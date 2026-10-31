@@ -17,3 +17,10 @@ checkout, built fresh from whatever revision sits beside this repository.
 - `scenarios/` — one file per demo scenario, each wiring a `models/` dynamics stack to an
   `AlgorithmModule` instance for one specific algorithm.
 - `campaigns/` — Monte Carlo campaign drivers and exporters over a scenario.
+
+## Exported sensor columns
+
+`gyro_*`/`accel_*` in an exported run file carry the IMU's reading in its own platform frame,
+which equals the body frame only when the sensor's mounting is identity, as in this demo. The
+t=0 s row of every exported run reads zero for the IMU columns: Basilisk writes a sensor's first
+output after the first dynamics step, not at `Reset()`.

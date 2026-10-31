@@ -14,9 +14,11 @@ dependencies = [
 wise-mc-imu = "sim.basilisk.campaigns.imu_dead_reckoning_mc:main"
 
 [tool.uv.sources]
-# WiseGncDesign is a sibling checkout (see README.md): an editable path dependency, not a pin,
-# so WiseDynamics always builds against whatever WiseGncDesign revision is checked out there.
+# WiseGncDesign and WiseGncAnalysis are sibling checkouts (see README.md): editable path
+# dependencies, not pins, so WiseDynamics always builds against whatever revision of each is
+# checked out there.
 gnc-algorithms = { path = "../WiseGncDesign", editable = true }
+gnc-analysis = { path = "../WiseGncAnalysis", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -29,6 +31,9 @@ packages = ["sim"]
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.0",
+    # gnc-analysis: a dev-only dependency so a campaign export can be checked against
+    # WiseGncAnalysis's real contract.v0.check_campaign, not a restated assumption about it.
+    "gnc-analysis",
 ]
 
 [tool.pytest.ini_options]

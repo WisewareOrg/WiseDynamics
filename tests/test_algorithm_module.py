@@ -44,7 +44,7 @@ class StubAlgorithm:
         return self._state
 
 
-def _two_input_two_output_module(dcm_PB=None) -> AlgorithmModule:
+def _two_input_two_output_module(mountings=None) -> AlgorithmModule:
     return AlgorithmModule(
         inputs={"imu": messaging.IMUSensorMsgReader(), "nav": messaging.NavAttMsgReader()},
         outputs={
@@ -62,7 +62,7 @@ def _two_input_two_output_module(dcm_PB=None) -> AlgorithmModule:
         sample_type=StubSample,
         make_algorithm=lambda t0, init: StubAlgorithm(t0, init),
         init_from=lambda: {"value0": [0.0, 0.0, 0.0]},
-        dcm_PB=dcm_PB,
+        mountings=mountings if mountings is not None else {"imu": np.eye(3)},
     )
 
 
@@ -91,15 +91,15 @@ def test_field_mapping_lands_the_right_numbers_in_the_right_sample_fields():
     module.UpdateState(1_000_000_000)  # 1 s later
 
     sample = module.algorithm.samples[-1]
-    assert np.allclose(sample.a, [1.0, 2.0, 3.0])  # identity dcm_PB: unchanged
+    assert np.allclose(sample.a, [1.0, 2.0, 3.0])  # identity mounting: unchanged
     assert np.allclose(sample.b, [0.4, 0.5, 0.6])  # unmapped frame: passed through raw
 
 
-def test_p_to_b_frame_applies_the_transpose_of_a_non_identity_dcm_pb():
-    # 90 deg rotation about +Z: platform-frame x becomes body-frame -y, i.e. dcm_PB.T swaps and
-    # negates accordingly for this specific matrix.
+def test_p_to_b_frame_applies_the_transpose_of_a_non_identity_mounting():
+    # 90 deg rotation about +Z: platform-frame x becomes body-frame +y under this matrix's
+    # transpose.
     dcm_PB = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-    module = _two_input_two_output_module(dcm_PB=dcm_PB)
+    module = _two_input_two_output_module(mountings={"imu": dcm_PB})
     module.inputs["imu"].subscribeTo(_write_imu([1.0, 0.0, 0.0]))
     module.inputs["nav"].subscribeTo(_write_nav([0.0, 0.0, 0.0]))
 
@@ -135,6 +135,33 @@ def test_construction_raises_on_a_misspelled_field():
             sample_type=StubSample,
             make_algorithm=lambda t0, init: StubAlgorithm(t0, init),
             init_from=lambda: {},
+        )
+
+
+def test_construction_raises_on_a_frame_in_an_output_map():
+    with pytest.raises(ValueError, match="apply only to input maps"):
+        AlgorithmModule(
+            inputs={"imu": messaging.IMUSensorMsgReader()},
+            outputs={"outAtt": (messaging.NavAttMsgPayload, messaging.NavAttMsg())},
+            input_map=[FieldMap("imu.AngVelPlatform", "a")],
+            output_map=[FieldMap("value", "outAtt.sigma_BN", frame="P->B")],
+            sample_type=StubSample,
+            make_algorithm=lambda t0, init: StubAlgorithm(t0, init),
+            init_from=lambda: {},
+        )
+
+
+def test_construction_raises_on_p_to_b_for_an_input_with_no_registered_mounting():
+    with pytest.raises(ValueError, match="no registered mounting"):
+        AlgorithmModule(
+            inputs={"imu": messaging.IMUSensorMsgReader()},
+            outputs={"outAtt": (messaging.NavAttMsgPayload, messaging.NavAttMsg())},
+            input_map=[FieldMap("imu.AngVelPlatform", "a", frame="P->B")],
+            output_map=[FieldMap("value", "outAtt.sigma_BN")],
+            sample_type=StubSample,
+            make_algorithm=lambda t0, init: StubAlgorithm(t0, init),
+            init_from=lambda: {},
+            mountings={},
         )
 
 

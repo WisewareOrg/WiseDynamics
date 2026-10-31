@@ -33,8 +33,8 @@ ACCEL_BIAS_DEFAULT = np.array([1e-4, -5e-5, 2e-4])  # m/s^2
 # PMatrixGyro/PMatrixAccel set the per-sample 1-sigma white-noise amplitude directly: with
 # AMatrixGyro/AMatrixAccel at their zero default, Basilisk's IMU applies no propagation, so the
 # diagonal is a standard deviation in the sensor's own units, not a power spectral density.
-GYRO_NOISE_STD_DEFAULT = 1e-12  # rad/s, per-sample 1-sigma
-ACCEL_NOISE_STD_DEFAULT = 1e-10  # m/s^2, per-sample 1-sigma
+GYRO_NOISE_STD_DEFAULT = 5e-5  # rad/s, per-sample 1-sigma on PMatrixGyro
+ACCEL_NOISE_STD_DEFAULT = 5e-5  # m/s^2, per-sample 1-sigma on PMatrixAccel
 
 DYNAMICS_STEP_S = 1.0  # s, dynamics/sensor/algorithm step
 

@@ -12,8 +12,8 @@ import numpy as np
 from Basilisk.architecture import sysModel
 from Basilisk.utilities import macros
 
-# The input-side frame transform the host performs: rotating a sensor's platform-frame
-# reading into the body frame via the sensor's own mounting DCM.
+# The input-side frame transform the host performs: rotating a reading in its own mounting
+# frame into the frame the algorithm's sample expects, via that input's registered mounting.
 _SUPPORTED_FRAMES = (None, "P->B")
 
 
@@ -23,7 +23,8 @@ class FieldMap:
     state. For `input_map`, `src` is `"<input name>.<PayloadField>"` and `dst` is a field name
     of `sample_type`. For `output_map`, `src` is a field name of the algorithm's state object
     and `dst` is `"<output name>.<PayloadField>"`. `frame="P->B"` multiplies the value by the
-    transpose of the module's `dcm_PB` before it reaches `dst` (input maps only)."""
+    transpose of that map's input's registered mounting (see `mountings`) before it reaches
+    `dst`; only an input map carries a `frame`."""
 
     src: str
     dst: str
@@ -49,7 +50,7 @@ class AlgorithmModule(sysModel.SysModel):
         sample_type: type,
         make_algorithm: Callable[[float, dict], Any],
         init_from: Callable[[], dict],
-        dcm_PB: np.ndarray | None = None,
+        mountings: dict[str, np.ndarray] | None = None,
     ) -> None:
         super().__init__()
         self.inputs = inputs
@@ -59,7 +60,9 @@ class AlgorithmModule(sysModel.SysModel):
         self.sample_type = sample_type
         self.make_algorithm = make_algorithm
         self.init_from = init_from
-        self.dcm_PB = np.eye(3) if dcm_PB is None else np.array(dcm_PB, dtype=float)
+        self.mountings = {
+            name: np.array(dcm, dtype=float) for name, dcm in (mountings or {}).items()
+        }
         self.algorithm: Any = None
 
         self._validate_maps()
@@ -81,6 +84,11 @@ class AlgorithmModule(sysModel.SysModel):
             if fm.dst not in sample_fields:
                 raise ValueError(
                     f"unknown field {fm.dst!r} on sample type {self.sample_type.__name__}"
+                )
+            if fm.frame == "P->B" and input_name not in self.mountings:
+                raise ValueError(
+                    f"field map {fm!r} names frame 'P->B' but input {input_name!r} has no "
+                    "registered mounting"
                 )
 
         for fm in self.output_map:
@@ -115,7 +123,7 @@ class AlgorithmModule(sysModel.SysModel):
             input_name, _, field_name = fm.src.partition(".")
             value = np.array(getattr(bufs[input_name], field_name), dtype=float)
             if fm.frame == "P->B":
-                value = self.dcm_PB.T @ value
+                value = self.mountings[input_name].T @ value
             sample_fields[fm.dst] = value
 
         sample = self.sample_type(t=t, **sample_fields)

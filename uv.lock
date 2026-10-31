@@ -396,6 +396,29 @@ dev = [
 ]
 
 [[package]]
+name = "gnc-analysis"
+version = "0.1.0"
+source = { editable = "../WiseGncAnalysis" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", specifier = ">=3.9" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pandas", specifier = ">=2.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.17.0" },
+]
+
+[[package]]
 name = "idna"
 version = "3.20"
 source = { registry = "https://pypi.org/simple" }
@@ -1207,6 +1230,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "gnc-analysis" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1221,6 +1245,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "gnc-analysis", editable = "../WiseGncAnalysis" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.17.0" },
 ]

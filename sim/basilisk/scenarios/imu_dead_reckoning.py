@@ -77,7 +77,7 @@ def create_scenario(
     scSim.scObject = dyn.scObject
     scSim.imuObject = dyn.imuObject
 
-    # Dead-reckoning estimator: identity mounting DCM (dcm_PB default), Earth's mu shared with
+    # Dead-reckoning estimator: identity mounting (the IMU's own dcm_PB), Earth's mu shared with
     # truth so estimate and truth integrate against the same gravity constant. Initial state is
     # read from the live hub at Reset() time (hub_initial_state reads it fresh each call), so a
     # Monte Carlo run's estimate starts aligned with that run's actual, dispersed truth.
@@ -101,7 +101,7 @@ def create_scenario(
             init["sigma0_BN"], init["r0_N"], init["v0_N"], t0, dyn.mu
         ),
         init_from=lambda: hub_initial_state(dyn.scObject),
-        dcm_PB=np.array(dyn.imuObject.dcm_PB),
+        mountings={"imu": np.array(dyn.imuObject.dcm_PB)},
     )
     scSim.algModule.ModelTag = "deadReckoning"
     scSim.algModule.inputs["imu"].subscribeTo(dyn.imuObject.sensorOutMsg)

@@ -16,6 +16,9 @@ is a judgment call, not something the spec states; flagged for review.
 the campaign back to the code that produced it; WiseGncAnalysis's contract check at commit
 fcb4c38 ignores unknown top-level manifest keys, confirmed by running it against a manifest
 carrying this key.
+
+The exported `gyro_*`/`accel_*` columns carry the IMU's reading in its own platform frame
+(identity to the body frame in this demo's mounting); see `sim/basilisk/README.md`.
 """
 
 import argparse
