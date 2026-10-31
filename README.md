@@ -22,4 +22,3 @@ and knows nothing about which simulation produced it.
 - Monte Carlo drivers and the exporters to the analysis data contract live alongside the
   simulation hosts they serve.
 - `docs/decisions/` — this repository's ADRs.
-- `docs/evaluation/` — evaluation evidence for simulation-host choices.

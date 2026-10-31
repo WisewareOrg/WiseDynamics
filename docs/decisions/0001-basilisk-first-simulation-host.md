@@ -1,7 +1,7 @@
 # 0001 — Simulate spacecraft dynamics with Basilisk as the first simulation host
 
 **Status:** accepted
-**Decided:** 2026-10-31 (evaluation on the development host; results in `docs/evaluation/`)
+**Decided:** 2026-10-31 (issue #1 evaluation on the development host)
 **Rev:** 1
 
 ## Revisions
@@ -45,15 +45,12 @@ simulation host, at `sim/basilisk/`.
 - Recorded runs are exported to the WiseGncAnalysis data contract; Basilisk's own retention
   format is never read by analysis.
 
-Evidence from the evaluation (`docs/evaluation/RESULTS.md`, `RESULTS-orbit.md`): wheels installed
-and imported on the development host without source builds; a ten-minute attitude scenario ran at
-about 3200 times real time with a C controller and about 1300 times with the same controller as a
-Python module; a 166-minute orbit of the full bskSim stack (four wheels, eight thrusters, eight sun
-sensors, magnetometer, three-body gravity through SPICE, four guidance modes and a steering law)
-ran at about 920 times real time; a 100-run Monte Carlo of that orbit completed on eight workers in
-436 seconds with no failures. Profiling (`RESULTS-profile.md`) put 90 to 93 percent of a run in the
-C++ step loop and showed the integration step as the dominant lever: the same orbit at a 1 s
-dynamics and flight-software step ran in 1.1 s, and a 16-run campaign fell from 74 s to 5.8 s.
+What the evaluation established: the wheels install and import on the development host without a
+source build; a controller written as a Basilisk Python module runs inside the step loop alongside C
+and C++ modules; a Monte Carlo campaign of a full-stack scenario (reaction wheels, thrusters, sun
+sensors, magnetometer, three-body gravity, a multi-mode guidance chain) dispatches across every core
+and completes with no failures; throughput is hundreds to thousands of times real time in every
+configuration tried; and the integration step, not the model set, is what sets the cost of a run.
 
 ## Alternatives considered
 
@@ -80,21 +77,17 @@ dynamics and flight-software step ran in 1.1 s, and a 16-run campaign fell from 
 
 ## Consequences
 
-- An algorithm written as a Basilisk Python module costs roughly two and a half times the wall
-  time of the same algorithm in C. Acceptable for design iteration; promotion to C++ in
-  WiseGncDesign is the path when campaign throughput matters.
-- Campaign throughput per worker was about one third of the single-run rate on the evaluation
-  host. Per-run construction and data retention were each under 0.2 s, so the loss is CPU
-  contention: eight workers on a four-core laptop processor with hyperthreading. The Monte Carlo
-  harness adds no material fixed cost per run; campaign speed is set by step size and physical
-  cores.
+- An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
+  same algorithm in C. Acceptable for design iteration; promotion to C++ in WiseGncDesign is the
+  path when campaign throughput matters.
+- The Monte Carlo harness adds no material fixed cost per run; campaign speed is set by the
+  integration step and the number of physical cores.
 - The shipped bskSim examples integrate at 0.1 s. Scenarios here choose their step from the
   problem, not from the example, and state it.
 - A plant that cannot run Python constrains WiseGncDesign: adding Trick would require a C++
   variant of every algorithm meant to run there. That cost is stated in the ADR that adds Trick.
 - First use of a scenario that loads SPICE kernels or the World Magnetic Model downloads support
-  data to a user cache (about 25 seconds once). CI that runs such scenarios needs the cache or
-  network access.
+  data to a user cache. CI that runs such scenarios needs the cache or network access.
 - Vizard, Basilisk's visualizer, is a closed-source binary and optional. Nothing here depends on it.
 - Revisit trigger: when the Common Model Library ships reaction wheel and star tracker models, or
   when guided-entry work for a lifting body begins, re-evaluate Trick with JEOD and CML as a
