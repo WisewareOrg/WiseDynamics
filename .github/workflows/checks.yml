@@ -106,3 +106,7 @@ jobs:
         run: uv sync --locked
       - working-directory: WiseDynamics
         run: uv run pytest
+      # testpaths restricts the step above to tests/; sim/basilisk/scenarios is a separate,
+      # explicit invocation that exercises its own conftest.py options.
+      - working-directory: WiseDynamics
+        run: uv run pytest sim/basilisk/scenarios -n 4 --runs 8 --out campaign-out

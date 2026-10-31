@@ -1,20 +1,31 @@
-"""Producer-side conformance: the campaign's own export against WiseGncAnalysis's real
-`contract.v0.check_campaign`, not a restated assumption about the columns it writes."""
+"""Producer-side conformance: running the scenario's own pytest campaign at a small scale and
+confirming it succeeds, which includes its own `pytest_sessionfinish` call into WiseGncAnalysis's
+real `contract.v0.check_campaign` -- not a restated assumption about the columns it writes."""
 
-from contract.v0 import check_campaign
+import json
+import subprocess
+import sys
 
-from sim.basilisk.campaigns.imu_dead_reckoning_mc import build_controller, export_campaign
 
-
-def test_eight_run_export_passes_the_real_contract_check(tmp_path):
-    controller = build_controller(
-        num_runs=8, archive_dir=str(tmp_path / "mc_contract"), worker_count=8
+def test_eight_run_campaign_passes_its_own_contract_check(tmp_path):
+    out_dir = tmp_path / "mc_contract"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "sim/basilisk/scenarios",
+            "--runs",
+            "8",
+            "--out",
+            str(out_dir),
+        ],
+        capture_output=True,
+        text=True,
     )
-    failures = controller.executeSimulations()
-    assert failures == [], f"campaign had failures: {failures}"
+    assert result.returncode == 0, result.stdout + result.stderr
 
-    out_dir = tmp_path / "mc_contract_export"
-    export_campaign(controller, 8, out_dir)
-
-    problems = check_campaign(out_dir)
-    assert problems == [], f"contract violations: {problems}"
+    manifest = json.loads((out_dir / "manifest.json").read_text())
+    versions = manifest["versions"]
+    assert set(versions) >= {"bsk", "gnc-algorithms", "wise-dynamics"}
+    assert all(versions[key] for key in ("bsk", "gnc-algorithms", "wise-dynamics"))

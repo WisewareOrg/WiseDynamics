@@ -9,14 +9,19 @@ checkout, built fresh from whatever revision sits beside this repository.
 
 ## Layout
 
+- `models/` — reusable, bskSim-style dynamics stacks (spacecraft, gravity, sensors); the plant,
+  carrying no algorithm.
 - `hosting/` — `AlgorithmModule`, one generic Basilisk `SysModel` that hosts any WiseGncDesign
-  algorithm through declarative field maps; it carries no vocabulary belonging to any one
-  algorithm, sensor, or dynamics model, enforced by `scripts/check-hosting-generic.sh`.
-- `models/` — reusable, bskSim-style dynamics stacks (spacecraft, gravity, sensors); a dynamics
-  model carries no algorithm.
-- `scenarios/` — one file per demo scenario, each wiring a `models/` dynamics stack to an
-  `AlgorithmModule` instance for one specific algorithm.
-- `campaigns/` — Monte Carlo campaign drivers and exporters over a scenario.
+  algorithm through declarative field maps; the seam, carrying no vocabulary belonging to any
+  one algorithm, sensor, or dynamics model, enforced by `scripts/check-hosting-generic.sh`.
+- `scenarios/` — one `test_<scenario>.py` module per study, each a parametrized pytest module
+  that wires a `models/` plant to an `AlgorithmModule` binding (declared in `bindings.py`) and
+  owns its own dispersions and contract-export column map. A single nominal case is
+  `execute_scenario(create_scenario())`, a plain function call; a campaign is this directory run
+  as pytest, `pytest sim/basilisk/scenarios --runs N --out DIR [-n WORKERS]`.
+- `conftest.py` — the campaign's `--runs`/`--out`/`--seed`/`--duration-s` options and the
+  `plant`/`algorithm_binding`/`draws` fixtures every study's cases are built from, plus the
+  session-end fold of every case's exported run into one contract v0 manifest.
 
 ## Exported sensor columns
 
