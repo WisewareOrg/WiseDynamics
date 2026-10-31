@@ -1,14 +1,13 @@
-"""One IMU on a tumbling spacecraft in a 500 km LEO orbit: gyro rates integrated to attitude
-(MRP) and the accelerometer, rotated by that attitude, integrated to position/velocity against a
-point-mass gravity model, by WiseGncDesign's ``ImuDeadReckoner`` (dead reckoning only, no
-correction), hosted by the generic ``AlgorithmModule`` on the reusable ``ImuSpacecraftModel``
-dynamics stack. See docs/decisions/0001-basilisk-first-simulation-host.md.
+"""One IMU on a tumbling spacecraft in a 500 km LEO orbit: WiseGncDesign's ``ImuDeadReckoner``
+integrates gyro rates to attitude (MRP) and the accelerometer, rotated by that attitude, to
+position and velocity against a point-mass gravity model, as an uncorrected, unfiltered
+estimate. Hosted by ``AlgorithmModule`` on the ``ImuSpacecraftModel`` dynamics stack. See
+docs/decisions/0001-basilisk-first-simulation-host.md.
 
-``imuSensor.AccelPlatform`` reports non-gravitational specific force only: confirmed empirically
+``imuSensor.AccelPlatform`` reports the non-gravitational specific force: confirmed empirically
 (2026-10-31) by running this orbit with zero sensor bias/noise and observing ``AccelPlatform``
-read exactly zero while the orbit's own gravitational acceleration is ~8.4 m/s^2. No C++ source
-is bundled in this prebuilt-wheel Basilisk install, so this was checked by running it rather than
-by reading the module source directly.
+read exactly zero while the orbit's own gravitational acceleration is ~8.4 m/s^2, checked by
+running it against this prebuilt-wheel Basilisk install, which ships binaries only.
 """
 
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ from Basilisk.architecture import messaging
 from Basilisk.utilities import SimulationBaseClass, macros
 from gnc_algorithms.imu_dead_reckoning import ImuDeadReckoner, ImuSample
 
-from sim.basilisk.hosting.algorithm_module import AlgorithmModule, FieldMap, hub_initial_state
+from sim.basilisk.hosting.algorithm_module import AlgorithmModule, FieldMap
 from sim.basilisk.models.imu_spacecraft import (
     ACCEL_BIAS_DEFAULT,
     DYNAMICS_STEP_S,
@@ -26,6 +25,7 @@ from sim.basilisk.models.imu_spacecraft import (
     OMEGA0_BN_B_DEFAULT,
     SIGMA0_BN_DEFAULT,
     ImuSpacecraftModel,
+    hub_initial_state,
 )
 
 ORBIT_DURATION_S = 5700.0  # s, one orbit
@@ -56,10 +56,11 @@ def create_scenario(
     step_s: float = DYNAMICS_STEP_S,
 ) -> SimulationBaseClass.SimBaseClass:
     """Builds the scenario (the `ImuSpacecraftModel` dynamics stack plus a dead-reckoning
-    `AlgorithmModule`) but does not run it. Every object dispersions or retention need to reach
-    is stored as an attribute of the returned `SimBaseClass`, per the Basilisk Monte Carlo
-    `Controller` convention (both so dotted-path dispersions can address them and so Python does
-    not garbage-collect C++-wrapped objects out from under the running sim)."""
+    `AlgorithmModule`) and returns it unexecuted; `execute_scenario` runs it. Every object
+    dispersions or retention need to reach is stored as an attribute of the returned
+    `SimBaseClass`, per the Basilisk Monte Carlo `Controller` convention: dotted-path
+    dispersions address them there, and the reference keeps the C++-wrapped objects alive for
+    the sim's lifetime."""
     scSim = SimulationBaseClass.SimBaseClass()
 
     scSim.dynamics = ImuSpacecraftModel(
@@ -157,7 +158,7 @@ def run(
     omega0_BN_B: np.ndarray = OMEGA0_BN_B_DEFAULT,
 ) -> ScenarioResult:
     """Builds and runs the scenario single-process, returning the recorded arrays. `show_plots`
-    is accepted for parity with other Basilisk scenario scripts; this scenario draws no plots."""
+    is accepted for signature parity with other Basilisk scenario scripts."""
     del show_plots
     scSim = create_scenario(sigma0_BN=sigma0_BN, omega0_BN_B=omega0_BN_B, step_s=step_s)
     execute_scenario(scSim, duration_s=duration_s)

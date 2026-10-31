@@ -1,6 +1,5 @@
 """A reusable Basilisk dynamics stack, bskSim-style: a rigid spacecraft hub under point-mass
-gravity on a classical-element orbit, with an IMU sensor attached. Owns no algorithm and no
-Monte Carlo concerns; any `AlgorithmModule` can be wired to its messages."""
+gravity on a classical-element orbit, with an IMU sensor attached."""
 
 import numpy as np
 from Basilisk.simulation import imuSensor, spacecraft
@@ -44,9 +43,8 @@ def _col(v: np.ndarray) -> list[list[float]]:
 
 class ImuSpacecraftModel:
     """Builds the process, task, hub, point-mass Earth, orbit, and IMU on `sim` (a
-    `SimBaseClass`). Exposes `scObject`, `imuObject`, `mu`, `task_name`, and `sim` for a
-    scenario to wire an `AlgorithmModule` and recorders to, and for a Monte Carlo campaign to
-    address with dispersions."""
+    `SimBaseClass`), exposing `scObject`, `imuObject`, `mu`, `task_name`, and `sim` as
+    attributes a caller addresses directly, by dotted path or otherwise."""
 
     def __init__(
         self,
@@ -75,7 +73,7 @@ class ImuSpacecraftModel:
         self.dynProcess = sim.CreateNewProcess(process_name)
         self.dynProcess.addTask(sim.CreateNewTask(task_name, macros.sec2nano(step_s)))
 
-        # Rigid hub, no effectors, no control.
+        # Rigid hub under point-mass gravity alone.
         self.scObject = spacecraft.Spacecraft()
         self.scObject.ModelTag = "bsk-Sat"
         self.scObject.hub.mHub = hub_mass
@@ -85,7 +83,7 @@ class ImuSpacecraftModel:
         self.scObject.hub.omega_BN_BInit = _col(omega0_BN_B)
         sim.AddModelToTask(task_name, self.scObject)
 
-        # Earth as a point mass, no SPICE.
+        # Earth as a point mass via the gravity factory.
         self.gravFactory = simIncludeGravBody.gravBodyFactory()
         self.earth = self.gravFactory.createEarth()
         self.earth.isCentralBody = True
@@ -113,3 +111,16 @@ class ImuSpacecraftModel:
         self.imuObject.PMatrixGyro = (gyro_noise_psd * np.eye(3)).tolist()
         self.imuObject.PMatrixAccel = (accel_noise_psd * np.eye(3)).tolist()
         sim.AddModelToTask(task_name, self.imuObject)
+
+
+def hub_initial_state(scObject: spacecraft.Spacecraft) -> dict:
+    """Reads a spacecraft's live hub initial-condition attributes — `sigma_BNInit`,
+    `r_CN_NInit`, `v_CN_NInit`, `omega_BN_BInit` — into a dict keyed `sigma0_BN`, `r0_N`,
+    `v0_N`, `omega0_BN_B`, picking up whatever a Monte Carlo run dispersed onto the hub before
+    this runs."""
+    return {
+        "sigma0_BN": np.array(scObject.hub.sigma_BNInit, dtype=float).flatten(),
+        "r0_N": np.array(scObject.hub.r_CN_NInit, dtype=float).flatten(),
+        "v0_N": np.array(scObject.hub.v_CN_NInit, dtype=float).flatten(),
+        "omega0_BN_B": np.array(scObject.hub.omega_BN_BInit, dtype=float).flatten(),
+    }

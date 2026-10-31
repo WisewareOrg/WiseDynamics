@@ -1,9 +1,6 @@
-"""A generic Basilisk Python `SysModel` that hosts a framework-free algorithm from
-WiseGncDesign. Knows nothing about any particular algorithm: no IMU, gyro, MRP, or dead
-reckoning. All algorithm-specific wiring (which messages, which fields, which frame
-transforms, how to construct the algorithm) is supplied by the scenario through `FieldMap`
-lists and two callables. See `sim/basilisk/scenarios/imu_dead_reckoning.py` for a worked
-example of wiring this module to `gnc_algorithms.imu_dead_reckoning.ImuDeadReckoner`.
+"""A generic Basilisk Python `SysModel` that hosts one framework-free algorithm. The caller
+supplies every message, field, frame transform, and algorithm-construction detail through
+`FieldMap` lists and two callables.
 """
 
 import dataclasses
@@ -15,9 +12,8 @@ import numpy as np
 from Basilisk.architecture import sysModel
 from Basilisk.utilities import macros
 
-# The only input-side frame transform the host performs: rotate a sensor's platform-frame
-# reading into the body frame via the sensor's own mounting DCM. Anything beyond this single
-# transform is an algorithm concern, not the host's.
+# The input-side frame transform the host performs: rotating a sensor's platform-frame
+# reading into the body frame via the sensor's own mounting DCM.
 _SUPPORTED_FRAMES = (None, "P->B")
 
 
@@ -37,11 +33,12 @@ class FieldMap:
 class AlgorithmModule(sysModel.SysModel):
     """Hosts one framework-free algorithm instance inside a Basilisk task. `Reset` builds the
     algorithm via `make_algorithm(t0, init_from())` and writes its initial state to every
-    output; `UpdateState` reads every input once, maps fields into one `sample_type` instance
-    per `input_map`, calls `algorithm.step(sample)`, and writes the result to every output per
-    `output_map`. Skips stepping on the call Basilisk makes at the same sim time as `Reset`
-    (dt would be zero). The built algorithm instance is exposed as `.algorithm` for recorders
-    and dispersions that need to reach inside it."""
+    output; `UpdateState` steps once `t` exceeds the algorithm's current state time (the call
+    Basilisk makes at the same sim time as `Reset` carries `dt = 0`), reading every input once,
+    mapping fields into one `sample_type` instance per `input_map`, calling
+    `algorithm.step(sample)`, and writing the result to every output per `output_map`. The
+    built algorithm instance is exposed as `.algorithm` for recorders and dispersions to reach
+    inside it."""
 
     def __init__(
         self,
@@ -138,16 +135,3 @@ class AlgorithmModule(sysModel.SysModel):
         for output_name, payload in payloads.items():
             _, msg = self.outputs[output_name]
             msg.write(payload, CurrentSimNanos, self.moduleID)
-
-
-def hub_initial_state(scObject: Any) -> dict:
-    """Reads a spacecraft's live hub initial-condition attributes (which a Monte Carlo run may
-    have dispersed before `Reset()` runs). A ready-made `init_from` for the common case of an
-    algorithm that starts aligned with the truth hub state; a scenario whose algorithm needs a
-    different `init` dict shape passes its own callable instead."""
-    return {
-        "sigma0_BN": np.array(scObject.hub.sigma_BNInit, dtype=float).flatten(),
-        "r0_N": np.array(scObject.hub.r_CN_NInit, dtype=float).flatten(),
-        "v0_N": np.array(scObject.hub.v_CN_NInit, dtype=float).flatten(),
-        "omega0_BN_B": np.array(scObject.hub.omega_BN_BInit, dtype=float).flatten(),
-    }
