@@ -20,7 +20,7 @@ against its real loader.
 ## Layout
 
 - `sim/basilisk/` — the Basilisk simulation host, the first plant
-  ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
+  ([ADR 0001 rev 2](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
 - `sim/<host>/` — a future simulation host, as a sibling directory.
 - A simulation host's studies, and the export to the format WiseGncAnalysis's loader reads, live
   inside that host's own directory, alongside the plants and the seam that host the algorithms
