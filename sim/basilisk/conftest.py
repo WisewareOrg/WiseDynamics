@@ -20,7 +20,6 @@ from sim.basilisk.models.imu_spacecraft import (
     SIGMA0_BN_DEFAULT,
     ImuSpacecraftModel,
 )
-from sim.basilisk.scenarios.bindings import IMU_DEAD_RECKONING_BINDING
 
 # Dispersion widths, 1-sigma per axis.
 MRP_STD = 0.01  # -
@@ -28,12 +27,18 @@ RATE_STD = 0.2 * macros.D2R  # rad/s
 GYRO_BIAS_STD = 1e-4  # rad/s
 ACCEL_BIAS_STD = 1e-4  # m/s^2
 
+# The one spacecraft model for now, looked up by name; a second model joins this registry
+# rather than branching the fixtures below.
+_SPACECRAFT_MODELS = {"imu_spacecraft": ImuSpacecraftModel}
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--runs", action="store", type=int, default=8)
     parser.addoption("--out", action="store", type=str, default=None)
     parser.addoption("--seed", action="store", type=int, default=0)
     parser.addoption("--duration-s", action="store", type=float, default=5700.0)
+    parser.addoption("--spacecraft", action="store", type=str, default="imu_spacecraft")
+    parser.addoption("--fsw", action="store", type=str, default="imu_dead_reckoning")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -62,6 +67,16 @@ def seed(request: pytest.FixtureRequest) -> int:
 @pytest.fixture
 def duration_s(request: pytest.FixtureRequest) -> float:
     return request.config.getoption("--duration-s")
+
+
+@pytest.fixture
+def spacecraft_name(request: pytest.FixtureRequest) -> str:
+    return request.config.getoption("--spacecraft")
+
+
+@pytest.fixture
+def fsw_name(request: pytest.FixtureRequest) -> str:
+    return request.config.getoption("--fsw")
 
 
 @dataclass
@@ -98,22 +113,18 @@ def draws(case_index: int, seed: int) -> Draws:
 
 
 @pytest.fixture
-def plant(draws: Draws) -> ImuSpacecraftModel:
-    """Parametrizable later by vehicle; for now, the one IMU spacecraft, with this case's
-    dispersed initial conditions and biases."""
+def plant(draws: Draws, spacecraft_name: str) -> ImuSpacecraftModel:
+    """The named spacecraft model (`--spacecraft`, looked up in `_SPACECRAFT_MODELS`), built
+    with this case's dispersed initial conditions and biases."""
+    model_cls = _SPACECRAFT_MODELS[spacecraft_name]
     sim = SimulationBaseClass.SimBaseClass()
-    return ImuSpacecraftModel(
+    return model_cls(
         sim,
         sigma0_BN=draws.sigma0_BN,
         omega0_BN_B=draws.omega0_BN_B,
         gyro_bias=draws.gyro_bias,
         accel_bias=draws.accel_bias,
     )
-
-
-@pytest.fixture
-def algorithm_binding():
-    return IMU_DEAD_RECKONING_BINDING
 
 
 def _git_describe(path: Path) -> str:

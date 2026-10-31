@@ -395,6 +395,12 @@ dependencies = [
     { name = "numpy" },
 ]
 
+[package.optional-dependencies]
+basilisk = [
+    { name = "bsk", extra = ["all"] },
+    { name = "numpy" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "bsk", extras = ["all"], marker = "extra == 'basilisk'" },
@@ -1293,7 +1299,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "bsk", extra = ["all"] },
-    { name = "gnc-algorithms" },
+    { name = "gnc-algorithms", extra = ["basilisk"] },
     { name = "h5py" },
     { name = "numpy" },
 ]
@@ -1309,7 +1315,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bsk", extras = ["all"] },
-    { name = "gnc-algorithms", editable = "../WiseGncDesign" },
+    { name = "gnc-algorithms", extras = ["basilisk"], editable = "../WiseGncDesign" },
     { name = "h5py" },
     { name = "numpy" },
 ]

@@ -1,7 +1,10 @@
 """A reusable Basilisk dynamics stack, bskSim-style: a rigid spacecraft hub under point-mass
 gravity on a classical-element orbit, with an IMU sensor attached."""
 
+from typing import Any
+
 import numpy as np
+from Basilisk.architecture import messaging
 from Basilisk.simulation import imuSensor, spacecraft
 from Basilisk.utilities import (
     SimulationBaseClass,
@@ -114,15 +117,21 @@ class ImuSpacecraftModel:
         self.imuObject.PMatrixAccel = (accel_noise_std * np.eye(3)).tolist()
         sim.AddModelToTask(task_name, self.imuObject)
 
+    def readers(self) -> dict[str, Any]:
+        """This plant's sensor messages by role, each reader already subscribed, for a C&DH
+        host adapter to read from."""
+        imu_reader = messaging.IMUSensorMsgReader()
+        imu_reader.subscribeTo(self.imuObject.sensorOutMsg)
+        return {"imu": imu_reader}
 
-def hub_initial_state(scObject: spacecraft.Spacecraft) -> dict:
-    """Reads a spacecraft's live hub initial-condition attributes — `sigma_BNInit`,
-    `r_CN_NInit`, `v_CN_NInit`, `omega_BN_BInit` — into a dict keyed `sigma0_BN`, `r0_N`,
-    `v0_N`, `omega0_BN_B`, picking up whatever a Monte Carlo run dispersed onto the hub before
-    this runs."""
-    return {
-        "sigma0_BN": np.array(scObject.hub.sigma_BNInit, dtype=float).flatten(),
-        "r0_N": np.array(scObject.hub.r_CN_NInit, dtype=float).flatten(),
-        "v0_N": np.array(scObject.hub.v_CN_NInit, dtype=float).flatten(),
-        "omega0_BN_B": np.array(scObject.hub.omega_BN_BInit, dtype=float).flatten(),
-    }
+    def initial_state(self) -> dict:
+        """Reads the hub's live initial-condition attributes — `sigma_BNInit`, `r_CN_NInit`,
+        `v_CN_NInit`, `omega_BN_BInit` — into a dict keyed `sigma0_BN`, `r0_N`, `v0_N`,
+        `omega0_BN_B`, picking up whatever a Monte Carlo run dispersed onto the hub before this
+        runs."""
+        return {
+            "sigma0_BN": np.array(self.scObject.hub.sigma_BNInit, dtype=float).flatten(),
+            "r0_N": np.array(self.scObject.hub.r_CN_NInit, dtype=float).flatten(),
+            "v0_N": np.array(self.scObject.hub.v_CN_NInit, dtype=float).flatten(),
+            "omega0_BN_B": np.array(self.scObject.hub.omega_BN_BInit, dtype=float).flatten(),
+        }

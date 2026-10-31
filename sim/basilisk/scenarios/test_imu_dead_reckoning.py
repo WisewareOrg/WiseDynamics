@@ -1,7 +1,8 @@
 """One IMU on a tumbling spacecraft in a 500 km LEO orbit: WiseGncDesign's ``ImuDeadReckoner``
 integrates gyro rates to attitude (MRP) and the accelerometer, rotated by that attitude, to
 position and velocity against a point-mass gravity model, as an uncorrected, unfiltered
-estimate. Hosted by ``AlgorithmModule`` on the ``ImuSpacecraftModel`` dynamics stack. See
+estimate. Booted as a named flight-software instance against the ``ImuSpacecraftModel`` plant,
+through the host adapter in WiseGncDesign's C&DH partition (``cdh.basilisk.make_fsw``). See
 docs/decisions/0001-basilisk-first-simulation-host.md.
 
 ``imuSensor.AccelPlatform`` reports the non-gravitational specific force: confirmed empirically
@@ -19,14 +20,14 @@ SPEC-demo.md §2's layout.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
-from Basilisk.architecture import messaging
 from Basilisk.utilities import SimulationBaseClass, macros
+from cdh.basilisk import make_fsw
 
 from sim.basilisk.conftest import Draws, _producer_versions
-from sim.basilisk.hosting.algorithm_module import AlgorithmModule
 from sim.basilisk.models.imu_spacecraft import (
     ACCEL_BIAS_DEFAULT,
     DYNAMICS_STEP_S,
@@ -34,9 +35,9 @@ from sim.basilisk.models.imu_spacecraft import (
     OMEGA0_BN_B_DEFAULT,
     SIGMA0_BN_DEFAULT,
     ImuSpacecraftModel,
-    hub_initial_state,
 )
-from sim.basilisk.scenarios.bindings import IMU_DEAD_RECKONING_BINDING, AlgorithmBinding
+
+FSW_NAME = "imu_dead_reckoning"
 
 ORBIT_DURATION_S = 5700.0  # s, one orbit
 RECORDER_RATE_S = 10.0  # s
@@ -73,33 +74,26 @@ class ScenarioResult:
 
 
 def _attach_algorithm_and_recorders(
-    dyn: ImuSpacecraftModel, binding: AlgorithmBinding
-) -> tuple[AlgorithmModule, dict]:
-    """Hosts `binding`'s algorithm on `dyn` and attaches the four recorders at 10 s, returning
-    the module and the `msgRecList`-shaped dict of recorders."""
-    algModule = AlgorithmModule(
-        inputs={"imu": messaging.IMUSensorMsgReader()},
-        outputs={
-            "navAtt": (messaging.NavAttMsgPayload, messaging.NavAttMsg()),
-            "navTrans": (messaging.NavTransMsgPayload, messaging.NavTransMsg()),
-        },
-        input_map=binding.input_map,
-        output_map=binding.output_map,
-        sample_type=binding.sample_type,
-        make_algorithm=binding.make_algorithm,
-        init_from=lambda: {**hub_initial_state(dyn.scObject), "mu": dyn.mu},
-        mountings=binding.mountings,
+    dyn: ImuSpacecraftModel, fsw_name: str = FSW_NAME
+) -> tuple[Any, dict]:
+    """Boots `fsw_name` on `dyn` through WiseGncDesign's C&DH partition and attaches the four
+    recorders at 10 s, returning the hosted module and the `msgRecList`-shaped dict of
+    recorders."""
+    algModule = make_fsw(
+        fsw_name,
+        inputs=dyn.readers(),
+        initial_state=dyn.initial_state,
+        mu=dyn.mu,
     )
     algModule.ModelTag = "algorithm"
-    algModule.inputs["imu"].subscribeTo(dyn.imuObject.sensorOutMsg)
     dyn.sim.AddModelToTask(dyn.task_name, algModule)
 
     samplingTime = macros.sec2nano(RECORDER_RATE_S)
     msgRecList = {
         "truth": dyn.scObject.scStateOutMsg.recorder(samplingTime),
         "imu": dyn.imuObject.sensorOutMsg.recorder(samplingTime),
-        "estAtt": algModule.outputs["navAtt"][1].recorder(samplingTime),
-        "estTrans": algModule.outputs["navTrans"][1].recorder(samplingTime),
+        "estAtt": algModule.outputs["nav_att"][1].recorder(samplingTime),
+        "estTrans": algModule.outputs["nav_trans"][1].recorder(samplingTime),
     }
     for rec in msgRecList.values():
         dyn.sim.AddModelToTask(dyn.task_name, rec)
@@ -114,8 +108,8 @@ def create_scenario(
     accel_bias: np.ndarray = ACCEL_BIAS_DEFAULT,
     step_s: float = DYNAMICS_STEP_S,
 ) -> SimulationBaseClass.SimBaseClass:
-    """Builds the scenario (the `ImuSpacecraftModel` dynamics stack plus the dead-reckoning
-    `AlgorithmModule`) and returns it unexecuted; `execute_scenario` runs it."""
+    """Builds the scenario (the `ImuSpacecraftModel` plant plus the dead-reckoning flight
+    software) and returns it unexecuted; `execute_scenario` runs it."""
     scSim = SimulationBaseClass.SimBaseClass()
     scSim.dynamics = ImuSpacecraftModel(
         scSim,
@@ -128,9 +122,7 @@ def create_scenario(
     scSim.scObject = scSim.dynamics.scObject
     scSim.imuObject = scSim.dynamics.imuObject
 
-    algModule, msgRecList = _attach_algorithm_and_recorders(
-        scSim.dynamics, IMU_DEAD_RECKONING_BINDING
-    )
+    algModule, msgRecList = _attach_algorithm_and_recorders(scSim.dynamics)
     scSim.algModule = algModule
     scSim.msgRecList = msgRecList
     return scSim
@@ -213,11 +205,11 @@ def _assert_run_loads(path: Path) -> None:
     load_run(path)
 
 
-def test_case(case_index, plant, algorithm_binding, draws, duration_s, out_dir) -> None:
-    """One Monte Carlo case: builds the algorithm binding onto the already-dispersed `plant`
-    fixture, runs it, writes its `run_<NNNN>.h5`, and checks that WiseGncAnalysis's own loader
-    reads it back."""
-    _algModule, msgRecList = _attach_algorithm_and_recorders(plant, algorithm_binding)
+def test_case(case_index, plant, fsw_name, draws, duration_s, out_dir) -> None:
+    """One Monte Carlo case: boots `fsw_name` onto the already-dispersed `plant` fixture, runs
+    it, writes its `run_<NNNN>.h5`, and checks that WiseGncAnalysis's own loader reads it
+    back."""
+    _algModule, msgRecList = _attach_algorithm_and_recorders(plant, fsw_name)
     execute_scenario(plant.sim, duration_s=duration_s)
     assert len(msgRecList["truth"].times()) > 0, "scenario produced no recorded samples"
 

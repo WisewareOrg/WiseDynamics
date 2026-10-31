@@ -7,7 +7,7 @@ dependencies = [
     "bsk[all]",
     "numpy",
     "h5py",
-    "gnc-algorithms",
+    "gnc-algorithms[basilisk]",
 ]
 
 [tool.uv.sources]
