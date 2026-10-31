@@ -2,7 +2,7 @@
 integrates gyro rates to attitude (MRP) and the accelerometer, rotated by that attitude, to
 position and velocity against a point-mass gravity model, as an uncorrected, unfiltered
 estimate. Booted as a named flight-software instance against the ``ImuSpacecraftModel`` plant,
-through the host adapter in WiseGncDesign's C&DH partition (``cdh.basilisk.make_fsw``). See
+through the host adapter in WiseGncDesign's C&DH partition (``gnc_cdh.basilisk.make_fsw``). See
 docs/decisions/0001-basilisk-first-simulation-host.md.
 
 ``imuSensor.AccelPlatform`` reports the non-gravitational specific force: confirmed empirically
@@ -25,7 +25,7 @@ from typing import Any
 import h5py
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
-from cdh.basilisk import make_fsw
+from gnc_cdh.basilisk import make_fsw
 
 from sim.basilisk.conftest import Draws, _producer_versions
 from sim.basilisk.models.imu_spacecraft import (
