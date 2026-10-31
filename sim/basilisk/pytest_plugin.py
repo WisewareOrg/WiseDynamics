@@ -1,9 +1,11 @@
 """A pytest plugin exposing Monte Carlo campaign options and fixtures over this repository's
 plant models, registered via this package's own `pytest11` entry point: installing
-`wise-dynamics` is enough for pytest to load it, with no consumer `conftest.py` declaration
-needed. A consumer parametrizes a test over `case_index` to get one call per `--runs` case, and
-builds its own flight-software module against the `plant` fixture's
-`readers()`/`initial_state()`/`mu`."""
+`wise-dynamics` is enough for pytest to load it. A consumer's own `pytest_plugins` must not also
+name `sim.basilisk.pytest_plugin` -- the same module registered under two names is a pluggy
+`ValueError`, not a no-op. A consumer parametrizes a test over `case_index` to get one call per
+`--sim-runs` case, and builds its own flight-software module against the `plant` fixture's
+`readers()`/`initial_state()`/`mu`. Options are namespaced `--sim-*` so an autoloaded plugin
+cannot collide with a consumer's own option of the same short name."""
 
 import json
 import secrets
@@ -21,16 +23,16 @@ from Basilisk.utilities import SimulationBaseClass
 from sim.basilisk.models.imu_spacecraft import ImuSpacecraftModel
 from sim.basilisk.runs import write_run
 
-# The spacecraft models this plugin knows how to build, by `--spacecraft` name.
+# The spacecraft models this plugin knows how to build, by `--sim-spacecraft` name.
 _SPACECRAFT_MODELS: dict[str, type] = {"imu_spacecraft": ImuSpacecraftModel}
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--runs", action="store", type=int, default=8)
-    parser.addoption("--out", action="store", type=str, default=None)
-    parser.addoption("--seed", action="store", type=int, default=0)
-    parser.addoption("--duration-s", action="store", type=float, default=5700.0)
-    parser.addoption("--spacecraft", action="store", type=str, default="imu_spacecraft")
+    parser.addoption("--sim-runs", action="store", type=int, default=8)
+    parser.addoption("--sim-out", action="store", type=str, default=None)
+    parser.addoption("--sim-seed", action="store", type=int, default=0)
+    parser.addoption("--sim-duration-s", action="store", type=float, default=5700.0)
+    parser.addoption("--sim-spacecraft", action="store", type=str, default="imu_spacecraft")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -38,7 +40,7 @@ def pytest_configure(config: pytest.Config) -> None:
     `pytest11` entry point, this plugin configures every pytest session of a consumer that has
     `wise-dynamics` installed, most of which run no case and need no directory at all. The
     directory is created on first use, by `run_writer`'s own `write_run` call."""
-    out = config.getoption("--out")
+    out = config.getoption("--sim-out")
     if out:
         out_dir = Path(out)
     else:
@@ -56,7 +58,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_configure_node(node: Any) -> None:
     """pytest-xdist's own controller-side hook, called once per worker before it starts: hands
     the worker the controller's already-resolved `out_dir`, so every worker in a campaign writes
-    to the one directory the controller picked -- with or without `--out` -- rather than each
+    to the one directory the controller picked -- with or without `--sim-out` -- rather than each
     worker falling back to its own `mkdtemp`. `optionalhook=True`: xdist defines this hook's
     spec, and loads this plugin into every session of a consumer that has `wise-dynamics`
     installed, with or without xdist present. Without it, pytest's plugin validation would
@@ -66,7 +68,7 @@ def pytest_configure_node(node: Any) -> None:
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "case_index" in metafunc.fixturenames:
-        runs = metafunc.config.getoption("--runs")
+        runs = metafunc.config.getoption("--sim-runs")
         metafunc.parametrize("case_index", range(runs))
 
 
@@ -77,22 +79,22 @@ def out_dir(request: pytest.FixtureRequest) -> Path:
 
 @pytest.fixture
 def seed(request: pytest.FixtureRequest) -> int:
-    return request.config.getoption("--seed")
+    return request.config.getoption("--sim-seed")
 
 
 @pytest.fixture
 def campaign_size(request: pytest.FixtureRequest) -> int:
-    return request.config.getoption("--runs")
+    return request.config.getoption("--sim-runs")
 
 
 @pytest.fixture
 def duration_s(request: pytest.FixtureRequest) -> float:
-    return request.config.getoption("--duration-s")
+    return request.config.getoption("--sim-duration-s")
 
 
 @pytest.fixture
 def spacecraft_name(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--spacecraft")
+    return request.config.getoption("--sim-spacecraft")
 
 
 @pytest.fixture

@@ -46,11 +46,13 @@ simulation host, at `sim/basilisk/`.
 - `sim/basilisk/models/` holds static plant models (a spacecraft hub, its gravity, its sensors);
   `sim/basilisk/run.py::run_case` adds any flight-software module a consumer builds to a plant's
   task and records it, through Basilisk's own `SysModel` interface alone.
-- `sim/basilisk/pytest_plugin.py` is a pytest plugin, loaded by a consumer's own `conftest.py`
-  (`pytest_plugins = [...]`): `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft` options and
+- `sim/basilisk/pytest_plugin.py` is a pytest plugin, registered via this package's own
+  `pytest11` entry point: installing `wise-dynamics` is enough for a consumer's pytest to load
+  it. `--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft` options
+  (namespaced so an autoloaded plugin cannot collide with a consumer's own option) and
   `plant`/`draws`/`run_writer` fixtures, dispersed through plain `numpy.random`, run in-process
   with no clock pacing. Campaigns run in the consumer's own test suite under pytest-xdist, which
-  that suite declares: `pytest -n W --runs N`.
+  that suite declares: `pytest -n W --sim-runs N`.
 - `sim/basilisk/runs.py::write_run` writes one HDF5 run file -- root attrs plus a set of float64
   datasets, each carrying a `units` attribute -- given whatever arrays and attrs the caller
   supplies; Basilisk's own retention format is never read by analysis.

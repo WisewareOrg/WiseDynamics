@@ -78,7 +78,7 @@ def test_two_case_campaign_runs_with_distinct_noise_and_recorded_draws(pytester)
     pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
 
     out_dir = pytester.path / "out"
-    result = pytester.runpytest_subprocess("--runs", "2", "--out", str(out_dir))
+    result = pytester.runpytest_subprocess("--sim-runs", "2", "--sim-out", str(out_dir))
 
     result.assert_outcomes(passed=2)
     written = sorted(out_dir.glob("run_*.h5"))
@@ -99,7 +99,7 @@ def test_two_case_campaign_runs_with_distinct_noise_and_recorded_draws(pytester)
 
 
 def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, monkeypatch):
-    """Without `--out`, `pytest_configure` falls back to `tempfile.mkdtemp`; under `-n W` each
+    """Without `--sim-out`, `pytest_configure` falls back to `tempfile.mkdtemp`; under `-n W` each
     worker is its own process, so without `pytest_configure_node` handing every worker the
     controller's own resolved directory, each would pick its own and a campaign's files would
     scatter. `TMPDIR` is redirected into this test's own tmp path only so the test can find
@@ -107,7 +107,7 @@ def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, mo
     monkeypatch.setenv("TMPDIR", str(pytester.path))
     pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
 
-    result = pytester.runpytest_subprocess("-n", "2", "--runs", "2")
+    result = pytester.runpytest_subprocess("-n", "2", "--sim-runs", "2")
 
     result.assert_outcomes(passed=2)
     run_files = list(pytester.path.rglob("run_*.h5"))
@@ -124,7 +124,9 @@ def test_campaign_runs_with_xdist_absent(pytester):
     pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
 
     out_dir = pytester.path / "out"
-    result = pytester.runpytest_subprocess("-p", "no:xdist", "--runs", "1", "--out", str(out_dir))
+    result = pytester.runpytest_subprocess(
+        "-p", "no:xdist", "--sim-runs", "1", "--sim-out", str(out_dir)
+    )
 
     result.assert_outcomes(passed=1)
     assert len(list(out_dir.glob("run_*.h5"))) == 1
