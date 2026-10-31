@@ -36,7 +36,8 @@ The constraints a first plant has to meet:
 Basilisk (AVS Lab, University of Colorado Boulder; PyPI package `bsk`, 2.12.x line) is the first
 simulation host, at `sim/basilisk/`.
 
-- Installed from prebuilt wheels with `pip install "bsk[all]"`.
+- Installed from prebuilt wheels as a locked dependency (`bsk[all]`) of this repository's uv
+  project, the organisation's Python dependency manager. Never built from source here.
 - Scenarios are Python scripts. WiseGncDesign algorithms enter the loop through thin wrapper
   modules written here: a Basilisk Python module around a Python algorithm, a Basilisk C++ module
   around a C++ one. Nothing algorithmic lives in this repository.
