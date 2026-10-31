@@ -33,9 +33,23 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     out = config.getoption("--out")
-    out_dir = Path(out) if out else Path(tempfile.mkdtemp(prefix="wise_dynamics_"))
+    if out:
+        out_dir = Path(out)
+    else:
+        workerinput = getattr(config, "workerinput", None)
+        shared = workerinput.get("wise_dynamics_out_dir") if workerinput else None
+        out_dir = Path(shared) if shared else Path(tempfile.mkdtemp(prefix="wise_dynamics_"))
     out_dir.mkdir(parents=True, exist_ok=True)
     config._wise_dynamics_out_dir = out_dir
+
+
+def pytest_configure_node(node: Any) -> None:
+    """pytest-xdist's own controller-side hook, called once per worker before it starts: hands
+    the worker the controller's already-resolved `out_dir`, so every worker in a campaign writes
+    to the one directory the controller picked -- with or without `--out` -- rather than each
+    worker falling back to its own `mkdtemp`. Never called outside xdist; this plugin depends on
+    neither xdist nor its presence."""
+    node.workerinput["wise_dynamics_out_dir"] = str(node.config._wise_dynamics_out_dir)
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:

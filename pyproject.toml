@@ -19,6 +19,7 @@ packages = ["sim"]
 
 [dependency-groups]
 dev = [
+    "pytest-xdist>=3.6",
     "ruff>=0.17.0",
 ]
 

@@ -94,3 +94,22 @@ def test_two_case_campaign_runs_with_distinct_noise_and_recorded_draws(pytester)
     finally:
         for case in cases:
             case.close()
+
+
+def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, monkeypatch):
+    """Without `--out`, `pytest_configure` falls back to `tempfile.mkdtemp`; under `-n W` each
+    worker is its own process, so without `pytest_configure_node` handing every worker the
+    controller's own resolved directory, each would pick its own and a campaign's files would
+    scatter. `TMPDIR` is redirected into this test's own tmp path only so the test can find
+    where `mkdtemp` landed; it plays no part in the plugin's own logic."""
+    monkeypatch.setenv("TMPDIR", str(pytester.path))
+    pytester.makeconftest('pytest_plugins = ["sim.basilisk.pytest_plugin"]')
+    pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
+
+    result = pytester.runpytest_subprocess("-n", "2", "--runs", "2")
+
+    result.assert_outcomes(passed=2)
+    run_files = list(pytester.path.rglob("run_*.h5"))
+    assert len(run_files) == 2
+    out_dirs = {path.parent for path in run_files}
+    assert len(out_dirs) == 1, f"run files scattered across directories: {out_dirs}"
