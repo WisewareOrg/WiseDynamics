@@ -11,21 +11,21 @@ against this prebuilt-wheel Basilisk install, which ships binaries only.
 
 A single nominal run is ``execute_scenario(create_scenario())``, a plain function call. A
 campaign is this file run as a pytest module: ``pytest sim/basilisk/scenarios --runs N --out
-DIR [-n WORKERS]`` (see ``sim/basilisk/conftest.py``) disperses `N` cases, executes each as its
-own parametrized test, exports each to a contract v0 run file plus a sidecar, and folds every
-sidecar into one ``manifest.json`` validated against WiseGncAnalysis's contract check at session
-end.
+DIR [-n WORKERS]`` (see ``sim/basilisk/conftest.py``) disperses `N` cases and executes each as
+its own parametrized test, writing one ``run_<NNNN>.h5`` per case directly into ``--out``, per
+SPEC-demo.md §2's layout.
 """
 
-import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+import h5py
 import numpy as np
-import pandas as pd
 from Basilisk.architecture import messaging
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from sim.basilisk.conftest import Draws, _producer_versions
 from sim.basilisk.hosting.algorithm_module import AlgorithmModule
 from sim.basilisk.models.imu_spacecraft import (
     ACCEL_BIAS_DEFAULT,
@@ -41,22 +41,19 @@ from sim.basilisk.scenarios.bindings import IMU_DEAD_RECKONING_BINDING, Algorith
 ORBIT_DURATION_S = 5700.0  # s, one orbit
 RECORDER_RATE_S = 10.0  # s
 
-# Contract v0 column name -> (recorder name in msgRecList, payload field, axis index). t_s
-# comes from the truth recorder's own times and is handled separately.
-EXPORT: dict[str, tuple[str, str, int]] = {}
-for _prefix, _rec_name, _field_name in [
-    ("truth_sigma", "truth", "sigma_BN"),
-    ("truth_omega", "truth", "omega_BN_B"),
-    ("truth_r", "truth", "r_BN_N"),
-    ("truth_v", "truth", "v_BN_N"),
-    ("est_sigma", "estAtt", "sigma_BN"),
-    ("est_r", "estTrans", "r_BN_N"),
-    ("est_v", "estTrans", "v_BN_N"),
-    ("gyro", "imu", "AngVelPlatform"),
-    ("accel", "imu", "AccelPlatform"),
-]:
-    for _axis in range(3):
-        EXPORT[f"{_prefix}_{_axis + 1}"] = (_rec_name, _field_name, _axis)
+# SPEC-demo.md §2's run file layout: dataset name -> (recorder name in msgRecList, payload
+# field, units). t_s comes from the truth recorder's own times and is handled separately.
+EXPORT: dict[str, tuple[str, str, str]] = {
+    "truth/sigma_BN": ("truth", "sigma_BN", "MRP"),
+    "truth/omega_BN_B": ("truth", "omega_BN_B", "rad/s"),
+    "truth/r_N": ("truth", "r_BN_N", "m"),
+    "truth/v_N": ("truth", "v_BN_N", "m/s"),
+    "est/sigma_BN": ("estAtt", "sigma_BN", "MRP"),
+    "est/r_N": ("estTrans", "r_BN_N", "m"),
+    "est/v_N": ("estTrans", "v_BN_N", "m/s"),
+    "imu/gyro_P": ("imu", "AngVelPlatform", "rad/s"),
+    "imu/accel_P": ("imu", "AccelPlatform", "m/s^2"),
+}
 
 
 @dataclass
@@ -182,36 +179,54 @@ def run(
     return _collect_result(scSim)
 
 
-def _export_run(msgRecList: dict, path: Path) -> None:
-    columns = {"t_s": msgRecList["truth"].times() * macros.NANO2SEC}
-    for column, (rec_name, field_name, axis) in EXPORT.items():
-        columns[column] = np.array(getattr(msgRecList[rec_name], field_name))[:, axis]
-    pd.DataFrame(columns, columns=["t_s", *EXPORT.keys()]).to_csv(path, index=False)
+def _write_run(path: Path, msgRecList: dict, case_index: int, draws: Draws) -> None:
+    """Writes one `run_<NNNN>.h5` per SPEC-demo.md §2: root attrs (`case`, `seed`, `producer`,
+    `created_utc`, `versions_*`, one `draw_<name>` per dispersed quantity) and the ten float64
+    datasets, each carrying a string `units` attribute."""
+    versions = _producer_versions()
+    t_s = msgRecList["truth"].times() * macros.NANO2SEC
+
+    with h5py.File(path, "w") as f:
+        f.attrs["case"] = case_index
+        f.attrs["seed"] = draws.rng_seed
+        f.attrs["producer"] = "WiseDynamics sim/basilisk/scenarios/test_imu_dead_reckoning.py"
+        f.attrs["created_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        f.attrs["versions_bsk"] = versions["bsk"]
+        f.attrs["versions_gnc_algorithms"] = versions["gnc-algorithms"]
+        f.attrs["versions_wise_dynamics"] = versions["wise-dynamics"]
+        for name, value in draws.as_dict().items():
+            f.attrs[f"draw_{name}"] = np.asarray(value, dtype=np.float64)
+
+        ds = f.create_dataset("t_s", data=t_s.astype(np.float64))
+        ds.attrs["units"] = "s"
+        for dataset_name, (rec_name, field_name, units) in EXPORT.items():
+            data = np.array(getattr(msgRecList[rec_name], field_name), dtype=np.float64)
+            ds = f.create_dataset(dataset_name, data=data)
+            ds.attrs["units"] = units
+
+
+def _assert_run_loads(path: Path) -> None:
+    """TODO: wire to WiseGncAnalysis's `gnc_analysis.runs.load_run` once it exists on the
+    sibling checkout (pending impl-analysis). Imports it directly here rather than catching the
+    failure, so a missing or incomplete loader fails this assertion loudly instead of this test
+    silently passing without real validation."""
+    from gnc_analysis.runs import load_run
+
+    load_run(path)
 
 
 def test_case(case_index, plant, algorithm_binding, draws, duration_s, out_dir) -> None:
     """One Monte Carlo case: builds the algorithm binding onto the already-dispersed `plant`
-    fixture, runs it, exports its contract v0 run file plus a sidecar recording this case's
-    seed and draws, and checks the run file against WiseGncAnalysis's own contract check."""
+    fixture, runs it, writes its `run_<NNNN>.h5`, and checks that WiseGncAnalysis's own loader
+    reads it back."""
     _algModule, msgRecList = _attach_algorithm_and_recorders(plant, algorithm_binding)
     execute_scenario(plant.sim, duration_s=duration_s)
-
-    run_file = f"run_{case_index:04d}.csv"
-    _export_run(msgRecList, out_dir / run_file)
-
-    sidecar = {
-        "run": case_index,
-        "file": run_file,
-        "seeds": {"numpy_rng": draws.rng_seed},
-        "dispersions": draws.as_dict(),
-    }
-    (out_dir / f"run_{case_index:04d}.json").write_text(json.dumps(sidecar, indent=2))
-
-    # Contract validation against WiseGncAnalysis withheld: contract v0 moved to a single
-    # campaign.h5 (no CSV, no manifest, no sidecars), and that module is itself mid-restructure
-    # on WiseGncAnalysis as of this commit. The CSV/sidecar above are a local artifact pending
-    # the HDF5 exporter rewrite.
     assert len(msgRecList["truth"].times()) > 0, "scenario produced no recorded samples"
+
+    run_file = out_dir / f"run_{case_index:04d}.h5"
+    _write_run(run_file, msgRecList, case_index, draws)
+
+    _assert_run_loads(run_file)
 
 
 if __name__ == "__main__":

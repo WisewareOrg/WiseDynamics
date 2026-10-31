@@ -417,7 +417,6 @@ dependencies = [
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "numpy" },
-    { name = "pandas" },
 ]
 
 [package.metadata]
@@ -425,7 +424,6 @@ requires-dist = [
     { name = "h5py", specifier = ">=3.11" },
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "pandas", specifier = ">=2.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -1296,8 +1294,8 @@ source = { editable = "." }
 dependencies = [
     { name = "bsk", extra = ["all"] },
     { name = "gnc-algorithms" },
+    { name = "h5py" },
     { name = "numpy" },
-    { name = "pandas" },
 ]
 
 [package.dev-dependencies]
@@ -1312,8 +1310,8 @@ dev = [
 requires-dist = [
     { name = "bsk", extras = ["all"] },
     { name = "gnc-algorithms", editable = "../WiseGncDesign" },
+    { name = "h5py" },
     { name = "numpy" },
-    { name = "pandas" },
 ]
 
 [package.metadata.requires-dev]

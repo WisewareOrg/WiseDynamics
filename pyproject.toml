@@ -1,12 +1,12 @@
 [project]
 name = "wise-dynamics"
 version = "0.1.0"
-description = "Simulation host for Wiseware's GNC work: Basilisk scenarios and Monte Carlo campaigns exporting to the WiseGncAnalysis data contract."
+description = "Simulation host for Wiseware's GNC work: Basilisk scenarios and the Monte Carlo campaigns run over them, exporting runs the WiseGncAnalysis loader reads."
 requires-python = ">=3.12"
 dependencies = [
     "bsk[all]",
     "numpy",
-    "pandas",
+    "h5py",
     "gnc-algorithms",
 ]
 
@@ -29,8 +29,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.6",
     "ruff>=0.17.0",
-    # gnc-analysis: a dev-only dependency so a campaign export can be checked against
-    # WiseGncAnalysis's real contract.v0.check_campaign, not a restated assumption about it.
+    # gnc-analysis: a dev-only dependency so an exported run can be checked against
+    # WiseGncAnalysis's own loader, not a restated assumption about what it reads.
     "gnc-analysis",
 ]
 

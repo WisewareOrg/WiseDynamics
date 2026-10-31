@@ -1,13 +1,11 @@
 """Options and fixtures for running `sim/basilisk/scenarios` as a Monte Carlo campaign:
 `pytest sim/basilisk/scenarios --runs N --out DIR [-n WORKERS]` disperses `N` cases through
-numpy's own RNG (no Basilisk `MonteCarlo.Controller`), executes each as an ordinary pytest test
-case, and folds every case's exported run into one contract v0 manifest at session end."""
+numpy's own RNG (no Basilisk `MonteCarlo.Controller`), each executed as an ordinary pytest test
+case that writes its own run file directly into `--out`."""
 
-import json
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 
@@ -29,10 +27,6 @@ MRP_STD = 0.01  # -
 RATE_STD = 0.2 * macros.D2R  # rad/s
 GYRO_BIAS_STD = 1e-4  # rad/s
 ACCEL_BIAS_STD = 1e-4  # m/s^2
-
-# Not imported from WiseGncAnalysis's contract module: that module is currently unimportable,
-# mid-restructure on WiseGncAnalysis. A local placeholder until the exporter's rewrite.
-CONTRACT_VERSION = 0
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -136,8 +130,8 @@ def _git_describe(path: Path) -> str:
 
 
 def _producer_versions() -> dict[str, str]:
-    """The versions that produced this campaign, for tracing a manifest back to the code that
-    made it: the installed `bsk` version, and `git describe` of each sibling checkout."""
+    """The versions that produced a run, for tracing it back to the code that made it: the
+    installed `bsk` version, and `git describe` of each sibling checkout."""
     repo_root = Path(__file__).resolve().parents[2]
     return {
         "bsk": pkg_version("bsk"),
@@ -147,27 +141,21 @@ def _producer_versions() -> dict[str, str]:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Folds every case's `run_<NNNN>.json` sidecar into one `manifest.json`. Runs once, on the
-    controlling process, not on every pytest-xdist worker.
+    """Validates the whole campaign directory with WiseGncAnalysis's own loader. Runs once, on
+    the controlling process, not on every pytest-xdist worker.
 
-    Does not yet call WiseGncAnalysis's `check_campaign`: contract v0 moved to a single
-    `campaign.h5` (no CSV, no manifest, no sidecars), and as of this commit that contract module
-    is itself mid-restructure on WiseGncAnalysis, with no stable target to validate against.
-    `manifest.json` here is an interim, local artifact pending the exporter's rewrite."""
+    TODO: wire to WiseGncAnalysis's `gnc_analysis.runs.load_campaign` once it exists on the
+    sibling checkout (pending impl-analysis). Imports it directly here rather than catching the
+    failure, so a missing or incomplete loader fails this session loudly instead of silently
+    skipping validation."""
     config = session.config
     if hasattr(config, "workerinput"):
         return
 
     out_dir = config._mc_out_dir
-    sidecars = sorted(out_dir.glob("run_*.json"))
-    if not sidecars:
+    if not any(out_dir.glob("run_*.h5")):
         return
 
-    manifest = {
-        "contract_version": CONTRACT_VERSION,
-        "producer": "WiseDynamics sim/basilisk/scenarios (pytest campaign)",
-        "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "versions": _producer_versions(),
-        "runs": [json.loads(sidecar.read_text()) for sidecar in sidecars],
-    }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    from gnc_analysis.runs import load_campaign
+
+    load_campaign(out_dir)

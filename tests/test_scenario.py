@@ -1,6 +1,6 @@
 """Smoke tests, run before anything else per SPEC-demo.md §3: a single-process 300 s run of the
-nominal case. The pytest-based campaign (dispersed cases, contract export) is exercised by
-running `sim/basilisk/scenarios` itself, not from here."""
+nominal case. The pytest-based campaign (dispersed cases, run export) is exercised by running
+`sim/basilisk/scenarios` itself, not from here."""
 
 import numpy as np
 from gnc_algorithms.mrp import angle, subtract
