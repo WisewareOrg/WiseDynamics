@@ -52,6 +52,11 @@ ORBIT_DURATION_S = 5700.0  # s, one orbit
 RECORDER_RATE_S = 10.0  # s
 
 
+def _col(v: np.ndarray) -> list[list[float]]:
+    """Converts a 3-vector to Basilisk's column-vector list form `[[x], [y], [z]]`."""
+    return [[float(x)] for x in v]
+
+
 @dataclass
 class ScenarioResult:
     """Recorded arrays from one `run()` call. `time_s` is shared by every array's first axis."""
@@ -121,11 +126,6 @@ class DeadReckoningModule(sysModel.SysModel):
         transOut.v_BN_N = state.v_N.tolist()
         self.navTransOutMsg.write(transOut, CurrentSimNanos, self.moduleID)
 
-        transOut = messaging.NavTransMsgPayload()
-        transOut.r_BN_N = state.r_N.tolist()
-        transOut.v_BN_N = state.v_N.tolist()
-        self.navTransOutMsg.write(transOut, CurrentSimNanos, self.moduleID)
-
 
 def create_scenario(
     sigma0_BN: np.ndarray = SIGMA0_BN_DEFAULT,
@@ -153,8 +153,8 @@ def create_scenario(
     scSim.scObject.hub.mHub = HUB_MASS
     scSim.scObject.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
     scSim.scObject.hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(HUB_INERTIA)
-    scSim.scObject.hub.sigma_BNInit = [[float(x)] for x in sigma0_BN]
-    scSim.scObject.hub.omega_BN_BInit = [[float(x)] for x in omega0_BN_B]
+    scSim.scObject.hub.sigma_BNInit = _col(sigma0_BN)
+    scSim.scObject.hub.omega_BN_BInit = _col(omega0_BN_B)
     scSim.AddModelToTask(simTaskName, scSim.scObject)
 
     # Earth as a point mass, no SPICE.
@@ -180,8 +180,8 @@ def create_scenario(
     scSim.imuObject.ModelTag = "imuSensor"
     scSim.imuObject.scStateInMsg.subscribeTo(scSim.scObject.scStateOutMsg)
     scSim.imuObject.sensorPos_B = [[0.0], [0.0], [0.0]]
-    scSim.imuObject.senRotBias = [[float(x)] for x in gyro_bias]
-    scSim.imuObject.senTransBias = [[float(x)] for x in accel_bias]
+    scSim.imuObject.senRotBias = _col(gyro_bias)
+    scSim.imuObject.senTransBias = _col(accel_bias)
     scSim.imuObject.PMatrixGyro = (GYRO_NOISE_PSD_DEFAULT * np.eye(3)).tolist()
     scSim.imuObject.PMatrixAccel = (ACCEL_NOISE_PSD_DEFAULT * np.eye(3)).tolist()
     scSim.AddModelToTask(simTaskName, scSim.imuObject)

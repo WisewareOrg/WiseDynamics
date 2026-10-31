@@ -14,9 +14,13 @@ dependencies = [
 wise-mc-imu = "sim.basilisk.campaigns.imu_dead_reckoning_mc:main"
 
 [tool.uv.sources]
-# WiseGncDesign PR #4 head (branch task_3-imu_dead_reckoning_package): the amended
-# ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, mu) interface per SPEC-demo.md §1.
-gnc-algorithms = { git = "https://github.com/WisewareOrg/WiseGncDesign", rev = "e60a7b06d63701f3edfb20549f4108dc45cf082c" }
+# WiseGncDesign PR #4, frozen head: the ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, mu) interface
+# per SPEC-demo.md §1. Superseded e60a7b06 (same interface/numerics; this rev adds tests and
+# drops a zero-mu guard irrelevant here, since this scenario always passes Earth's real mu) and
+# the 6a982dae intermediate revision in between. The 852-run campaign committed alongside this
+# pin was executed against e60a7b06, not re-run against this rev; only the 300 s single-process
+# scenario test was re-run as confirmation (see the PR body).
+gnc-algorithms = { git = "https://github.com/WisewareOrg/WiseGncDesign", rev = "14aa03a3ac044b6f9a4d7a3e22c51c66ac1db935" }
 
 [build-system]
 requires = ["hatchling"]
