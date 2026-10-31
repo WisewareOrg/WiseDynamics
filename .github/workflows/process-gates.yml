@@ -1,0 +1,47 @@
+name: process-gates
+
+# Satisfies the `process-gates` ruleset's required-status-check contexts (`check-branch`,
+# `pr-title`, `repo-floor`): each job is top-level and named for its context. `merge_group` is a
+# deliberate addition over wise-ci's own workflow: WiseKiosk's merge queue re-runs its required
+# checks there, and these three skip rather than repeat work a pull_request run already did.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: process-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every job's `name:` equals its id, which here is also the required-status-check context the
+  # `process-gates` ruleset names.
+  check-branch:
+    name: check-branch
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: WisewareOrg/wise-ci/check-branch@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
+
+  pr-title:
+    name: pr-title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # reads the PR's current title from the API
+    steps:
+      - uses: WisewareOrg/wise-ci/pr-title@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
+
+  repo-floor:
+    name: repo-floor
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: WisewareOrg/wise-ci/repo-floor@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
