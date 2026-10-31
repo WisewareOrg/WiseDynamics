@@ -12,7 +12,8 @@ touching the other two: flight GNC algorithms live in
 simulation-blind; simulation plants and Monte Carlo campaigns that import those algorithms live
 here, in WiseDynamics; analysis of the runs they produce lives in
 [WiseGncAnalysis](https://github.com/WisewareOrg/WiseGncAnalysis), which reads the data contract
-and knows nothing about which simulation produced it.
+and knows nothing about which simulation produced it. WiseDynamics checks out WiseGncDesign as a
+sibling directory and depends on it by editable path rather than by a pinned revision.
 
 ## Layout
 

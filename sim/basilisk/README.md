@@ -4,7 +4,8 @@ Basilisk is a locked dependency (`bsk[all]`) of this repository's uv project, in
 wheels. Scenarios live here, importing GNC algorithms
 from [WiseGncDesign](https://github.com/WisewareOrg/WiseGncDesign) rather than reimplementing
 them; nothing algorithmic lives under this directory. Basilisk is the first simulation host by
-ADR 0001 rev 1.
+ADR 0001 rev 1. `gnc-algorithms` is an editable path dependency on a sibling `WiseGncDesign`
+checkout, built fresh from whatever revision sits beside this repository.
 
 ## Layout
 

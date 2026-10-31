@@ -134,27 +134,34 @@ def _split_parameters(params: dict) -> tuple[dict, dict]:
     return seeds, dispersions
 
 
-def _producer_versions() -> dict[str, str]:
-    """The versions that produced this campaign: the installed `bsk` version, the exact
-    `gnc-algorithms` git commit resolved by the lock, and this repository's own `git describe`,
-    for tracing a manifest back to the code that made it."""
-    gnc_direct_url = json.loads(distribution("gnc-algorithms").read_text("direct_url.json"))
-    repo_root = Path(__file__).resolve().parents[3]
+def _git_describe(path: Path) -> str:
     try:
-        wise_dynamics_rev = subprocess.run(
+        return subprocess.run(
             ["git", "describe", "--always", "--dirty"],
-            cwd=repo_root,
+            cwd=path,
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        wise_dynamics_rev = "unknown"
+        return "unknown"
+
+
+def _producer_versions() -> dict[str, str]:
+    """The versions that produced this campaign, for tracing a manifest back to the code that
+    made it: the installed `bsk` version, and `git describe` of each sibling checkout
+    (gnc-algorithms, wise-dynamics) -- a record of what ran, not a pin."""
+    gnc_dir = Path(
+        json.loads(distribution("gnc-algorithms").read_text("direct_url.json"))["url"].removeprefix(
+            "file://"
+        )
+    )
+    repo_root = Path(__file__).resolve().parents[3]
 
     return {
         "bsk": pkg_version("bsk"),
-        "gnc-algorithms": gnc_direct_url["vcs_info"]["commit_id"],
-        "wise-dynamics": wise_dynamics_rev,
+        "gnc-algorithms": _git_describe(gnc_dir),
+        "wise-dynamics": _git_describe(repo_root),
     }
 
 
