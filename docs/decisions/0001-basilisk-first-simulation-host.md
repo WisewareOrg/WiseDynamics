@@ -45,14 +45,14 @@ simulation host, at `sim/basilisk/`.
   project, the organisation's Python dependency manager. Never built from source here.
 - `sim/basilisk/models/` holds static plant models (a spacecraft hub, its gravity, its sensors);
   `sim/basilisk/run.py::run_case` adds any flight-software module a consumer builds to a plant's
-  task and records it; neither knows about, nor depends on, any particular algorithm.
+  task and records it, through Basilisk's own `SysModel` interface alone.
 - `sim/basilisk/pytest_plugin.py` is a pytest plugin, loaded by a consumer's own `conftest.py`
   (`pytest_plugins = [...]`): `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft` options and
   `plant`/`draws`/`run_writer` fixtures, dispersed through plain `numpy.random`, run in-process
   with no clock pacing. A campaign is `pytest -n W --runs N` in the consumer's own test suite.
-- `sim/basilisk/runs.py::write_run` writes one HDF5 run file per SPEC-demo.md §2's layout, given
-  whatever arrays and attrs the caller supplies; Basilisk's own retention format is never read
-  by analysis.
+- `sim/basilisk/runs.py::write_run` writes one HDF5 run file -- root attrs plus a set of float64
+  datasets, each carrying a `units` attribute -- given whatever arrays and attrs the caller
+  supplies; Basilisk's own retention format is never read by analysis.
 
 What the evaluation established: the wheels install and import on the development host without a
 source build; a controller written as a Basilisk Python module runs inside the step loop alongside C

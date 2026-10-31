@@ -1,6 +1,5 @@
 """Model-level checks for `ImuSpacecraftModel`: the IMU's own configured noise shows up in its
-output at the magnitude this repository has settled on, independent of whatever
-`imu_spacecraft.py` currently exports as its own default."""
+output at the magnitude this repository has settled on."""
 
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros

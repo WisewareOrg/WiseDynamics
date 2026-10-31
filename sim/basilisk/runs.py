@@ -1,6 +1,6 @@
-"""Writes one run file in the layout SPEC-demo.md §2 names: root attrs plus a set of float64
-datasets, each carrying a string `units` attribute. Carries no knowledge of which datasets or
-attrs a particular study needs -- the caller supplies both, fully named."""
+"""Writes one HDF5 run file: root attrs plus a set of float64 datasets, each carrying a string
+`units` attribute. The caller names every dataset and attr; this module writes exactly what it
+is given."""
 
 from pathlib import Path
 from typing import Any

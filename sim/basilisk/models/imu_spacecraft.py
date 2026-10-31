@@ -77,6 +77,7 @@ class ImuSpacecraftModel:
         accel_bias: np.ndarray = ACCEL_BIAS_DEFAULT,
         gyro_noise_std: float = GYRO_NOISE_STD_DEFAULT,
         accel_noise_std: float = ACCEL_NOISE_STD_DEFAULT,
+        rng_seed: int = 0,
     ) -> None:
         self.sim = sim
         self.task_name = task_name
@@ -121,6 +122,7 @@ class ImuSpacecraftModel:
         self.imuObject.senTransBias = _col(accel_bias)
         self.imuObject.PMatrixGyro = (gyro_noise_std * np.eye(3)).tolist()
         self.imuObject.PMatrixAccel = (accel_noise_std * np.eye(3)).tolist()
+        self.imuObject.RNGSeed = int(rng_seed)
         sim.AddModelToTask(task_name, self.imuObject)
 
     def readers(self) -> dict[str, Any]:
@@ -129,6 +131,10 @@ class ImuSpacecraftModel:
         imu_reader = messaging.IMUSensorMsgReader()
         imu_reader.subscribeTo(self.imuObject.sensorOutMsg)
         return {"imu": imu_reader}
+
+    def truth_messages(self) -> dict[str, Any]:
+        """This plant's own recordable messages by role, mirroring `readers()`'s convention."""
+        return {"truth": self.scObject.scStateOutMsg, "imu": self.imuObject.sensorOutMsg}
 
     def initial_state(self) -> dict:
         """Reads the hub's live initial-condition attributes — `sigma_BNInit`, `r_CN_NInit`,

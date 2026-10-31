@@ -32,7 +32,9 @@ def test_truth_trajectory_matches_golden_reference():
     stub = StubFsw()
     stub.ModelTag = "stub"
 
-    recorders = run_case(plant, stub, duration_s=300.0, record_s=10.0)
+    recorders = run_case(
+        plant, stub, {"stub_out": stub.output_msg}, duration_s=300.0, record_s=10.0
+    )
 
     golden = json.loads(GOLDEN_PATH.read_text())
 
@@ -40,10 +42,9 @@ def test_truth_trajectory_matches_golden_reference():
     final_v_N = np.array(recorders["truth"].v_BN_N)[-1]
     final_sigma_BN = np.array(recorders["truth"].sigma_BN)[-1]
 
-    # rtol=0.0: these are absolute tolerances. np.allclose's default rtol=1e-5 would otherwise
-    # dominate on r_N's ~1e6 m magnitude (1e-5 * 1e6 m = 10 m, far looser than the stated 1e-3 m)
-    # and silently pass a moved reference -- confirmed by seeding a 1 m perturbation and seeing
-    # it pass before this fix.
+    # rtol=0.0: these are absolute tolerances. np.allclose's default rtol=1e-5 dominates on
+    # r_N's ~1e6 m magnitude (1e-5 * 1e6 m = 10 m, far looser than the stated 1e-3 m), so it
+    # must stay explicit here for the tolerance to mean what it says.
     assert np.allclose(final_r_N, golden["r_N"], atol=POSITION_TOL_M, rtol=0.0), (
         f"r_N {final_r_N} vs golden {golden['r_N']}"
     )

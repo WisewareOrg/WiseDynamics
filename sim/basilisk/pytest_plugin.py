@@ -1,12 +1,13 @@
 """A pytest plugin exposing Monte Carlo campaign options and fixtures over this repository's
-plant models, with no knowledge of any flight software. A consumer loads it with
-`pytest_plugins = ["sim.basilisk.pytest_plugin"]` in its own `conftest.py`, parametrizes a test
-over `case_index` to get one call per `--runs` case, and builds its own flight-software module
-against the `plant` fixture's `readers()`/`initial_state()`/`mu`."""
+plant models. A consumer loads it with `pytest_plugins = ["sim.basilisk.pytest_plugin"]` in its
+own `conftest.py`, parametrizes a test over `case_index` to get one call per `--runs` case, and
+builds its own flight-software module against the `plant` fixture's
+`readers()`/`initial_state()`/`mu`."""
 
-import subprocess
+import json
 import tempfile
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, distribution
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,11 @@ def seed(request: pytest.FixtureRequest) -> int:
 
 
 @pytest.fixture
+def campaign_size(request: pytest.FixtureRequest) -> int:
+    return request.config.getoption("--runs")
+
+
+@pytest.fixture
 def duration_s(request: pytest.FixtureRequest) -> float:
     return request.config.getoption("--duration-s")
 
@@ -64,13 +70,23 @@ def spacecraft_name(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def case_seed(case_index: int, seed: int) -> int:
-    return seed + case_index
+def case_seeds(
+    case_index: int, seed: int, campaign_size: int
+) -> tuple[np.random.SeedSequence, np.random.SeedSequence]:
+    """This case's own two independent child seed sequences, spawned from the campaign seed so
+    no case's draws or sensor noise overlaps another's anywhere in the campaign: one for this
+    case's dispersed draws, one for its sensor noise. `numpy.random.SeedSequence(seed).spawn(n)`
+    is a pure function of `seed` and `n`, so every fixture in the campaign that calls it with
+    this same `campaign_size` derives the same per-case children regardless of call order."""
+    case_seed = np.random.SeedSequence(seed).spawn(campaign_size)[case_index]
+    draws_seed, noise_seed = case_seed.spawn(2)
+    return draws_seed, noise_seed
 
 
 @pytest.fixture
-def rng(case_seed: int) -> np.random.Generator:
-    return np.random.default_rng(case_seed)
+def rng(case_seeds: tuple[np.random.SeedSequence, np.random.SeedSequence]) -> np.random.Generator:
+    draws_seed, _ = case_seeds
+    return np.random.default_rng(draws_seed)
 
 
 @pytest.fixture
@@ -82,46 +98,64 @@ def draws(rng: np.random.Generator, spacecraft_name: str) -> dict[str, np.ndarra
 
 
 @pytest.fixture
-def plant(draws: dict[str, np.ndarray], spacecraft_name: str) -> Any:
-    """The named spacecraft model, built with this case's dispersed draws."""
+def plant(
+    draws: dict[str, np.ndarray],
+    spacecraft_name: str,
+    case_seeds: tuple[np.random.SeedSequence, np.random.SeedSequence],
+) -> Any:
+    """The named spacecraft model, built with this case's dispersed draws and its own
+    independent sensor-noise seed."""
     model_cls = _SPACECRAFT_MODELS[spacecraft_name]
     sim = SimulationBaseClass.SimBaseClass()
-    return model_cls(sim, **draws)
+    _, noise_seed = case_seeds
+    rng_seed = int(noise_seed.generate_state(1)[0])
+    return model_cls(sim, rng_seed=rng_seed, **draws)
 
 
-def _git_describe(path: Path) -> str:
+def _wise_dynamics_version() -> str:
+    """This package's own installed version, read from its distribution metadata: a tagged-
+    release consumer then always gets this package's version, never the consumer's own commit.
+    Appends the pinned commit from the install's `direct_url.json` when one is recorded (a VCS
+    install); a local or ordinary wheel install has none, and the plain version is returned."""
     try:
-        return subprocess.run(
-            ["git", "describe", "--always", "--dirty"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+        dist = distribution("wise-dynamics")
+    except PackageNotFoundError:
         return "unknown"
+
+    text = dist.version
+    direct_url_text = dist.read_text("direct_url.json")
+    if direct_url_text:
+        try:
+            direct_url = json.loads(direct_url_text)
+        except ValueError:
+            direct_url = {}
+        commit_id = direct_url.get("vcs_info", {}).get("commit_id")
+        if commit_id:
+            text = f"{text}+{commit_id[:12]}"
+    return text
 
 
 @pytest.fixture
-def run_writer(case_index: int, case_seed: int, out_dir: Path):
+def run_writer(case_index: int, seed: int, draws: dict[str, np.ndarray], out_dir: Path):
     """A callable writing `<out_dir>/run_<NNNN>.h5`: fills in the generic root attrs (`case`,
-    `seed`, `producer`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`) and merges in
-    whatever `extra_attrs` the caller supplies (e.g. its own `draw_<name>` and
-    `versions_<package>` entries) before writing `arrays` via `write_run`. Returns the path
-    written."""
-    repo_root = Path(__file__).resolve().parents[1]
+    the campaign `seed`, `producer`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`),
+    records this case's own `draws` as `draw_<name>` attrs, and merges in whatever `extra_attrs`
+    the caller supplies (e.g. its own `versions_<package>` entries) before writing `arrays` via
+    `write_run`. Returns the path written."""
 
     def write(
         arrays: dict[str, tuple[np.ndarray, str]], extra_attrs: dict[str, Any] | None = None
     ) -> Path:
         attrs: dict[str, Any] = {
             "case": case_index,
-            "seed": case_seed,
+            "seed": seed,
             "producer": "wise-dynamics sim/basilisk",
             "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "versions_bsk": pkg_version("bsk"),
-            "versions_wise_dynamics": _git_describe(repo_root),
+            "versions_wise_dynamics": _wise_dynamics_version(),
         }
+        for name, value in draws.items():
+            attrs[f"draw_{name}"] = np.asarray(value, dtype=float)
         if extra_attrs:
             attrs.update(extra_attrs)
 
