@@ -22,7 +22,7 @@ from Basilisk.utilities import (
     simHelpers,
     simIncludeGravBody,
 )
-from gnc_algorithms.imu_dead_reckoning import ImuDeadReckoner, ImuSample
+from gnc_algorithms.imu_dead_reckoning import DeadReckoningState, ImuDeadReckoner, ImuSample
 
 # Orbit: 500 km circular LEO at 45 deg inclination (classical elements, Earth point-mass gravity).
 ORBIT_A = 6871.0e3  # m
@@ -92,20 +92,34 @@ class DeadReckoningModule(sysModel.SysModel):
         r0_N = np.array(self.scObject.hub.r_CN_NInit, dtype=float).flatten()
         v0_N = np.array(self.scObject.hub.v_CN_NInit, dtype=float).flatten()
         self._reckoner = ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, self.mu)
+        self._write_estimate(self._reckoner.state, CurrentSimNanos)
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
-        buf = self.gyroInMsg()
         t = CurrentSimNanos * macros.NANO2SEC
+        if not t > self._reckoner.state.t:
+            # Basilisk calls UpdateState once at the same sim time as Reset (dt == 0); the
+            # reckoner already holds the correct (truth-aligned) state for that instant, so
+            # there is nothing to step yet.
+            return
+
+        buf = self.gyroInMsg()
         omega_P = np.array(buf.AngVelPlatform, dtype=float)
         accel_P = np.array(buf.AccelPlatform, dtype=float)
         omega_B = self.dcm_PB.T @ omega_P
         accel_B = self.dcm_PB.T @ accel_P
 
         state = self._reckoner.step(ImuSample(t=t, omega_B=omega_B, accel_B=accel_B))
+        self._write_estimate(state, CurrentSimNanos)
 
+    def _write_estimate(self, state: DeadReckoningState, CurrentSimNanos: int) -> None:
         attOut = messaging.NavAttMsgPayload()
         attOut.sigma_BN = state.sigma_BN.tolist()
         self.navAttOutMsg.write(attOut, CurrentSimNanos, self.moduleID)
+
+        transOut = messaging.NavTransMsgPayload()
+        transOut.r_BN_N = state.r_N.tolist()
+        transOut.v_BN_N = state.v_N.tolist()
+        self.navTransOutMsg.write(transOut, CurrentSimNanos, self.moduleID)
 
         transOut = messaging.NavTransMsgPayload()
         transOut.r_BN_N = state.r_N.tolist()

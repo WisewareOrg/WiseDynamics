@@ -14,11 +14,9 @@ dependencies = [
 wise-mc-imu = "sim.basilisk.campaigns.imu_dead_reckoning_mc:main"
 
 [tool.uv.sources]
-# PLACEHOLDER: awaiting the new WiseGncDesign commit implementing SPEC-demo.md §1's
-# ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, mu) interface (f74f70b implements a superseded,
-# attitude-plus-delta-V-only interface -- see task #6 discussion). Do not `uv lock` against this
-# rev; team-lead will send the real SHA.
-gnc-algorithms = { git = "https://github.com/WisewareOrg/WiseGncDesign", rev = "PLACEHOLDER-awaiting-spec-section1-sha" }
+# WiseGncDesign PR #4 head (branch task_3-imu_dead_reckoning_package): the amended
+# ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, mu) interface per SPEC-demo.md §1.
+gnc-algorithms = { git = "https://github.com/WisewareOrg/WiseGncDesign", rev = "e60a7b06d63701f3edfb20549f4108dc45cf082c" }
 
 [build-system]
 requires = ["hatchling"]
