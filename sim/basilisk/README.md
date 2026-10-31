@@ -17,14 +17,14 @@ plants pins a tagged release of this repository.
   `sim`, `task_name`, `readers()` and `truth_messages()`.
 - `runs.py` — `write_run(path, arrays, attrs)`: writes one HDF5 run file — root attrs plus a set
   of float64 datasets, each carrying a `units` attribute — from whatever dataset/attr names the
-  caller supplies.
-- `pytest_plugin.py` — a pytest plugin a consumer loads with `pytest_plugins =
-  ["sim.basilisk.pytest_plugin"]`: `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft`
-  options, and `plant`/`draws`/`run_writer` fixtures (the named plant, built with its standard
-  per-case draws, each case keyed off an independent child of the campaign seed; a callable
-  recording the draws alongside the generic root attrs and writing `run_<NNNN>.h5` via
-  `runs.py`). A consumer parametrizes its own test over `case_index` and builds its own
-  flight-software module.
+  caller supplies, creating `path`'s parent directory on first write if it does not exist yet.
+- `pytest_plugin.py` — a pytest plugin registered via this package's own `pytest11` entry point:
+  installing `wise-dynamics` is enough for pytest to load it, no consumer `conftest.py`
+  declaration needed. `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft` options, and
+  `plant`/`draws`/`run_writer` fixtures (the named plant, built with its standard per-case
+  draws, each case keyed off an independent child of the campaign seed; a callable recording the
+  draws alongside the generic root attrs and writing `run_<NNNN>.h5` via `runs.py`). A consumer
+  parametrizes its own test over `case_index` and builds its own flight-software module.
 
 ## The IMU reader
 

@@ -1,7 +1,8 @@
 """Checks `sim.basilisk.pytest_plugin`: its own provenance helper reads this package's installed
-version from distribution metadata, and a 2-case campaign run through its fixtures, with a stub
+version from distribution metadata; a 2-case campaign run through its fixtures, with a stub
 flight-software module, writes one run file per case, each carrying its own draws and its own
-distinct sensor noise."""
+distinct sensor noise; a campaign fanned over workers shares one output directory; and a session
+with no case creates none at all."""
 
 import textwrap
 from importlib.metadata import version as pkg_version
@@ -71,8 +72,8 @@ def test_two_case_campaign_runs_with_distinct_noise_and_recorded_draws(pytester)
     for that case. The campaign's own `draws` fixture is overridden to zero so every case starts
     identical and tumble-free; `gyro` then isolates the IMU noise seed alone (R1: a shared seed
     across cases would make it identical), and the `draw_*` attrs are checked regardless (R5: a
-    writer that drops them would leave these attrs out)."""
-    pytester.makeconftest('pytest_plugins = ["sim.basilisk.pytest_plugin"]')
+    writer that drops them would leave these attrs out). Relies on the `pytest11` entry point
+    to load the plugin in the subprocess -- no `conftest.py` declaration is written here."""
     pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
 
     out_dir = pytester.path / "out"
@@ -101,9 +102,8 @@ def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, mo
     worker is its own process, so without `pytest_configure_node` handing every worker the
     controller's own resolved directory, each would pick its own and a campaign's files would
     scatter. `TMPDIR` is redirected into this test's own tmp path only so the test can find
-    where `mkdtemp` landed; it plays no part in the plugin's own logic."""
+    where the default directory landed; it plays no part in the plugin's own logic."""
     monkeypatch.setenv("TMPDIR", str(pytester.path))
-    pytester.makeconftest('pytest_plugins = ["sim.basilisk.pytest_plugin"]')
     pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
 
     result = pytester.runpytest_subprocess("-n", "2", "--runs", "2")
@@ -113,3 +113,18 @@ def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, mo
     assert len(run_files) == 2
     out_dirs = {path.parent for path in run_files}
     assert len(out_dirs) == 1, f"run files scattered across directories: {out_dirs}"
+
+
+def test_a_session_with_no_case_creates_no_out_dir(pytester, monkeypatch):
+    """`pytest_configure` computes the default `out_dir` path without creating it, because this
+    plugin, loaded via the `pytest11` entry point, configures every session of a consumer that
+    has `wise-dynamics` installed -- most of which run no case and call `run_writer` never.
+    `TMPDIR` is redirected into this test's own tmp path only so the test can assert nothing
+    landed there; it plays no part in the plugin's own logic."""
+    monkeypatch.setenv("TMPDIR", str(pytester.path))
+    pytester.makepyfile(test_nothing="def test_nothing():\n    pass\n")
+
+    result = pytester.runpytest_subprocess()
+
+    result.assert_outcomes(passed=1)
+    assert not list(pytester.path.glob("wise_dynamics_*"))

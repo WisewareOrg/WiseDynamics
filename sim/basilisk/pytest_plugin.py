@@ -1,10 +1,12 @@
 """A pytest plugin exposing Monte Carlo campaign options and fixtures over this repository's
-plant models. A consumer loads it with `pytest_plugins = ["sim.basilisk.pytest_plugin"]` in its
-own `conftest.py`, parametrizes a test over `case_index` to get one call per `--runs` case, and
+plant models, registered via this package's own `pytest11` entry point: installing
+`wise-dynamics` is enough for pytest to load it, with no consumer `conftest.py` declaration
+needed. A consumer parametrizes a test over `case_index` to get one call per `--runs` case, and
 builds its own flight-software module against the `plant` fixture's
 `readers()`/`initial_state()`/`mu`."""
 
 import json
+import secrets
 import tempfile
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, distribution
@@ -32,14 +34,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    """Resolves this session's `out_dir`, but never creates it: loaded via this package's own
+    `pytest11` entry point, this plugin configures every pytest session of a consumer that has
+    `wise-dynamics` installed, most of which run no case and need no directory at all. The
+    directory is created on first use, by `run_writer`'s own `write_run` call."""
     out = config.getoption("--out")
     if out:
         out_dir = Path(out)
     else:
         workerinput = getattr(config, "workerinput", None)
         shared = workerinput.get("wise_dynamics_out_dir") if workerinput else None
-        out_dir = Path(shared) if shared else Path(tempfile.mkdtemp(prefix="wise_dynamics_"))
-    out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = (
+            Path(shared)
+            if shared
+            else Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
+        )
     config._wise_dynamics_out_dir = out_dir
 
 

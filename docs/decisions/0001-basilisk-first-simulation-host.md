@@ -90,8 +90,9 @@ configuration tried; and the integration step, not the model set, is what sets t
 - An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
   same algorithm in C. Acceptable for design iteration; promotion to C++ in WiseGncDesign is the
   path when campaign throughput matters.
-- pytest-xdist, declared by the consumer's test suite, fans cases over workers; campaign speed
-  is set by the integration step and physical cores.
+- pytest-xdist, declared by a consumer's test suite for its campaigns and by this repository's
+  dev group to test the plugin under workers, fans cases over workers; campaign speed is set by
+  the integration step and physical cores.
 - The shipped bskSim examples integrate at 0.1 s. Scenarios here choose their step from the
   problem, not from the example, and state it.
 - A plant that cannot run Python constrains WiseGncDesign: adding Trick would require a C++

@@ -10,6 +10,9 @@ dependencies = [
     "pytest>=9.1.1",
 ]
 
+[project.entry-points.pytest11]
+wisedynamics = "sim.basilisk.pytest_plugin"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

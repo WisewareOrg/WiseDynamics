@@ -16,7 +16,9 @@ def write_run(
 ) -> None:
     """Writes `path` as one HDF5 file: `attrs` at the root (e.g. `case`, `seed`, `producer`,
     `created_utc`, `versions_*`, `draw_<name>`), and one float64 dataset per `arrays` entry
-    (dataset name -> `(data, units)`), each carrying its `units` string as its own attribute."""
+    (dataset name -> `(data, units)`), each carrying its `units` string as its own attribute.
+    Creates `path`'s parent directory if it does not already exist."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(path, "w") as f:
         for name, value in attrs.items():
             f.attrs[name] = value
