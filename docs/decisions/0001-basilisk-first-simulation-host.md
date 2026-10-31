@@ -13,12 +13,13 @@
 
 ## Context
 
-WiseDynamics is the simulation home of a three-repository GNC project. Flight code lives in
-WiseGncDesign and must not depend on any simulation tool. Analysis lives in WiseGncAnalysis and
-reads recorded runs through a data contract, never a simulator's native output. WiseDynamics owns
-every simulation plant, the wrappers that host WiseGncDesign algorithms in each plant, the Monte
-Carlo drivers, and the exporters to the data contract. Which plants it supports is the one trade
-this project has to make, and this ADR makes the first of them.
+WiseDynamics is the simulation home of a two-repository GNC project. WiseGncDesign holds the
+flight GNC algorithms (framework-free, must not depend on any simulation tool), the per-transport
+C&DH partition that hosts a named algorithm on a given simulator, and the analysis package that
+reads a recorded run back and knows nothing about which simulation produced it. WiseDynamics owns
+every simulation plant and the studies that boot a named flight-software instance on each, run
+singly or as a Monte Carlo campaign at scale. Which plants it supports is the one trade this
+project has to make, and this ADR makes the first of them.
 
 The constraints a first plant has to meet:
 
@@ -46,7 +47,7 @@ simulation host, at `sim/basilisk/`.
   nothing algorithmic lives in this repository.
 - A campaign is `pytest -n W --runs N`: cases are parametrized pytest tests, dispersed through
   plain `numpy.random`, run in-process with no clock pacing.
-- Each case writes one HDF5 run file that WiseGncAnalysis's own loader reads directly;
+- Each case writes one HDF5 run file that the analysis package's own loader reads directly;
   Basilisk's own retention format is never read by analysis.
 
 What the evaluation established: the wheels install and import on the development host without a

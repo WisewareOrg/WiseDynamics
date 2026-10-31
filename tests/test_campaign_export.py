@@ -1,7 +1,7 @@
-"""Producer-side check: a small campaign's own exported runs, read back by WiseGncAnalysis's
-own loader rather than a restated assumption about what it expects. Runs 2 cases for a fast
-sanity check; the real CI-sized check is its own explicit `pytest sim/basilisk/scenarios --runs
-8` step (see .github/workflows/checks.yml)."""
+"""Producer-side check: a small campaign's own exported runs, read back by the analysis
+package's own loader (`gnc_analysis.runs`) rather than a restated assumption about what it
+expects. Runs 2 cases for a fast sanity check; the real CI-sized check is its own explicit
+`pytest sim/basilisk/scenarios --runs 8` step (see .github/workflows/checks.yml)."""
 
 import subprocess
 import sys

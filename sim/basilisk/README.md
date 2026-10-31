@@ -4,7 +4,7 @@ Basilisk is a locked dependency (`bsk[all]`) of this repository's uv project, in
 prebuilt wheels. Basilisk is the first simulation host by ADR 0001 rev 2. A study here runs a
 spacecraft configuration with a named flight-software instance, booted through WiseGncDesign's
 C&DH partition (`gnc_cdh.basilisk.make_fsw`); nothing algorithmic, and no host adapter, lives under
-this directory. `gnc-algorithms[basilisk]` is an editable path dependency on a sibling
+this directory. `gnc-algorithms[basilisk,analysis]` is an editable path dependency on a sibling
 `WiseGncDesign` checkout, built fresh from whatever revision sits beside this repository.
 
 ## Layout
@@ -20,7 +20,7 @@ this directory. `gnc-algorithms[basilisk]` is an editable path dependency on a s
   --runs N --out DIR [-n WORKERS]`.
 - `conftest.py` — the campaign's `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft`/`--fsw`
   options and the `plant`/`fsw_name`/`draws` fixtures every study's cases are built from, plus
-  the session-end check of every run against WiseGncAnalysis's own loader.
+  the session-end check of every run against the analysis package's own loader.
 
 ## Exported sensor datasets
 

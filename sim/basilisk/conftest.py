@@ -152,8 +152,9 @@ def _producer_versions() -> dict[str, str]:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Validates the whole campaign directory with WiseGncAnalysis's own loader. Runs once, on
-    the controlling process, not on every pytest-xdist worker."""
+    """Validates the whole campaign directory with the analysis package's own loader
+    (`gnc_analysis.runs`). Runs once, on the controlling process, not on every pytest-xdist
+    worker."""
     config = session.config
     if hasattr(config, "workerinput"):
         return
@@ -168,4 +169,4 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         load_campaign(out_dir)
     except RunDataError as exc:
         session.exitstatus = 1
-        print(f"run export failed WiseGncAnalysis's loader: {exc}")
+        print(f"run export failed gnc_analysis's loader: {exc}")

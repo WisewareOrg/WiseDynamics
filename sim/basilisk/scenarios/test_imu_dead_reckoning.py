@@ -198,8 +198,8 @@ def _write_run(path: Path, msgRecList: dict, case_index: int, draws: Draws) -> N
 
 
 def _assert_run_loads(path: Path) -> None:
-    """Confirms WiseGncAnalysis's own loader reads this run back cleanly; `load_run` raises
-    `RunDataError` naming the file and the problem otherwise."""
+    """Confirms the analysis package's own loader (`gnc_analysis.runs`) reads this run back
+    cleanly; `load_run` raises `RunDataError` naming the file and the problem otherwise."""
     from gnc_analysis.runs import load_run
 
     load_run(path)
@@ -207,7 +207,7 @@ def _assert_run_loads(path: Path) -> None:
 
 def test_case(case_index, plant, fsw_name, draws, duration_s, out_dir) -> None:
     """One Monte Carlo case: boots `fsw_name` onto the already-dispersed `plant` fixture, runs
-    it, writes its `run_<NNNN>.h5`, and checks that WiseGncAnalysis's own loader reads it
+    it, writes its `run_<NNNN>.h5`, and checks that the analysis package's own loader reads it
     back."""
     _algModule, msgRecList = _attach_algorithm_and_recorders(plant, fsw_name)
     execute_scenario(plant.sim, duration_s=duration_s)

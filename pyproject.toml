@@ -1,21 +1,21 @@
 [project]
 name = "wise-dynamics"
 version = "0.1.0"
-description = "Simulation host for Wiseware's GNC work: Basilisk scenarios and the Monte Carlo campaigns run over them, exporting runs the WiseGncAnalysis loader reads."
+description = "Simulation host for Wiseware's GNC work: Basilisk scenarios and the Monte Carlo campaigns run over them, exporting runs the analysis package's loader reads."
 requires-python = ">=3.12"
 dependencies = [
     "bsk[all]",
     "numpy",
     "h5py",
-    "gnc-algorithms[basilisk]",
+    "gnc-algorithms[basilisk,analysis]",
 ]
 
 [tool.uv.sources]
-# WiseGncDesign and WiseGncAnalysis are sibling checkouts (see README.md): editable path
-# dependencies, not pins, so WiseDynamics always builds against whatever revision of each is
-# checked out there.
+# WiseGncDesign is a sibling checkout (see README.md): an editable path dependency, not a pin,
+# so WiseDynamics always builds against whatever revision is checked out there. The analysis
+# and basilisk extras above both resolve against this same checkout, which carries gnc_cdh,
+# gnc_algorithms and gnc_analysis together.
 gnc-algorithms = { path = "../WiseGncDesign", editable = true }
-gnc-analysis = { path = "../WiseGncAnalysis", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -29,9 +29,6 @@ dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.6",
     "ruff>=0.17.0",
-    # gnc-analysis: a dev-only dependency so an exported run can be checked against
-    # WiseGncAnalysis's own loader, not a restated assumption about what it reads.
-    "gnc-analysis",
 ]
 
 [tool.pytest.ini_options]
