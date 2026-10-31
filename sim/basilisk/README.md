@@ -26,6 +26,17 @@ plants pins a tagged release of this repository.
   draws alongside the generic root attrs and writing `run_<NNNN>.h5` via `runs.py`). A consumer
   parametrizes its own test over `case_index` and builds its own flight-software module.
 
+## Interface
+
+The stable surface a consumer's own host adapter codes against, pinned by
+`tests/test_interface.py`:
+
+- `readers()` returns role `imu`.
+- `truth_messages()` returns roles `truth` and `imu`.
+- `initial_state()` returns exactly `sigma0_BN`, `r0_N`, `v0_N`, `omega0_BN_B`.
+- `run_case(plant, fsw_module, fsw_outputs, duration_s, record_s=10.0)` (`run.py`).
+- `write_run(path, arrays, attrs)` (`runs.py`).
+
 ## The IMU reader
 
 `plant.readers()["imu"]` is an `IMUSensorMsgReader` on the plant's `imuSensor`, reporting the

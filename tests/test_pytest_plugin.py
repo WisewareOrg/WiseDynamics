@@ -1,8 +1,9 @@
 """Checks `sim.basilisk.pytest_plugin`: its own provenance helper reads this package's installed
 version from distribution metadata; a 2-case campaign run through its fixtures, with a stub
 flight-software module, writes one run file per case, each carrying its own draws and its own
-distinct sensor noise; a campaign fanned over workers shares one output directory; and a session
-with no case creates none at all."""
+distinct sensor noise; a campaign fanned over workers shares one output directory; a campaign
+still runs where pytest-xdist is absent; and a session with no case creates no directory at
+all."""
 
 import textwrap
 from importlib.metadata import version as pkg_version
@@ -113,6 +114,20 @@ def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, mo
     assert len(run_files) == 2
     out_dirs = {path.parent for path in run_files}
     assert len(out_dirs) == 1, f"run files scattered across directories: {out_dirs}"
+
+
+def test_campaign_runs_with_xdist_absent(pytester):
+    """`-p no:xdist` leaves xdist's own hookspecs unregistered -- the same state as xdist not
+    being installed at all. Loaded via the `pytest11` entry point, this plugin configures that
+    session regardless, so its `pytest_configure_node` (an xdist hookimpl with no matching
+    hookspec there) must not make pytest itself refuse to start."""
+    pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
+
+    out_dir = pytester.path / "out"
+    result = pytester.runpytest_subprocess("-p", "no:xdist", "--runs", "1", "--out", str(out_dir))
+
+    result.assert_outcomes(passed=1)
+    assert len(list(out_dir.glob("run_*.h5"))) == 1
 
 
 def test_a_session_with_no_case_creates_no_out_dir(pytester, monkeypatch):

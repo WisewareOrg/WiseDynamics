@@ -52,12 +52,15 @@ def pytest_configure(config: pytest.Config) -> None:
     config._wise_dynamics_out_dir = out_dir
 
 
+@pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
     """pytest-xdist's own controller-side hook, called once per worker before it starts: hands
     the worker the controller's already-resolved `out_dir`, so every worker in a campaign writes
     to the one directory the controller picked -- with or without `--out` -- rather than each
-    worker falling back to its own `mkdtemp`. Never called outside xdist; this plugin depends on
-    neither xdist nor its presence."""
+    worker falling back to its own `mkdtemp`. `optionalhook=True`: xdist defines this hook's
+    spec, and loads this plugin into every session of a consumer that has `wise-dynamics`
+    installed, with or without xdist present. Without it, pytest's plugin validation would
+    reject this hookimpl as unknown wherever xdist's hookspec is not registered."""
     node.workerinput["wise_dynamics_out_dir"] = str(node.config._wise_dynamics_out_dir)
 
 
