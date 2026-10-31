@@ -2,10 +2,12 @@
 the untested Python-module-in-a-Monte-Carlo-worker pattern over 4 runs. If the Monte Carlo step
 fails for pickling or import reasons, that is reported rather than worked around."""
 
+import json
+
 import numpy as np
 from gnc_algorithms.mrp import angle, subtract
 
-from sim.basilisk.campaigns.imu_dead_reckoning_mc import build_controller
+from sim.basilisk.campaigns.imu_dead_reckoning_mc import build_controller, export_campaign
 from sim.basilisk.scenarios.imu_dead_reckoning import run
 
 
@@ -41,3 +43,9 @@ def test_four_run_monte_carlo_through_controller_has_zero_failures(tmp_path):
     failures = controller.executeSimulations()
 
     assert failures == [], f"Monte Carlo smoke run had failures: {failures}"
+
+    export_campaign(controller, 4, tmp_path / "mc_smoke_export")
+    manifest = json.loads((tmp_path / "mc_smoke_export" / "manifest.json").read_text())
+    versions = manifest["versions"]
+    assert set(versions) >= {"bsk", "gnc-algorithms", "wise-dynamics"}
+    assert all(versions[key] for key in ("bsk", "gnc-algorithms", "wise-dynamics"))

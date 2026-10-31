@@ -11,13 +11,21 @@ normal perturbation of an attitude MRP around its nominal value) -- with a stand
 0.01 per axis, chosen to be small relative to the ~0.1-0.3 nominal components (the same
 small-fraction-of-nominal proportion as that shipped example's own MRP dispersion). This magnitude
 is a judgment call, not something the spec states; flagged for review.
+
+`manifest.json` carries a top-level `versions` key (bsk, gnc-algorithms, wise-dynamics) tracing
+the campaign back to the code that produced it; WiseGncAnalysis's contract check at commit
+fcb4c38 ignores unknown top-level manifest keys, confirmed by running it against a manifest
+carrying this key.
 """
 
 import argparse
 import ast
 import json
 import multiprocessing
+import subprocess
 from datetime import UTC, datetime
+from importlib.metadata import distribution
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 import pandas as pd
@@ -126,6 +134,30 @@ def _split_parameters(params: dict) -> tuple[dict, dict]:
     return seeds, dispersions
 
 
+def _producer_versions() -> dict[str, str]:
+    """The versions that produced this campaign: the installed `bsk` version, the exact
+    `gnc-algorithms` git commit resolved by the lock, and this repository's own `git describe`,
+    for tracing a manifest back to the code that made it."""
+    gnc_direct_url = json.loads(distribution("gnc-algorithms").read_text("direct_url.json"))
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        wise_dynamics_rev = subprocess.run(
+            ["git", "describe", "--always", "--dirty"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        wise_dynamics_rev = "unknown"
+
+    return {
+        "bsk": pkg_version("bsk"),
+        "gnc-algorithms": gnc_direct_url["vcs_info"]["commit_id"],
+        "wise-dynamics": wise_dynamics_rev,
+    }
+
+
 def export_campaign(controller: Controller, num_runs: int, out_dir: Path) -> None:
     """Post-campaign pass (parent process, serial): reads each run's retained data and archived
     parameters back off disk and writes contract v0's `run_<NNNN>.csv` + `manifest.json`."""
@@ -149,6 +181,7 @@ def export_campaign(controller: Controller, num_runs: int, out_dir: Path) -> Non
         "contract_version": 0,
         "producer": "WiseDynamics sim/basilisk/campaigns/imu_dead_reckoning_mc.py",
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "versions": _producer_versions(),
         "runs": manifest_runs,
     }
     with open(out_dir / "manifest.json", "w") as f:
