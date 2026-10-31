@@ -40,6 +40,12 @@ ACCEL_NOISE_STD_DEFAULT = 5e-5  # m/s^2, per-sample 1-sigma on PMatrixAccel
 
 DYNAMICS_STEP_S = 1.0  # s, dynamics/sensor/algorithm step
 
+# This model's standard per-case dispersion widths, 1-sigma per axis.
+MRP_DISPERSION_STD = 0.01  # -
+RATE_DISPERSION_STD = 0.2 * macros.D2R  # rad/s
+GYRO_BIAS_DISPERSION_STD = 1e-4  # rad/s
+ACCEL_BIAS_DISPERSION_STD = 1e-4  # m/s^2
+
 
 def _col(v: np.ndarray) -> list[list[float]]:
     """Converts a 3-vector to Basilisk's column-vector list form `[[x], [y], [z]]`."""
@@ -118,8 +124,8 @@ class ImuSpacecraftModel:
         sim.AddModelToTask(task_name, self.imuObject)
 
     def readers(self) -> dict[str, Any]:
-        """This plant's sensor messages by role, each reader already subscribed, for a C&DH
-        host adapter to read from."""
+        """This plant's sensor messages by role, each reader already subscribed, for a flight-
+        software module to read from."""
         imu_reader = messaging.IMUSensorMsgReader()
         imu_reader.subscribeTo(self.imuObject.sensorOutMsg)
         return {"imu": imu_reader}
@@ -134,4 +140,16 @@ class ImuSpacecraftModel:
             "r0_N": np.array(self.scObject.hub.r_CN_NInit, dtype=float).flatten(),
             "v0_N": np.array(self.scObject.hub.v_CN_NInit, dtype=float).flatten(),
             "omega0_BN_B": np.array(self.scObject.hub.omega_BN_BInit, dtype=float).flatten(),
+        }
+
+    @staticmethod
+    def default_draws(rng: np.random.Generator) -> dict[str, np.ndarray]:
+        """This model's standard per-case dispersion: `sigma0_BN`, `omega0_BN_B`, `gyro_bias`,
+        `accel_bias`, each perturbed normally around its own default by `rng`. The returned
+        dict is this model's own constructor keyword arguments."""
+        return {
+            "sigma0_BN": SIGMA0_BN_DEFAULT + rng.normal(0.0, MRP_DISPERSION_STD, size=3),
+            "omega0_BN_B": OMEGA0_BN_B_DEFAULT + rng.normal(0.0, RATE_DISPERSION_STD, size=3),
+            "gyro_bias": GYRO_BIAS_DEFAULT + rng.normal(0.0, GYRO_BIAS_DISPERSION_STD, size=3),
+            "accel_bias": ACCEL_BIAS_DEFAULT + rng.normal(0.0, ACCEL_BIAS_DISPERSION_STD, size=3),
         }

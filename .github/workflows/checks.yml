@@ -4,7 +4,7 @@ name: checks
 # citation pins its ADR's current rev. ruff/pytest: the uv project's own lint and test suite.
 # None of these are required-status-check contexts (repository-floor.yml names only
 # check-branch, pr-title and repo-floor); these are the repo's own invariant gates, same pinned
-# wise-ci/setup-uv actions WiseGncDesign's checks.yml and WiseKiosk's docs-and-hygiene job run.
+# wise-ci/setup-uv actions used elsewhere in the organisation.
 on:
   push:
     branches: [main]
@@ -33,31 +33,17 @@ jobs:
     name: ruff
     runs-on: ubuntu-latest
     steps:
-      # WiseGncDesign is checked out as a sibling directory (see README.md):
-      # gnc-algorithms[basilisk,analysis] is an editable path dependency on it, not a pinned
-      # source. Needed here, not just for pytest: `uv sync --locked` resolves the whole
-      # lockfile, including the dev group, for either job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: WiseDynamics
-          persist-credentials: false
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: WisewareOrg/WiseGncDesign
-          path: WiseGncDesign
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.6"
 
-      - working-directory: WiseDynamics
-        run: uv sync --locked
-      - working-directory: WiseDynamics
-        run: uv run ruff check .
-      - working-directory: WiseDynamics
-        run: uv run ruff format --check .
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   pytest:
     name: pytest
@@ -65,25 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: WiseDynamics
-          persist-credentials: false
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: WisewareOrg/WiseGncDesign
-          path: WiseGncDesign
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.6"
 
-      # The scenario is SPICE-free, so no support-data download is needed.
-      - working-directory: WiseDynamics
-        run: uv sync --locked
-      - working-directory: WiseDynamics
-        run: uv run pytest
-      # testpaths restricts the step above to tests/; sim/basilisk/scenarios is a separate,
-      # explicit invocation that exercises its own conftest.py options.
-      - working-directory: WiseDynamics
-        run: uv run pytest sim/basilisk/scenarios -n 4 --runs 8 --out campaign-out
+      - run: uv sync --locked
+      - run: uv run pytest

@@ -1,21 +1,14 @@
 [project]
 name = "wise-dynamics"
 version = "0.1.0"
-description = "Simulation host for Wiseware's GNC work: Basilisk scenarios and the Monte Carlo campaigns run over them, exporting runs the analysis package's loader reads."
+description = "A reusable Basilisk plant library: static spacecraft/sensor models, a one-case runner, a §2 HDF5 run writer, and a pytest plugin exposing Monte Carlo options and fixtures, with no flight-software dependency."
 requires-python = ">=3.12"
 dependencies = [
     "bsk[all]",
     "numpy",
     "h5py",
-    "gnc-algorithms[basilisk,analysis]",
+    "pytest>=9.1.1",
 ]
-
-[tool.uv.sources]
-# WiseGncDesign is a sibling checkout (see README.md): an editable path dependency, not a pin,
-# so WiseDynamics always builds against whatever revision is checked out there. The analysis
-# and basilisk extras above both resolve against this same checkout, which carries gnc_cdh,
-# gnc_algorithms and gnc_analysis together.
-gnc-algorithms = { path = "../WiseGncDesign", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -26,8 +19,6 @@ packages = ["sim"]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-xdist>=3.6",
     "ruff>=0.17.0",
 ]
 

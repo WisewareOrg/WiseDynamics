@@ -1,0 +1,7 @@
+{
+  "_bsk_version": "2.12.1",
+  "_description": "ImuSpacecraftModel truth trajectory at t=300s, zero sensor noise, default parameters, run through sim.basilisk.run.run_case with tests.stubs.StubFsw. Updating this file is a deliberate act, recorded in the PR that updates it, not something to do reflexively to make tests/test_golden_trajectory.py pass.",
+  "r_N": [-3791548.9714695853, 3043678.8131726617, 4855219.517842722],
+  "v_N": [-4922.513993601087, -5808.376106434565, -201.855234027071],
+  "sigma_BN": [0.5180898662149908, -0.3902932496115714, 0.1138155528903499]
+}

@@ -2,10 +2,16 @@
 
 **Status:** accepted
 **Decided:** 2026-10-31 (issue #1 evaluation on the development host)
-**Rev:** 2
+**Rev:** 3
 
 ## Revisions
 
+- **rev 3** — 2026-10-31 — WiseDynamics is a library with no dependency on any flight software:
+  static plant models, a one-case runner, a run writer, and a pytest plugin exposing Monte Carlo
+  options and fixtures. A scenario or campaign that boots a named flight-software instance lives
+  with the flight software it tests, in the repository that owns that software, which pins a
+  tagged release of this one (#6 add the Basilisk IMU dead-reckoning scenario and 852-run
+  campaign).
 - **rev 2** — 2026-10-31 — campaigns are parametrized pytests, runs are per-run HDF5 files read
   by the analysis loader, the algorithm is hosted through the flight repo's C&DH partition (#6
   add the Basilisk IMU dead-reckoning scenario and 852-run campaign).
@@ -13,13 +19,13 @@
 
 ## Context
 
-WiseDynamics is the simulation home of a two-repository GNC project. WiseGncDesign holds the
-flight GNC algorithms (framework-free, must not depend on any simulation tool), the per-transport
-C&DH partition that hosts a named algorithm on a given simulator, and the analysis package that
-reads a recorded run back and knows nothing about which simulation produced it. WiseDynamics owns
-every simulation plant and the studies that boot a named flight-software instance on each, run
-singly or as a Monte Carlo campaign at scale. Which plants it supports is the one trade this
-project has to make, and this ADR makes the first of them.
+WiseDynamics is a plant library for Wiseware's GNC work, depending on no flight software: a
+consumer that hosts a named algorithm against one of its plants pins a tagged release of this
+repository rather than this repository depending on that consumer. WiseDynamics owns every
+simulation plant and the generic running/exporting mechanics (a one-case runner, a run writer, a
+pytest plugin for Monte Carlo options and fixtures); a scenario or campaign that boots a named
+flight-software instance lives with the flight software it tests. Which plants it supports is the
+one trade this project has to make, and this ADR makes the first of them.
 
 The constraints a first plant has to meet:
 
@@ -42,13 +48,16 @@ simulation host, at `sim/basilisk/`.
 
 - Installed from prebuilt wheels as a locked dependency (`bsk[all]`) of this repository's uv
   project, the organisation's Python dependency manager. Never built from source here.
-- Scenarios are Python scripts. Each boots a named flight-software instance against a
-  spacecraft plant, through a host adapter that lives in WiseGncDesign's C&DH partition;
-  nothing algorithmic lives in this repository.
-- A campaign is `pytest -n W --runs N`: cases are parametrized pytest tests, dispersed through
-  plain `numpy.random`, run in-process with no clock pacing.
-- Each case writes one HDF5 run file that the analysis package's own loader reads directly;
-  Basilisk's own retention format is never read by analysis.
+- `sim/basilisk/models/` holds static plant models (a spacecraft hub, its gravity, its sensors);
+  `sim/basilisk/run.py::run_case` adds any flight-software module a consumer builds to a plant's
+  task and records it; neither knows about, nor depends on, any particular algorithm.
+- `sim/basilisk/pytest_plugin.py` is a pytest plugin, loaded by a consumer's own `conftest.py`
+  (`pytest_plugins = [...]`): `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft` options and
+  `plant`/`draws`/`run_writer` fixtures, dispersed through plain `numpy.random`, run in-process
+  with no clock pacing. A campaign is `pytest -n W --runs N` in the consumer's own test suite.
+- `sim/basilisk/runs.py::write_run` writes one HDF5 run file per SPEC-demo.md §2's layout, given
+  whatever arrays and attrs the caller supplies; Basilisk's own retention format is never read
+  by analysis.
 
 What the evaluation established: the wheels install and import on the development host without a
 source build; a controller written as a Basilisk Python module runs inside the step loop alongside C
