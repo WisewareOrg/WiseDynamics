@@ -2,19 +2,14 @@
 
 **Status:** accepted
 **Decided:** 2026-10-31 (issue #1 evaluation on the development host)
-**Rev:** 3
+**Rev:** 2
 
 ## Revisions
 
-- **rev 3** — 2026-10-31 — WiseDynamics is a library with no dependency on any flight software:
-  static plant models, a one-case runner, a run writer, and a pytest plugin exposing Monte Carlo
-  options and fixtures. A scenario or campaign that boots a named flight-software instance lives
-  with the flight software it tests, in the repository that owns that software, which pins a
-  tagged release of this one (#6 add the Basilisk IMU dead-reckoning scenario and 852-run
-  campaign).
-- **rev 2** — 2026-10-31 — campaigns are parametrized pytests, runs are per-run HDF5 files read
-  by the analysis loader, the algorithm is hosted through the flight repo's C&DH partition (#6
-  add the Basilisk IMU dead-reckoning scenario and 852-run campaign).
+- **rev 2** — 2026-10-31 — the sim is a library of plant models, a one-case runner, a run
+  writer and a pytest plugin that depends on no flight software; consumers pin a tagged
+  release; scenarios and campaigns live with the flight software they test (#6 add the Basilisk
+  IMU dead-reckoning scenario and 852-run campaign).
 - **rev 1** — 2026-10-31 — first written (#1 adopt Basilisk as the first simulation host).
 
 ## Context

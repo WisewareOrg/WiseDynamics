@@ -19,6 +19,6 @@ DIR [-n WORKERS]`.
 ## Layout
 
 - `sim/basilisk/` — the Basilisk simulation host, the first plant
-  ([ADR 0001 rev 3](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
+  ([ADR 0001 rev 2](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
 - `sim/<host>/` — a future simulation host, as a sibling directory.
 - `docs/decisions/` — this repository's ADRs.
