@@ -1,11 +1,11 @@
 """A pytest plugin exposing Monte Carlo campaign options and fixtures over this repository's
 plant models, registered via this package's own `pytest11` entry point: installing
-`wise-dynamics` is enough for pytest to load it. A consumer's own `pytest_plugins` must not also
-name `sim.basilisk.pytest_plugin` -- the same module registered under two names is a pluggy
-`ValueError`, not a no-op. A consumer parametrizes a test over `case_index` to get one call per
-`--sim-runs` case, and builds its own flight-software module against the `plant` fixture's
-`readers()`/`initial_state()`/`mu`. Options are namespaced `--sim-*` so an autoloaded plugin
-cannot collide with a consumer's own option of the same short name."""
+`wise-dynamics` loads it. Listing it again in a consumer's own `pytest_plugins` makes pytest
+raise "Plugin already registered under a different name". A consumer parametrizes a test over
+`case_index` to get one call per `--sim-runs` case, and builds its own flight-software module
+against the `plant` fixture's `readers()`/`initial_state()`/`mu`. Options are namespaced
+`--sim-*` so an autoloaded plugin cannot collide with a consumer's own option of the same short
+name."""
 
 import json
 import secrets

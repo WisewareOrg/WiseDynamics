@@ -19,9 +19,9 @@ plants pins a tagged release of this repository.
   of float64 datasets, each carrying a `units` attribute — from whatever dataset/attr names the
   caller supplies, creating `path`'s parent directory on first write if it does not exist yet.
 - `pytest_plugin.py` — a pytest plugin registered via this package's own `pytest11` entry point:
-  installing `wise-dynamics` is enough for pytest to load it. A consumer's own `pytest_plugins`
-  must not also name `sim.basilisk.pytest_plugin` -- pytest refuses the same module registered
-  under two names. `--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft`
+  installing `wise-dynamics` loads it. Listing it again in a consumer's own `pytest_plugins`
+  makes pytest raise "Plugin already registered under a different name".
+  `--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft`
   options (namespaced so an autoloaded plugin cannot collide with a consumer's own option of the
   same short name), and `plant`/`draws`/`run_writer` fixtures (the named plant, built with its
   standard per-case draws, each case keyed off an independent child of the campaign seed; a

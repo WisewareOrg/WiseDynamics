@@ -11,8 +11,9 @@ Each host directory provides static plant models, a one-case runner, a run write
 layout a consumer's analysis reads, and a pytest plugin exposing Monte Carlo options and
 fixtures (`--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft`;
 `plant`/`draws`/`run_writer`). Installing the package registers the plugin with pytest
-automatically, via its own `pytest11` entry point -- a consumer's `pytest_plugins` must not also
-name it. A consumer builds its own flight-software module against the `plant` fixture's
+automatically, via its own `pytest11` entry point. Listing it again in a consumer's own
+`pytest_plugins` makes pytest raise "Plugin already registered under a different name". A
+consumer builds its own flight-software module against the `plant` fixture's
 `readers()`/`initial_state()`/`mu`, and owns its own scenario and campaign tests. A campaign is
 that consumer's own test run at scale: `pytest <its scenario path> --sim-runs N --sim-out DIR
 [-n WORKERS]`.
