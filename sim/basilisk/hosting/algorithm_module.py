@@ -84,6 +84,8 @@ class AlgorithmModule(sysModel.SysModel):
                 )
 
         for fm in self.output_map:
+            if fm.frame is not None:
+                raise ValueError(f"frame transforms apply only to input maps, got {fm!r}")
             output_name, _, field_name = fm.dst.partition(".")
             if not field_name:
                 raise ValueError(

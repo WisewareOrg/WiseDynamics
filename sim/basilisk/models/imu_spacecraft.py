@@ -30,8 +30,11 @@ OMEGA0_BN_B_DEFAULT = np.array([1.0, 1.0, 1.0]) * macros.D2R  # rad/s per axis
 # the constant bias, zero correlation across axes).
 GYRO_BIAS_DEFAULT = np.array([1e-4, -2e-4, 5e-5])  # rad/s
 ACCEL_BIAS_DEFAULT = np.array([1e-4, -5e-5, 2e-4])  # m/s^2
-GYRO_NOISE_PSD_DEFAULT = 1e-12  # (rad/s)^2 * s, diagonal PMatrixGyro
-ACCEL_NOISE_PSD_DEFAULT = 1e-10  # (m/s^2)^2 * s, diagonal PMatrixAccel
+# PMatrixGyro/PMatrixAccel set the per-sample 1-sigma white-noise amplitude directly: with
+# AMatrixGyro/AMatrixAccel at their zero default, Basilisk's IMU applies no propagation, so the
+# diagonal is a standard deviation in the sensor's own units, not a power spectral density.
+GYRO_NOISE_STD_DEFAULT = 1e-12  # rad/s, per-sample 1-sigma
+ACCEL_NOISE_STD_DEFAULT = 1e-10  # m/s^2, per-sample 1-sigma
 
 DYNAMICS_STEP_S = 1.0  # s, dynamics/sensor/algorithm step
 
@@ -64,8 +67,8 @@ class ImuSpacecraftModel:
         omega0_BN_B: np.ndarray = OMEGA0_BN_B_DEFAULT,
         gyro_bias: np.ndarray = GYRO_BIAS_DEFAULT,
         accel_bias: np.ndarray = ACCEL_BIAS_DEFAULT,
-        gyro_noise_psd: float = GYRO_NOISE_PSD_DEFAULT,
-        accel_noise_psd: float = ACCEL_NOISE_PSD_DEFAULT,
+        gyro_noise_std: float = GYRO_NOISE_STD_DEFAULT,
+        accel_noise_std: float = ACCEL_NOISE_STD_DEFAULT,
     ) -> None:
         self.sim = sim
         self.task_name = task_name
@@ -108,8 +111,8 @@ class ImuSpacecraftModel:
         self.imuObject.sensorPos_B = [[0.0], [0.0], [0.0]]
         self.imuObject.senRotBias = _col(gyro_bias)
         self.imuObject.senTransBias = _col(accel_bias)
-        self.imuObject.PMatrixGyro = (gyro_noise_psd * np.eye(3)).tolist()
-        self.imuObject.PMatrixAccel = (accel_noise_psd * np.eye(3)).tolist()
+        self.imuObject.PMatrixGyro = (gyro_noise_std * np.eye(3)).tolist()
+        self.imuObject.PMatrixAccel = (accel_noise_std * np.eye(3)).tolist()
         sim.AddModelToTask(task_name, self.imuObject)
 
 
