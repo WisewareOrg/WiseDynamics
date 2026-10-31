@@ -114,9 +114,9 @@ def plant(
 
 def _wise_dynamics_version() -> str:
     """This package's own installed version, read from its distribution metadata: a tagged-
-    release consumer then always gets this package's version, never the consumer's own commit.
-    Appends the pinned commit from the install's `direct_url.json` when one is recorded (a VCS
-    install); a local or ordinary wheel install has none, and the plain version is returned."""
+    release consumer always gets this package's own version this way. Appends the pinned commit
+    from the install's `direct_url.json` when one is recorded (a VCS install); a local or
+    ordinary wheel install has none, and the plain version is returned."""
     try:
         dist = distribution("wise-dynamics")
     except PackageNotFoundError:

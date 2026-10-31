@@ -7,8 +7,8 @@ from Basilisk.utilities import macros
 
 
 class Plant(Protocol):
-    """The interface `run_case` needs from a plant: any class with these attributes and
-    methods works, not only `ImuSpacecraftModel`."""
+    """The interface `run_case` needs from a plant: any class providing these attributes and
+    methods works, `ImuSpacecraftModel` among them."""
 
     sim: Any
     task_name: str
