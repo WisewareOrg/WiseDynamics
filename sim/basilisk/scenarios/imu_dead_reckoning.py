@@ -1,7 +1,8 @@
 """One IMU on a tumbling spacecraft in a 500 km LEO orbit: gyro rates integrated to attitude
 (MRP) and the accelerometer, rotated by that attitude, integrated to position/velocity against a
 point-mass gravity model, by WiseGncDesign's ``ImuDeadReckoner`` (dead reckoning only, no
-correction). See docs/decisions/0001-basilisk-first-simulation-host.md.
+correction), hosted by the generic ``AlgorithmModule`` on the reusable ``ImuSpacecraftModel``
+dynamics stack. See docs/decisions/0001-basilisk-first-simulation-host.md.
 
 ``imuSensor.AccelPlatform`` reports non-gravitational specific force only: confirmed empirically
 (2026-10-31) by running this orbit with zero sensor bias/noise and observing ``AccelPlatform``
@@ -13,48 +14,22 @@ by reading the module source directly.
 from dataclasses import dataclass
 
 import numpy as np
-from Basilisk.architecture import messaging, sysModel
-from Basilisk.simulation import imuSensor, spacecraft
-from Basilisk.utilities import (
-    SimulationBaseClass,
-    macros,
-    orbitalMotion,
-    simHelpers,
-    simIncludeGravBody,
+from Basilisk.architecture import messaging
+from Basilisk.utilities import SimulationBaseClass, macros
+from gnc_algorithms.imu_dead_reckoning import ImuDeadReckoner, ImuSample
+
+from sim.basilisk.hosting.algorithm_module import AlgorithmModule, FieldMap, hub_initial_state
+from sim.basilisk.models.imu_spacecraft import (
+    ACCEL_BIAS_DEFAULT,
+    DYNAMICS_STEP_S,
+    GYRO_BIAS_DEFAULT,
+    OMEGA0_BN_B_DEFAULT,
+    SIGMA0_BN_DEFAULT,
+    ImuSpacecraftModel,
 )
-from gnc_algorithms.imu_dead_reckoning import DeadReckoningState, ImuDeadReckoner, ImuSample
 
-# Orbit: 500 km circular LEO at 45 deg inclination (classical elements, Earth point-mass gravity).
-ORBIT_A = 6871.0e3  # m
-ORBIT_E = 0.0001  # -
-ORBIT_I = 45.0 * macros.D2R  # rad
-ORBIT_OMEGA_CAP = 48.2 * macros.D2R  # rad, right ascension of ascending node
-ORBIT_OMEGA_LOW = 347.8 * macros.D2R  # rad, argument of periapsis
-ORBIT_F = 85.3 * macros.D2R  # rad, true anomaly
-
-# Rigid hub.
-HUB_MASS = 750.0  # kg
-HUB_INERTIA = [900.0, 0.0, 0.0, 0.0, 800.0, 0.0, 0.0, 0.0, 600.0]  # kg*m^2, diagonal
-
-# Tumble defaults.
-SIGMA0_BN_DEFAULT = np.array([0.1, 0.2, -0.3])  # -, MRP
-OMEGA0_BN_B_DEFAULT = np.array([1.0, 1.0, 1.0]) * macros.D2R  # rad/s per axis
-
-# IMU error model defaults (applied to the identity-mounted sensor; modest white noise on top of
-# the constant bias, zero correlation across axes).
-GYRO_BIAS_DEFAULT = np.array([1e-4, -2e-4, 5e-5])  # rad/s
-ACCEL_BIAS_DEFAULT = np.array([1e-4, -5e-5, 2e-4])  # m/s^2
-GYRO_NOISE_PSD_DEFAULT = 1e-12  # (rad/s)^2 * s, diagonal PMatrixGyro
-ACCEL_NOISE_PSD_DEFAULT = 1e-10  # (m/s^2)^2 * s, diagonal PMatrixAccel
-
-DYNAMICS_STEP_S = 1.0  # s, dynamics/sensor/algorithm step
 ORBIT_DURATION_S = 5700.0  # s, one orbit
 RECORDER_RATE_S = 10.0  # s
-
-
-def _col(v: np.ndarray) -> list[list[float]]:
-    """Converts a 3-vector to Basilisk's column-vector list form `[[x], [y], [z]]`."""
-    return [[float(x)] for x in v]
 
 
 @dataclass
@@ -73,60 +48,6 @@ class ScenarioResult:
     accel_B: np.ndarray
 
 
-class DeadReckoningModule(sysModel.SysModel):
-    """Basilisk Python module wrapping `ImuDeadReckoner`: reads the IMU output message (platform
-    frame), maps platform to body with the sensor's mounting DCM, steps the algorithm, and writes
-    the resulting attitude/position/velocity estimate as a `NavAttMsgPayload` /
-    `NavTransMsgPayload`. Initial state is read from the live spacecraft hub at `Reset()` time (not
-    captured at construction) so a Monte Carlo run that disperses the hub's initial condition
-    starts the reckoner aligned with that run's actual, dispersed truth."""
-
-    def __init__(self, scObject: spacecraft.Spacecraft, dcm_PB: np.ndarray, mu: float) -> None:
-        super().__init__()
-        self.scObject = scObject
-        self.dcm_PB = np.array(dcm_PB, dtype=float)
-        self.mu = mu
-        self._reckoner: ImuDeadReckoner | None = None
-        self.gyroInMsg = messaging.IMUSensorMsgReader()
-        self.navAttOutMsg = messaging.NavAttMsg()
-        self.navTransOutMsg = messaging.NavTransMsg()
-
-    def Reset(self, CurrentSimNanos: int) -> None:
-        t0 = CurrentSimNanos * macros.NANO2SEC
-        sigma0_BN = np.array(self.scObject.hub.sigma_BNInit, dtype=float).flatten()
-        r0_N = np.array(self.scObject.hub.r_CN_NInit, dtype=float).flatten()
-        v0_N = np.array(self.scObject.hub.v_CN_NInit, dtype=float).flatten()
-        self._reckoner = ImuDeadReckoner(sigma0_BN, r0_N, v0_N, t0, self.mu)
-        self._write_estimate(self._reckoner.state, CurrentSimNanos)
-
-    def UpdateState(self, CurrentSimNanos: int) -> None:
-        t = CurrentSimNanos * macros.NANO2SEC
-        if not t > self._reckoner.state.t:
-            # Basilisk calls UpdateState once at the same sim time as Reset (dt == 0); the
-            # reckoner already holds the correct (truth-aligned) state for that instant, so
-            # there is nothing to step yet.
-            return
-
-        buf = self.gyroInMsg()
-        omega_P = np.array(buf.AngVelPlatform, dtype=float)
-        accel_P = np.array(buf.AccelPlatform, dtype=float)
-        omega_B = self.dcm_PB.T @ omega_P
-        accel_B = self.dcm_PB.T @ accel_P
-
-        state = self._reckoner.step(ImuSample(t=t, omega_B=omega_B, accel_B=accel_B))
-        self._write_estimate(state, CurrentSimNanos)
-
-    def _write_estimate(self, state: DeadReckoningState, CurrentSimNanos: int) -> None:
-        attOut = messaging.NavAttMsgPayload()
-        attOut.sigma_BN = state.sigma_BN.tolist()
-        self.navAttOutMsg.write(attOut, CurrentSimNanos, self.moduleID)
-
-        transOut = messaging.NavTransMsgPayload()
-        transOut.r_BN_N = state.r_N.tolist()
-        transOut.v_BN_N = state.v_N.tolist()
-        self.navTransOutMsg.write(transOut, CurrentSimNanos, self.moduleID)
-
-
 def create_scenario(
     sigma0_BN: np.ndarray = SIGMA0_BN_DEFAULT,
     omega0_BN_B: np.ndarray = OMEGA0_BN_B_DEFAULT,
@@ -134,75 +55,67 @@ def create_scenario(
     accel_bias: np.ndarray = ACCEL_BIAS_DEFAULT,
     step_s: float = DYNAMICS_STEP_S,
 ) -> SimulationBaseClass.SimBaseClass:
-    """Builds the scenario (spacecraft, gravity, IMU, dead-reckoning module) but does not run it.
-    Every object dispersions or retention need to reach is stored as an attribute of the returned
-    `SimBaseClass`, per the Basilisk Monte Carlo `Controller` convention (both so dotted-path
-    dispersions can address them and so Python does not garbage-collect C++-wrapped objects out
-    from under the running sim)."""
-    simTaskName = "simTask"
-    simProcessName = "simProcess"
-
+    """Builds the scenario (the `ImuSpacecraftModel` dynamics stack plus a dead-reckoning
+    `AlgorithmModule`) but does not run it. Every object dispersions or retention need to reach
+    is stored as an attribute of the returned `SimBaseClass`, per the Basilisk Monte Carlo
+    `Controller` convention (both so dotted-path dispersions can address them and so Python does
+    not garbage-collect C++-wrapped objects out from under the running sim)."""
     scSim = SimulationBaseClass.SimBaseClass()
-    scSim.dynProcess = scSim.CreateNewProcess(simProcessName)
-    simulationTimeStep = macros.sec2nano(step_s)
-    scSim.dynProcess.addTask(scSim.CreateNewTask(simTaskName, simulationTimeStep))
 
-    # Rigid hub, no effectors, no control.
-    scSim.scObject = spacecraft.Spacecraft()
-    scSim.scObject.ModelTag = "bsk-Sat"
-    scSim.scObject.hub.mHub = HUB_MASS
-    scSim.scObject.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
-    scSim.scObject.hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(HUB_INERTIA)
-    scSim.scObject.hub.sigma_BNInit = _col(sigma0_BN)
-    scSim.scObject.hub.omega_BN_BInit = _col(omega0_BN_B)
-    scSim.AddModelToTask(simTaskName, scSim.scObject)
-
-    # Earth as a point mass, no SPICE.
-    scSim.gravFactory = simIncludeGravBody.gravBodyFactory()
-    scSim.earth = scSim.gravFactory.createEarth()
-    scSim.earth.isCentralBody = True
-    scSim.gravFactory.addBodiesTo(scSim.scObject)
-    mu = scSim.earth.mu
-
-    oe = orbitalMotion.ClassicElements()
-    oe.a = ORBIT_A
-    oe.e = ORBIT_E
-    oe.i = ORBIT_I
-    oe.Omega = ORBIT_OMEGA_CAP
-    oe.omega = ORBIT_OMEGA_LOW
-    oe.f = ORBIT_F
-    rN, vN = orbitalMotion.elem2rv(mu, oe)
-    scSim.scObject.hub.r_CN_NInit = rN
-    scSim.scObject.hub.v_CN_NInit = vN
-
-    # IMU: identity mounting, zero lever arm, constant bias plus modest white noise.
-    scSim.imuObject = imuSensor.ImuSensor()
-    scSim.imuObject.ModelTag = "imuSensor"
-    scSim.imuObject.scStateInMsg.subscribeTo(scSim.scObject.scStateOutMsg)
-    scSim.imuObject.sensorPos_B = [[0.0], [0.0], [0.0]]
-    scSim.imuObject.senRotBias = _col(gyro_bias)
-    scSim.imuObject.senTransBias = _col(accel_bias)
-    scSim.imuObject.PMatrixGyro = (GYRO_NOISE_PSD_DEFAULT * np.eye(3)).tolist()
-    scSim.imuObject.PMatrixAccel = (ACCEL_NOISE_PSD_DEFAULT * np.eye(3)).tolist()
-    scSim.AddModelToTask(simTaskName, scSim.imuObject)
+    scSim.dynamics = ImuSpacecraftModel(
+        scSim,
+        step_s=step_s,
+        sigma0_BN=sigma0_BN,
+        omega0_BN_B=omega0_BN_B,
+        gyro_bias=gyro_bias,
+        accel_bias=accel_bias,
+    )
+    dyn = scSim.dynamics
+    # Dispersion dotted paths ('scObject.hub.sigma_BNInit', 'imuObject.senRotBias', ...)
+    # address these directly on scSim, per the Monte Carlo Controller convention.
+    scSim.scObject = dyn.scObject
+    scSim.imuObject = dyn.imuObject
 
     # Dead-reckoning estimator: identity mounting DCM (dcm_PB default), Earth's mu shared with
-    # truth so estimate and truth integrate against the same gravity constant.
-    scSim.drModule = DeadReckoningModule(scSim.scObject, np.array(scSim.imuObject.dcm_PB), mu)
-    scSim.drModule.ModelTag = "deadReckoning"
-    scSim.drModule.gyroInMsg.subscribeTo(scSim.imuObject.sensorOutMsg)
-    scSim.AddModelToTask(simTaskName, scSim.drModule)
+    # truth so estimate and truth integrate against the same gravity constant. Initial state is
+    # read from the live hub at Reset() time (hub_initial_state reads it fresh each call), so a
+    # Monte Carlo run's estimate starts aligned with that run's actual, dispersed truth.
+    scSim.algModule = AlgorithmModule(
+        inputs={"imu": messaging.IMUSensorMsgReader()},
+        outputs={
+            "navAtt": (messaging.NavAttMsgPayload, messaging.NavAttMsg()),
+            "navTrans": (messaging.NavTransMsgPayload, messaging.NavTransMsg()),
+        },
+        input_map=[
+            FieldMap("imu.AngVelPlatform", "omega_B", frame="P->B"),
+            FieldMap("imu.AccelPlatform", "accel_B", frame="P->B"),
+        ],
+        output_map=[
+            FieldMap("sigma_BN", "navAtt.sigma_BN"),
+            FieldMap("r_N", "navTrans.r_BN_N"),
+            FieldMap("v_N", "navTrans.v_BN_N"),
+        ],
+        sample_type=ImuSample,
+        make_algorithm=lambda t0, init: ImuDeadReckoner(
+            init["sigma0_BN"], init["r0_N"], init["v0_N"], t0, dyn.mu
+        ),
+        init_from=lambda: hub_initial_state(dyn.scObject),
+        dcm_PB=np.array(dyn.imuObject.dcm_PB),
+    )
+    scSim.algModule.ModelTag = "deadReckoning"
+    scSim.algModule.inputs["imu"].subscribeTo(dyn.imuObject.sensorOutMsg)
+    scSim.AddModelToTask(dyn.task_name, scSim.algModule)
 
     # Recorders at 10 s: truth, IMU output, both estimate messages.
     samplingTime = macros.sec2nano(RECORDER_RATE_S)
     scSim.msgRecList = {
-        "truth": scSim.scObject.scStateOutMsg.recorder(samplingTime),
-        "imu": scSim.imuObject.sensorOutMsg.recorder(samplingTime),
-        "estAtt": scSim.drModule.navAttOutMsg.recorder(samplingTime),
-        "estTrans": scSim.drModule.navTransOutMsg.recorder(samplingTime),
+        "truth": dyn.scObject.scStateOutMsg.recorder(samplingTime),
+        "imu": dyn.imuObject.sensorOutMsg.recorder(samplingTime),
+        "estAtt": scSim.algModule.outputs["navAtt"][1].recorder(samplingTime),
+        "estTrans": scSim.algModule.outputs["navTrans"][1].recorder(samplingTime),
     }
     for rec in scSim.msgRecList.values():
-        scSim.AddModelToTask(simTaskName, rec)
+        scSim.AddModelToTask(dyn.task_name, rec)
 
     return scSim
 

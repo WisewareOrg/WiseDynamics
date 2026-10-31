@@ -25,14 +25,13 @@ from Basilisk.utilities import macros
 from Basilisk.utilities.MonteCarlo.Controller import Controller, RetentionPolicy
 from Basilisk.utilities.MonteCarlo.Dispersions import NormalVectorCartDispersion
 
-from sim.basilisk.scenarios.imu_dead_reckoning import (
+from sim.basilisk.models.imu_spacecraft import (
     ACCEL_BIAS_DEFAULT,
     GYRO_BIAS_DEFAULT,
     OMEGA0_BN_B_DEFAULT,
     SIGMA0_BN_DEFAULT,
-    create_scenario,
-    execute_scenario,
 )
+from sim.basilisk.scenarios.imu_dead_reckoning import create_scenario, execute_scenario
 
 DEFAULT_RUNS = 852
 
