@@ -206,10 +206,8 @@ def _write_run(path: Path, msgRecList: dict, case_index: int, draws: Draws) -> N
 
 
 def _assert_run_loads(path: Path) -> None:
-    """TODO: wire to WiseGncAnalysis's `gnc_analysis.runs.load_run` once it exists on the
-    sibling checkout (pending impl-analysis). Imports it directly here rather than catching the
-    failure, so a missing or incomplete loader fails this assertion loudly instead of this test
-    silently passing without real validation."""
+    """Confirms WiseGncAnalysis's own loader reads this run back cleanly; `load_run` raises
+    `RunDataError` naming the file and the problem otherwise."""
     from gnc_analysis.runs import load_run
 
     load_run(path)

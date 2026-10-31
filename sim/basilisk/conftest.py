@@ -142,12 +142,7 @@ def _producer_versions() -> dict[str, str]:
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Validates the whole campaign directory with WiseGncAnalysis's own loader. Runs once, on
-    the controlling process, not on every pytest-xdist worker.
-
-    TODO: wire to WiseGncAnalysis's `gnc_analysis.runs.load_campaign` once it exists on the
-    sibling checkout (pending impl-analysis). Imports it directly here rather than catching the
-    failure, so a missing or incomplete loader fails this session loudly instead of silently
-    skipping validation."""
+    the controlling process, not on every pytest-xdist worker."""
     config = session.config
     if hasattr(config, "workerinput"):
         return
@@ -156,6 +151,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not any(out_dir.glob("run_*.h5")):
         return
 
-    from gnc_analysis.runs import load_campaign
+    from gnc_analysis.runs import RunDataError, load_campaign
 
-    load_campaign(out_dir)
+    try:
+        load_campaign(out_dir)
+    except RunDataError as exc:
+        session.exitstatus = 1
+        print(f"run export failed WiseGncAnalysis's loader: {exc}")
