@@ -16,9 +16,9 @@ and knows nothing about which simulation produced it.
 
 ## Layout
 
-- `sim/basilisk/` — the Basilisk simulation host (first; see its own `README.md`).
+- `sim/basilisk/` — the Basilisk simulation host, the first plant
+  ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
 - `sim/<host>/` — a future simulation host, as a sibling directory.
 - Monte Carlo drivers and the exporters to the analysis data contract live alongside the
   simulation hosts they serve.
 - `docs/decisions/` — this repository's ADRs.
-- `docs/evaluation/` — evaluation evidence for simulation-host choices.

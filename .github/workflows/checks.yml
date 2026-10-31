@@ -1,0 +1,29 @@
+name: checks
+
+# Repo-wide invariant: docs/decisions/ and its index agree, and every ADR citation pins its
+# ADR's current rev. Not a required-status-check context (repository-floor.yml names only
+# check-branch, pr-title and repo-floor); this is the repo's own invariant gate, same pinned
+# wise-ci action WiseKiosk's checks.yml docs-and-hygiene job runs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check-adrs:
+    name: check-adrs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: WisewareOrg/wise-ci/check-adrs@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b

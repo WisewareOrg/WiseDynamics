@@ -1,0 +1,7 @@
+# Basilisk
+
+Basilisk is a locked dependency (`bsk[all]`) of this repository's uv project, installed from prebuilt
+wheels. Scenarios live here, importing GNC algorithms
+from [WiseGncDesign](https://github.com/WisewareOrg/WiseGncDesign) rather than reimplementing
+them; nothing algorithmic lives under this directory. Basilisk is the first simulation host by
+ADR 0001 rev 1.

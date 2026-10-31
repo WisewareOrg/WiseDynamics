@@ -37,6 +37,7 @@ decision and its reasoning, not who ruled it.
 
 | # | Rev | Decided | Decision |
 |---|---|---|---|
+| [0001](0001-basilisk-first-simulation-host.md) | 1 | 2026-10-31 | Simulate spacecraft dynamics with Basilisk as the first simulation host |
 
 ## Revisions
 
