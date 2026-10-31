@@ -49,7 +49,8 @@ simulation host, at `sim/basilisk/`.
 - `sim/basilisk/pytest_plugin.py` is a pytest plugin, loaded by a consumer's own `conftest.py`
   (`pytest_plugins = [...]`): `--runs`/`--out`/`--seed`/`--duration-s`/`--spacecraft` options and
   `plant`/`draws`/`run_writer` fixtures, dispersed through plain `numpy.random`, run in-process
-  with no clock pacing. A campaign is `pytest -n W --runs N` in the consumer's own test suite.
+  with no clock pacing. Campaigns run in the consumer's own test suite under pytest-xdist, which
+  that suite declares: `pytest -n W --runs N`.
 - `sim/basilisk/runs.py::write_run` writes one HDF5 run file -- root attrs plus a set of float64
   datasets, each carrying a `units` attribute -- given whatever arrays and attrs the caller
   supplies; Basilisk's own retention format is never read by analysis.
@@ -89,8 +90,8 @@ configuration tried; and the integration step, not the model set, is what sets t
 - An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
   same algorithm in C. Acceptable for design iteration; promotion to C++ in WiseGncDesign is the
   path when campaign throughput matters.
-- pytest-xdist fans cases over workers; campaign speed is set by the integration step and
-  physical cores.
+- pytest-xdist, declared by the consumer's test suite, fans cases over workers; campaign speed
+  is set by the integration step and physical cores.
 - The shipped bskSim examples integrate at 0.1 s. Scenarios here choose their step from the
   problem, not from the example, and state it.
 - A plant that cannot run Python constrains WiseGncDesign: adding Trick would require a C++
