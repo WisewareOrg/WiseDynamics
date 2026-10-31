@@ -1,20 +1,21 @@
 """Model-level checks for `ImuSpacecraftModel`: the IMU's own configured noise shows up in its
-output at the configured magnitude."""
+output at the magnitude this repository has settled on, independent of whatever
+`imu_spacecraft.py` currently exports as its own default."""
 
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
 
-from sim.basilisk.models.imu_spacecraft import (
-    ACCEL_NOISE_STD_DEFAULT,
-    GYRO_NOISE_STD_DEFAULT,
-    ImuSpacecraftModel,
-)
+from sim.basilisk.models.imu_spacecraft import ImuSpacecraftModel
+
+# Pinned as literals rather than imported from imu_spacecraft.py, so this test fails if that
+# module's own default ever drifts from this value.
+GYRO_STD_SIGMA = 5e-5  # rad/s, 1-sigma
+ACCEL_STD_SIGMA = 5e-5  # m/s^2, 1-sigma
 
 
-def test_gyro_and_accel_noise_std_matches_the_configured_sigma():
+def test_gyro_and_accel_noise_std_matches_the_settled_sigma():
     """Zero bias, zero body rate: the recorded signal is noise alone, so its standard
-    deviation should land within 30% of the configured 1-sigma. This is the check that would
-    have caught the noise being configured eight orders of magnitude too small."""
+    deviation should land within 30% of the settled 1-sigma above."""
     sim = SimulationBaseClass.SimBaseClass()
     model = ImuSpacecraftModel(
         sim,
@@ -33,8 +34,8 @@ def test_gyro_and_accel_noise_std_matches_the_configured_sigma():
     accel_std = np.array(imu_log.AccelPlatform)[5:].std(axis=0)
 
     for axis_std in gyro_std:
-        rel_err = abs(axis_std - GYRO_NOISE_STD_DEFAULT) / GYRO_NOISE_STD_DEFAULT
-        assert rel_err < 0.30, f"gyro noise std {axis_std} vs configured {GYRO_NOISE_STD_DEFAULT}"
+        rel_err = abs(axis_std - GYRO_STD_SIGMA) / GYRO_STD_SIGMA
+        assert rel_err < 0.30, f"gyro noise std {axis_std} vs expected {GYRO_STD_SIGMA}"
     for axis_std in accel_std:
-        rel_err = abs(axis_std - ACCEL_NOISE_STD_DEFAULT) / ACCEL_NOISE_STD_DEFAULT
-        assert rel_err < 0.30, f"accel noise std {axis_std} vs configured {ACCEL_NOISE_STD_DEFAULT}"
+        rel_err = abs(axis_std - ACCEL_STD_SIGMA) / ACCEL_STD_SIGMA
+        assert rel_err < 0.30, f"accel noise std {axis_std} vs expected {ACCEL_STD_SIGMA}"

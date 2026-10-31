@@ -30,9 +30,8 @@ OMEGA0_BN_B_DEFAULT = np.array([1.0, 1.0, 1.0]) * macros.D2R  # rad/s per axis
 # the constant bias, zero correlation across axes).
 GYRO_BIAS_DEFAULT = np.array([1e-4, -2e-4, 5e-5])  # rad/s
 ACCEL_BIAS_DEFAULT = np.array([1e-4, -5e-5, 2e-4])  # m/s^2
-# PMatrixGyro/PMatrixAccel set the per-sample 1-sigma white-noise amplitude directly: with
-# AMatrixGyro/AMatrixAccel at their zero default, Basilisk's IMU applies no propagation, so the
-# diagonal is a standard deviation in the sensor's own units, not a power spectral density.
+# PMatrixGyro/PMatrixAccel entries are per-sample 1-sigma standard deviations in the sensor's
+# own units, with AMatrixGyro/AMatrixAccel at their zero default.
 GYRO_NOISE_STD_DEFAULT = 5e-5  # rad/s, per-sample 1-sigma on PMatrixGyro
 ACCEL_NOISE_STD_DEFAULT = 5e-5  # m/s^2, per-sample 1-sigma on PMatrixAccel
 
