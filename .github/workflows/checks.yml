@@ -1,9 +1,11 @@
 name: checks
 
-# Repo-wide invariant: docs/decisions/ and its index agree, and every ADR citation pins its
-# ADR's current rev. Not a required-status-check context (repository-floor.yml names only
-# check-branch, pr-title and repo-floor); this is the repo's own invariant gate, same pinned
-# wise-ci action WiseKiosk's checks.yml docs-and-hygiene job runs.
+# check-adrs: repo-wide invariant that docs/decisions/ and its index agree, and every ADR
+# citation pins its ADR's current rev. check-sim-independent: sim/ and tests/ import no
+# flight-software package. ruff/pytest: the uv project's own lint and test suite. None of these
+# are required-status-check contexts (repository-floor.yml names only check-branch, pr-title and
+# repo-floor); these are the repo's own invariant gates, same pinned wise-ci/setup-uv actions
+# used elsewhere in the organisation.
 on:
   push:
     branches: [main]
@@ -27,3 +29,45 @@ jobs:
           persist-credentials: false
 
       - uses: WisewareOrg/wise-ci/check-adrs@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
+
+  check-sim-independent:
+    name: check-sim-independent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: sim/ and tests/ depend on no flight software
+        run: scripts/check-sim-independent.sh
+
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+
+      - run: uv sync --locked
+      - run: uv run pytest

@@ -1,24 +1,26 @@
 # WiseDynamics
 
-WiseDynamics is the simulation home for Wiseware's GNC work. Every simulation plant is a sibling
-directory under `sim/` — Basilisk first (`sim/basilisk/`), with other hosts such as Trick
-(`sim/trick/`) joining later as siblings rather than replacements. It also holds the Monte Carlo
-campaign drivers that run those plants in bulk, and the exporters that write recorded runs out to
-the analysis data contract.
+WiseDynamics is a reusable Basilisk plant library for Wiseware's GNC work. It depends on no
+flight software: a consumer that hosts a named algorithm against one of its plants pins a
+tagged release of this repository, rather than this repository depending on that consumer.
+Every simulation plant is a sibling directory under `sim/` — Basilisk first (`sim/basilisk/`),
+with other hosts such as Trick (`sim/trick/`) joining later as siblings rather than
+replacements.
 
-Flight, simulation and analysis are split into three homes so any one can be replaced without
-touching the other two: flight GNC algorithms live in
-[WiseGncDesign](https://github.com/WisewareOrg/WiseGncDesign), framework-free and
-simulation-blind; simulation plants and Monte Carlo campaigns that import those algorithms live
-here, in WiseDynamics; analysis of the runs they produce lives in
-[WiseGncAnalysis](https://github.com/WisewareOrg/WiseGncAnalysis), which reads the data contract
-and knows nothing about which simulation produced it.
+Each host directory provides static plant models, a one-case runner, a run writer for the HDF5
+layout a consumer's analysis reads, and a pytest plugin exposing Monte Carlo options and
+fixtures (`--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft`;
+`plant`/`draws`/`run_writer`). Installing the package registers the plugin with pytest
+automatically, via its own `pytest11` entry point. Listing it again in a consumer's own
+`pytest_plugins` makes pytest raise "Plugin already registered under a different name". A
+consumer builds its own flight-software module against the `plant` fixture's
+`readers()`/`initial_state()`/`mu`, and owns its own scenario and campaign tests. A campaign is
+that consumer's own test run at scale: `pytest <its scenario path> --sim-runs N --sim-out DIR
+[-n WORKERS]`.
 
 ## Layout
 
 - `sim/basilisk/` — the Basilisk simulation host, the first plant
-  ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
+  ([ADR 0001 rev 2](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
 - `sim/<host>/` — a future simulation host, as a sibling directory.
-- Monte Carlo drivers and the exporters to the analysis data contract live alongside the
-  simulation hosts they serve.
 - `docs/decisions/` — this repository's ADRs.
