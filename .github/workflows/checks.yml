@@ -26,4 +26,4 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: WisewareOrg/wise-ci/check-adrs@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
+      - uses: WisewareOrg/wise-ci/check-adrs@18515fc2124eeebc399fe15fdddc13c4886c96d9
