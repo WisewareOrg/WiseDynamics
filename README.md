@@ -24,23 +24,18 @@ pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR
 ```
 
 [`wise_dynamics/basilisk/README.md`](wise_dynamics/basilisk/README.md) is the reference: the
-plants and their parameters, a worked one-case example, campaigns, run files, and the plugin's
-options and fixtures.
+plants and their parameters, a worked one-case example, run files, and the plugin's options,
+fixtures and case seeding.
 
-## Independence
-
-WiseDynamics depends on Basilisk, numpy, h5py and pytest. Flight software depends on
-WiseDynamics, and the dependency runs that one way: `scripts/check-sim-independent.sh` fails on a
-flight-software package named in `wise_dynamics/`, `tests/` or `pyproject.toml`.
+WiseDynamics depends on no flight software; flight software depends on WiseDynamics.
 
 ## Layout
 
-- `wise_dynamics/` — the installed package: campaigns, dispersion, run files, the pytest plugin.
+- `wise_dynamics/` — the installed package: dispersion, run files, the pytest plugin.
 - `wise_dynamics/basilisk/` — the Basilisk host: the plant contract, the plants, the runner.
   A further simulation host is a sibling subpackage.
 - `tests/` — the regression suite that gates a Basilisk upgrade, including the golden reference
   `tests/golden/`.
-- `scripts/` — CI gates.
 - `docs/decisions/` — this repository's ADRs.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers how a change is made and checked.

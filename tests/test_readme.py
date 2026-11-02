@@ -4,7 +4,7 @@ import doctest
 from pathlib import Path
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
-EXAMPLE_STATEMENTS = 18
+EXAMPLE_STATEMENTS = 16
 
 
 def test_readme_example_runs():

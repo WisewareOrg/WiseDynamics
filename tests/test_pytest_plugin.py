@@ -1,7 +1,8 @@
 """The pytest plugin, exercised through real pytest sessions in subprocesses, loaded by its
 `pytest11` entry point."""
 
-import json
+import re
+from importlib.metadata import version
 from pathlib import Path
 
 import h5py
@@ -9,30 +10,46 @@ import numpy as np
 import pytest
 
 import tests.support
-from wise_dynamics import Campaign
+from wise_dynamics.basilisk import ImuSpacecraft
 
 CAMPAIGN_TEST = """
 import numpy as np
 
 from support import StubFsw
 from wise_dynamics.basilisk import run_case
+from wise_dynamics.pytest_plugin import sim_out_dir
 
 
-def test_case(sim_campaign, sim_draws, sim_plant, sim_run_writer):
-    for name, value in sim_draws.items():
-        assert np.array_equal(getattr(sim_plant.config, name), value)
+def test_case(request, sim_plant, sim_run_writer):
     stub = StubFsw()
     recording = run_case(
         sim_plant,
         stub,
         fsw_outputs={"stub": stub.output_msg},
-        duration_s=sim_campaign.duration_s,
+        duration_s=request.config.getoption("--sim-duration-s"),
         record_s=1.0,
     )
-    sim_run_writer(recording.datasets(sim_plant.recorded_fields))
+    sim_run_writer(
+        recording.datasets(sim_plant.recorded_fields),
+        extra_attrs={
+            "probe_noise_seed": sim_plant.imu.RNGSeed,
+            "probe_gyro_bias_P": np.array(sim_plant.imu.senRotBias, dtype=float).flatten(),
+            "probe_out_dir": str(sim_out_dir(request.config)),
+        },
+    )
 """
 
 SHORT = ("--sim-duration-s", "3")
+
+# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every campaign recorded since
+# reproduces only while these hold.
+CASE_5_NOISE_SEED = 2153058428
+CASE_5_DRAWS = {
+    "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
+    "omega0_BN_B": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
+    "gyro_bias_P": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
+    "accel_bias_P": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
+}
 
 
 @pytest.fixture
@@ -43,38 +60,122 @@ def campaign_dir(pytester: pytest.Pytester) -> pytest.Pytester:
     return pytester
 
 
-def run_files(out_dir: Path) -> list[h5py.File]:
-    return [h5py.File(path, "r") for path in sorted(out_dir.glob("run_*.h5"))]
+def run_campaign(campaign_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
+    """Run the campaign into `out` and return each run file's attributes and datasets."""
+    out_dir = campaign_dir.path / out
+    campaign_dir.runpytest_subprocess("--sim-out", str(out_dir), *SHORT, *args).assert_outcomes(
+        passed=passed
+    )
+    runs = []
+    for path in sorted(out_dir.glob("run_*.h5")):
+        with h5py.File(path, "r") as run_file:
+            runs.append(
+                {
+                    "name": path.name,
+                    "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
+                    "gyro_P": run_file["imu/gyro_P"][:],
+                    "sigma_BN": run_file["truth/sigma_BN"][:],
+                    "omega_BN_B": run_file["truth/omega_BN_B"][:],
+                }
+            )
+    return runs
 
 
-def draws_of(run_file: h5py.File) -> dict[str, np.ndarray]:
+def draws_of(run: dict) -> dict[str, np.ndarray]:
     return {
-        name.removeprefix("draw_"): np.array(value)
-        for name, value in run_file.attrs.items()
-        if name.startswith("draw_")
+        key.removeprefix("draw_"): np.asarray(value)
+        for key, value in run["attrs"].items()
+        if key.startswith("draw_")
     }
 
 
-def test_each_case_records_the_standard_draws_its_plant_used(campaign_dir):
-    out_dir = campaign_dir.path / "out"
-    result = campaign_dir.runpytest_subprocess("--sim-runs", "3", "--sim-out", str(out_dir), *SHORT)
+def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
+    """The standard draws of case `index`, derived as the README states."""
+    draws_stream, _ = np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+    rng = np.random.default_rng(draws_stream)
+    return ImuSpacecraft.standard_dispersion.draw(ImuSpacecraft.nominal(), rng)
 
-    result.assert_outcomes(passed=3)
-    campaign = Campaign("imu_spacecraft", seed=0, runs=3, duration_s=3.0, out_dir=out_dir)
-    files = run_files(out_dir)
-    assert [f.attrs["case"] for f in files] == [0, 1, 2]
-    for index, run_file in enumerate(files):
-        draws = draws_of(run_file)
-        expected = campaign.standard_draws(index)
+
+def test_case_seeding_matches_recorded_campaigns(campaign_dir):
+    (run,) = run_campaign(
+        campaign_dir, "out", "--sim-runs", "852", "test_campaign.py::test_case[5]", passed=1
+    )
+    assert run["name"] == "run_0005.h5"
+    assert run["attrs"]["probe_noise_seed"] == CASE_5_NOISE_SEED
+    assert {name: value.tolist() for name, value in draws_of(run).items()} == CASE_5_DRAWS
+
+
+def test_a_case_is_the_same_whatever_the_run_count(campaign_dir):
+    (small,) = run_campaign(
+        campaign_dir, "small", "--sim-runs", "8", "test_campaign.py::test_case[5]", passed=1
+    )
+    (large,) = run_campaign(
+        campaign_dir, "large", "--sim-runs", "852", "test_campaign.py::test_case[5]", passed=1
+    )
+    assert small["attrs"]["probe_noise_seed"] == large["attrs"]["probe_noise_seed"]
+    for name, value in draws_of(small).items():
+        assert np.array_equal(value, draws_of(large)[name])
+
+
+def test_noise_seeds_differ_across_cases_and_campaign_seeds(campaign_dir):
+    seeds = [
+        run["attrs"]["probe_noise_seed"]
+        for seed in ("0", "1")
+        for run in run_campaign(
+            campaign_dir, f"seed{seed}", "--sim-runs", "2", "--sim-seed", seed, passed=2
+        )
+    ]
+    assert len(set(seeds)) == 4, seeds
+
+
+def test_each_case_records_the_standard_draws_its_plant_used(campaign_dir):
+    runs = run_campaign(campaign_dir, "out", "--sim-runs", "3", passed=3)
+
+    assert [run["attrs"]["case"] for run in runs] == [0, 1, 2]
+    for index, run in enumerate(runs):
+        draws = draws_of(run)
+        expected = standard_draws(0, index)
         assert draws.keys() == expected.keys()
         for name, value in expected.items():
             assert np.array_equal(draws[name], value), (index, name)
-        assert np.array_equal(run_file["truth/sigma_BN"][0], draws["sigma0_BN"])
-        assert np.allclose(
-            run_file["truth/omega_BN_B"][0], draws["omega0_BN_B"], rtol=0, atol=1e-15
-        )
-    for name in draws_of(files[0]):
-        assert not np.allclose(draws_of(files[0])[name], draws_of(files[1])[name])
+        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], draws["gyro_bias_P"])
+        assert np.array_equal(run["sigma_BN"][0], draws["sigma0_BN"])
+        assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B"], rtol=0, atol=1e-15)
+    for name in draws_of(runs[0]):
+        assert not np.allclose(draws_of(runs[0])[name], draws_of(runs[1])[name])
+
+
+def test_the_run_file_carries_the_case_root_attrs(campaign_dir):
+    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
+
+    run = runs[1]
+    attrs = run["attrs"]
+    assert run["name"] == "run_0001.h5"
+    assert attrs["case"] == 1
+    assert attrs["seed"] == 42
+    assert attrs["producer"] == "wise_dynamics.basilisk"
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
+    assert attrs["versions_bsk"] == version("bsk")
+    assert attrs["versions_wise_dynamics"].startswith(version("wise-dynamics"))
+    assert "probe_noise_seed" in attrs
+
+
+def test_extra_attrs_cannot_replace_a_root_attr(pytester):
+    pytester.makepyfile(
+        """
+        import numpy as np
+        import pytest
+
+        from wise_dynamics import Dataset
+
+        def test_case(sim_run_writer):
+            with pytest.raises(ValueError, match=r"reserved root attrs \\['seed'\\]"):
+                sim_run_writer({"t_s": Dataset(np.zeros(1), "s")}, extra_attrs={"seed": 1})
+        """
+    )
+    pytester.runpytest_subprocess(
+        "--sim-runs", "1", "--sim-out", str(pytester.path / "out")
+    ).assert_outcomes(passed=1)
 
 
 def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
@@ -89,56 +190,48 @@ def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
             return {}
         """
     )
-    out_dir = campaign_dir.path / "out"
-    campaign_dir.runpytest_subprocess(
-        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
-    ).assert_outcomes(passed=2)
+    first, second = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
 
-    first, second = run_files(out_dir)
     assert not draws_of(first) and not draws_of(second)
-    assert np.array_equal(first["truth/sigma_BN"][:], second["truth/sigma_BN"][:])
-    assert not np.allclose(first["imu/gyro_P"][1:], second["imu/gyro_P"][1:])
+    assert np.array_equal(first["sigma_BN"], second["sigma_BN"])
+    assert not np.allclose(first["gyro_P"][1:], second["gyro_P"][1:])
 
 
 def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign_dir):
     campaign_dir.makeconftest(
         """
+        import numpy as np
         import pytest
 
         @pytest.fixture
-        def sim_draws(sim_campaign, sim_case_index):
-            rng = sim_campaign.draws_rng(sim_case_index)
+        def sim_draws(request, sim_case_index):
+            rng = np.random.default_rng([request.config.getoption("--sim-seed"), sim_case_index])
             return {"gyro_bias_P": rng.normal(0.0, 1e-3, size=3)}
         """
     )
-    out_dir = campaign_dir.path / "out"
-    campaign_dir.runpytest_subprocess(
-        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
-    ).assert_outcomes(passed=2)
+    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
 
-    campaign = Campaign("imu_spacecraft", seed=0, runs=2, duration_s=3.0, out_dir=out_dir)
-    for index, run_file in enumerate(run_files(out_dir)):
-        expected = campaign.draws_rng(index).normal(0.0, 1e-3, size=3)
-        assert draws_of(run_file).keys() == {"gyro_bias_P"}
-        assert np.array_equal(draws_of(run_file)["gyro_bias_P"], expected)
+    for index, run in enumerate(runs):
+        expected = np.random.default_rng([0, index]).normal(0.0, 1e-3, size=3)
+        assert draws_of(run).keys() == {"gyro_bias_P"}
+        assert np.array_equal(draws_of(run)["gyro_bias_P"], expected)
+        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], expected)
 
 
 def test_a_campaign_reproduces_from_its_seed(campaign_dir):
-    def campaign_data(seed: str, name: str) -> list[dict[str, np.ndarray]]:
-        out_dir = campaign_dir.path / name
-        campaign_dir.runpytest_subprocess(
-            "--sim-runs", "2", "--sim-seed", seed, "--sim-out", str(out_dir), *SHORT
-        ).assert_outcomes(passed=2)
-        return [
-            {**draws_of(f), **{key: f[key][:] for key in ("imu/gyro_P", "truth/sigma_BN")}}
-            for f in run_files(out_dir)
-        ]
+    def campaign(seed: str, out: str) -> list[dict]:
+        return run_campaign(campaign_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
 
-    first, again, other = campaign_data("3", "a"), campaign_data("3", "b"), campaign_data("4", "c")
+    first, again, other = campaign("3", "a"), campaign("3", "b"), campaign("4", "c")
     for case_first, case_again, case_other in zip(first, again, other, strict=True):
-        for key, value in case_first.items():
-            assert np.array_equal(value, case_again[key]), key
-            assert not np.array_equal(value, case_other[key]), key
+        assert case_first["attrs"]["probe_noise_seed"] == case_again["attrs"]["probe_noise_seed"]
+        assert case_first["attrs"]["probe_noise_seed"] != case_other["attrs"]["probe_noise_seed"]
+        for name in ("gyro_P", "sigma_BN"):
+            assert np.array_equal(case_first[name], case_again[name]), name
+            assert not np.array_equal(case_first[name], case_other[name]), name
+        for name, value in draws_of(case_first).items():
+            assert np.array_equal(value, draws_of(case_again)[name]), name
+            assert not np.array_equal(value, draws_of(case_other)[name]), name
 
 
 def test_consumer_fixtures_with_common_names_leave_the_campaign_unchanged(campaign_dir):
@@ -168,53 +261,11 @@ def test_consumer_fixtures_with_common_names_leave_the_campaign_unchanged(campai
             return {}
         """
     )
-    out_dir = campaign_dir.path / "out"
-    campaign_dir.runpytest_subprocess(
-        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
-    ).assert_outcomes(passed=2)
+    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
 
-    campaign = Campaign("imu_spacecraft", seed=0, runs=2, duration_s=3.0, out_dir=out_dir)
-    for index, run_file in enumerate(run_files(out_dir)):
-        for name, value in campaign.standard_draws(index).items():
-            assert np.array_equal(draws_of(run_file)[name], value)
-
-
-def test_campaign_from_config_returns_the_options(pytester, tmp_path):
-    report = tmp_path / "campaign.json"
-    pytester.makepyfile(
-        f"""
-        import json
-
-        from wise_dynamics.pytest_plugin import campaign_from_config
-
-        def test_campaign(request, sim_campaign):
-            campaign = campaign_from_config(request.config)
-            assert campaign is sim_campaign
-            fields = ("plant", "seed", "runs", "duration_s", "out_dir")
-            values = {{name: str(getattr(campaign, name)) for name in fields}}
-            open({str(report)!r}, "w").write(json.dumps(values))
-        """
-    )
-    pytester.runpytest_subprocess(
-        "--sim-runs",
-        "3",
-        "--sim-seed",
-        "7",
-        "--sim-duration-s",
-        "12.5",
-        "--sim-spacecraft",
-        "imu_spacecraft",
-        "--sim-out",
-        "relative/out",
-    ).assert_outcomes(passed=1)
-
-    assert json.loads(report.read_text()) == {
-        "plant": "imu_spacecraft",
-        "seed": "7",
-        "runs": "3",
-        "duration_s": "12.5",
-        "out_dir": str(pytester.path / "relative" / "out"),
-    }
+    for index, run in enumerate(runs):
+        for name, value in standard_draws(0, index).items():
+            assert np.array_equal(draws_of(run)[name], value)
 
 
 def test_workers_share_the_default_out_dir(campaign_dir, monkeypatch):
@@ -230,13 +281,17 @@ def test_workers_share_the_default_out_dir(campaign_dir, monkeypatch):
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {files[0].parent}"])
 
 
-def test_workers_share_a_relative_out_dir_resolved_by_the_controller(campaign_dir):
-    """Each worker changes directory before the plugin configures it; the run files still land
-    in the directory the controller resolved."""
+def test_sim_out_dir_is_one_absolute_path_on_the_controller_and_every_worker(campaign_dir):
+    """Each worker changes directory before the plugin configures it, and `--sim-out` is
+    relative; every worker and the controller still report the one directory the controller
+    resolved, and the run files land there."""
+    report = campaign_dir.path / "controller_out_dir.txt"
     campaign_dir.makeconftest(
-        """
+        f"""
         import os
         import pytest
+
+        from wise_dynamics.pytest_plugin import sim_out_dir
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_configure(config):
@@ -244,35 +299,50 @@ def test_workers_share_a_relative_out_dir_resolved_by_the_controller(campaign_di
                 worker_dir = config.rootpath / config.workerinput["workerid"]
                 worker_dir.mkdir()
                 os.chdir(worker_dir)
+
+        def pytest_sessionfinish(session):
+            if not hasattr(session.config, "workerinput"):
+                open({str(report)!r}, "w").write(str(sim_out_dir(session.config)))
         """
     )
     campaign_dir.runpytest_subprocess(
         "-n", "2", "--sim-runs", "2", "--sim-out", "out", *SHORT
     ).assert_outcomes(passed=2)
-    assert len(list((campaign_dir.path / "out").glob("run_*.h5"))) == 2
+
+    out_dir = campaign_dir.path / "out"
+    assert report.read_text() == str(out_dir)
+    files = sorted(out_dir.glob("run_*.h5"))
+    assert len(files) == 2
+    for path in files:
+        with h5py.File(path, "r") as run_file:
+            assert run_file.attrs["probe_out_dir"] == str(out_dir)
 
 
 def test_a_campaign_runs_without_xdist(campaign_dir):
-    out_dir = campaign_dir.path / "out"
-    campaign_dir.runpytest_subprocess(
-        "-p", "no:xdist", "--sim-runs", "1", "--sim-out", str(out_dir), *SHORT
-    ).assert_outcomes(passed=1)
-    assert len(list(out_dir.glob("run_*.h5"))) == 1
+    runs = run_campaign(campaign_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
+    assert len(runs) == 1
 
 
-def test_a_session_with_no_case_creates_no_directory(pytester, monkeypatch):
-    monkeypatch.setenv("TMPDIR", str(pytester.path))
+def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
+    pytester, tmp_path, monkeypatch
+):
+    """The default output directory sits under `TMPDIR`; a session with no case leaves `TMPDIR`
+    as it found it."""
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    monkeypatch.setenv("TMPDIR", str(temporary))
     pytester.makepyfile("def test_nothing():\n    pass\n")
-    pytester.runpytest_subprocess().assert_outcomes(passed=1)
-    assert not list(pytester.path.glob("wise_dynamics_*"))
+    before = sorted(temporary.iterdir())
+    pytester.runpytest_subprocess(f"--basetemp={tmp_path / 'basetemp'}").assert_outcomes(passed=1)
+    assert sorted(temporary.iterdir()) == before
 
 
 @pytest.mark.parametrize(
     ("option", "value", "message"),
     [
-        ("--sim-runs", "0", "a campaign needs at least one run, got 0"),
-        ("--sim-duration-s", "0", "case duration must be positive, got 0.0 s"),
-        ("--sim-seed", "-1", "campaign seed must be non-negative, got -1"),
+        ("--sim-runs", "0", "--sim-runs must be at least 1, got 0"),
+        ("--sim-duration-s", "0", "--sim-duration-s must be positive, got 0.0"),
+        ("--sim-seed", "-1", "--sim-seed must be non-negative, got -1"),
     ],
 )
 def test_out_of_range_options_are_usage_errors(pytester, option, value, message):

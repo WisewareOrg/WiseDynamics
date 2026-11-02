@@ -1,19 +1,18 @@
 # wise_dynamics.basilisk
 
-Basilisk spacecraft plants, the one-case runner, and the campaign machinery and pytest plugin
-that drive them. Basilisk is the first simulation host by ADR 0001 rev 1. This file is the
-reference for the `wise-dynamics` distribution; each symbol's docstring carries its full
-contract.
+Basilisk spacecraft plants, the one-case runner, the run-file writer, and the pytest plugin
+whose session over `--sim-runs` cases is a Monte Carlo campaign. Basilisk is the first
+simulation host by ADR 0001 rev 1. This file is the reference for the `wise-dynamics`
+distribution; each symbol's docstring carries its full contract.
 
 ## Modules
 
 | module | holds |
 |---|---|
-| `wise_dynamics/campaign.py` | `Campaign` and `Case`: seeding, draws, the plant a case builds, its run file |
-| `wise_dynamics/dispersion.py` | `Dispersion`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/dispersion.py` | `Dispersion`, `apply_draws`, `DataclassConfig`: per-case normal dispersion of a configuration's 3-vector fields |
 | `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
 | `wise_dynamics/run_file.py` | `Dataset` and `write_run`: one HDF5 run file |
-| `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `campaign_from_config` |
+| `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `sim_out_dir`, `RunWriter` |
 | `wise_dynamics/basilisk/plant.py` | `Plant`, the contract every plant meets; `PlantConfig`; `RecordedField` |
 | `wise_dynamics/basilisk/runner.py` | `run_case` and `Recording` |
 | `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one module per plant |
@@ -100,20 +99,13 @@ first. A flight-software module reads `plant.readers()` and starts from
 >>> import tempfile
 >>> from pathlib import Path
 >>> from Basilisk.fswAlgorithms import inertial3D
->>> from wise_dynamics import Campaign
->>> from wise_dynamics.basilisk import RecordedField, run_case
->>> scratch = tempfile.TemporaryDirectory()
->>> campaign = Campaign(
-...     "imu_spacecraft", seed=0, runs=852, duration_s=60.0,
-...     out_dir=Path(scratch.name) / "campaign",
-... )
->>> case = campaign.case(417)
->>> plant = case.build_plant()
+>>> from wise_dynamics import write_run
+>>> from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, run_case
+>>> plant = ImuSpacecraft()
 >>> guidance = inertial3D.inertial3D()
 >>> guidance.ModelTag = "guidance"
 >>> recording = run_case(
-...     plant, guidance, fsw_outputs={"guidance": guidance.attRefOutMsg},
-...     duration_s=campaign.duration_s,
+...     plant, guidance, fsw_outputs={"guidance": guidance.attRefOutMsg}, duration_s=60.0
 ... )
 >>> fields = {
 ...     **plant.recorded_fields,
@@ -124,34 +116,21 @@ first. A flight-software module reads `plant.readers()` and starts from
 [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
 >>> datasets["truth/r_N"].data.shape
 (7, 3)
->>> case.write(datasets).name
-'run_0417.h5'
+>>> scratch = tempfile.TemporaryDirectory()
+>>> write_run(Path(scratch.name) / "run.h5", datasets, {"case": 0}).name
+'run.h5'
 >>> scratch.cleanup()
 
 ```
 
 `tests/test_readme.py` runs this example.
 
-## Campaigns
-
-`Campaign(plant, seed, runs, duration_s, out_dir)` is a set of cases of the plant named in
-`PLANTS`. Case `k` takes its random streams from
-`numpy.random.SeedSequence(seed, spawn_key=(k,)).spawn(2)`: the first draws the case's dispersed
-configuration, the second seeds its sensor noise. Case `k` is therefore the same whatever `runs`
-is, and `campaign.case(k)` rebuilds any recorded case from its file's `seed` and `case`
-attributes.
-
-`campaign.case(k)` applies the standard dispersion; `campaign.case(k, draws)` applies a
-scenario's own, a mapping of configuration field name to value, drawn for example from
-`campaign.draws_rng(k)`. Either way the case's `draws` are both what its plant is built with and
-what its run file records.
-
 ## Run files
 
 `write_run(path, datasets, attrs)` writes one HDF5 file: each dataset as float64 with a string
-`units` attribute, the attributes at the root. It creates parent directories and writes a path
-once. `Case.write(datasets, extra_attrs=None)` writes `<out_dir>/run_<NNNN>.h5` with these root
-attributes:
+`units` attribute, the attributes at the root. It creates parent directories, writes a path once,
+and leaves no file when a write fails. The plugin's `sim_run_writer` writes a case's
+`<out_dir>/run_<NNNN>.h5` with these root attributes:
 
 | attribute | value |
 |---|---|
@@ -164,14 +143,15 @@ attributes:
 | `draw_<field>` | each draw, a float array |
 
 `extra_attrs` adds further root attributes, such as the flight software's version as
-`versions_<distribution>`, beside these.
+`versions_<distribution>`, beside these; it may not reuse one of their names.
 
 ## pytest plugin
 
 Installing `wise-dynamics` registers the plugin through its `pytest11` entry point, so a
 consumer's `conftest.py` names nothing; naming the module in `pytest_plugins` as well makes
 pytest raise "Plugin already registered under a different name". The plugin imports Basilisk
-when pytest collects a test that uses a `sim_` fixture.
+when pytest collects a test that uses `sim_case_index`, directly or through `sim_draws`,
+`sim_plant` or `sim_run_writer`.
 
 | option | default | meaning |
 |---|---|---|
@@ -187,23 +167,40 @@ every pytest-xdist worker; the first run file creates it, and the terminal summa
 | fixture | gives |
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
-| `sim_campaign` | the session's `Campaign` (session scope) |
 | `sim_draws` | the case's draws; override it to supply a scenario's own |
-| `sim_case` | the case's `Case`, built from `sim_draws` |
-| `sim_plant` | the case's plant, from `sim_case.build_plant()` |
-| `sim_run_writer` | `writer(datasets, extra_attrs=None) -> Path`, the case's `Case.write` |
+| `sim_plant` | the case's plant: the nominal configuration with `sim_draws` applied, its sensor noise seeded from the case's stream |
+| `sim_run_writer` | `writer(datasets, extra_attrs=None) -> Path`, writing the case's run file with `sim_draws` recorded |
 
-`campaign_from_config(config)` returns the session's `Campaign` from any hook, for example a
-`pytest_sessionfinish` that checks the campaign directory. A consumer's scenario test:
+Case `k` of seed `s` takes its random streams from
+`numpy.random.SeedSequence(s, spawn_key=(k,)).spawn(2)`: the first draws its standard dispersion,
+the second seeds its sensor noise. Case `k` is therefore the same whatever `--sim-runs` is, and a
+recorded case reruns alone from its file's `seed` and `case` attributes:
+
+```sh
+pytest <scenario> --sim-seed S --sim-runs N "<scenario>::test_case[k]"
+```
+
+A scenario supplying its own draws overrides `sim_draws`, seeding its own generator from
+`--sim-seed` and `sim_case_index`; whichever draws a case has are both what its plant is built
+with and what its run file records.
+
+`sim_out_dir(config) -> Path` gives the session's absolute output directory, the same on the
+controller and every worker, for example to a `pytest_sessionfinish` that checks the run files.
+The case duration and the run count are the options themselves,
+`config.getoption("--sim-duration-s")` and `config.getoption("--sim-runs")`. A consumer's
+scenario test:
 
 ```python
-from wise_dynamics.basilisk import RecordedField, run_case
+from wise_dynamics.basilisk import run_case
 
 
-def test_case(sim_campaign, sim_plant, sim_run_writer):
+def test_case(request, sim_plant, sim_run_writer):
     fsw = build_flight_software(sim_plant.readers(), sim_plant.initial_state(), sim_plant.mu)
     recording = run_case(
-        sim_plant, fsw, fsw_outputs=fsw.outputs, duration_s=sim_campaign.duration_s
+        sim_plant,
+        fsw,
+        fsw_outputs=fsw.outputs,
+        duration_s=request.config.getoption("--sim-duration-s"),
     )
     datasets = recording.datasets({**sim_plant.recorded_fields, **ESTIMATE_FIELDS})
     sim_run_writer(datasets, extra_attrs={"versions_flight_software": FSW_VERSION})
@@ -216,7 +213,6 @@ A campaign is that test at scale: `pytest <scenario> -n 8 --sim-runs 852 --sim-o
 A release changes these only as a breaking change: the import paths and names in
 [Modules](#modules); the `Plant` members in [Plants](#plants); the roles, initial-state keys and
 dataset names in the `ImuSpacecraft` tables; the `run_case` and `Recording` signatures in
-[Running one case](#running-one-case); the case seeding in [Campaigns](#campaigns); the root
-attributes in [Run files](#run-files); and the options, fixtures and `campaign_from_config` in
-[pytest plugin](#pytest-plugin). `tests/test_interface.py` and `tests/test_pytest_plugin.py`
+[Running one case](#running-one-case); the root attributes in [Run files](#run-files); and the
+options, fixtures, case seeding and `sim_out_dir` in [pytest plugin](#pytest-plugin). `tests/test_interface.py` and `tests/test_pytest_plugin.py`
 hold them.

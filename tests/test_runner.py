@@ -39,25 +39,28 @@ def test_run_case_runs_a_stock_basilisk_module():
     assert np.allclose(sigma_RN.data[-1], [0.1, 0.0, 0.0])
 
 
-def test_a_flight_software_role_equal_to_a_truth_role_is_refused():
-    stub = StubFsw()
-    with pytest.raises(ValueError, match=r"\['truth'\]"):
-        run_case(ImuSpacecraft(), stub, fsw_outputs={"truth": stub.output_msg}, duration_s=1.0)
-
-
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("refusal", "error", "message"),
     [
-        ({"duration_s": 0.0}, "duration must be positive"),
-        ({"record_s": 0.0}, "recording period must be positive"),
+        ("truth role", ValueError, r"truth roles \['truth'\]"),
+        ("record_s", ValueError, "recording period must be positive"),
+        ("duration_s", ValueError, "duration must be positive"),
+        ("already run", RuntimeError, "already run"),
     ],
 )
-def test_refused_arguments_leave_the_plant_unchanged(overrides, message):
+def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     plant = ImuSpacecraft()
-    models_before = len(plant.simulation.TaskList[0].TaskModels)
     stub = StubFsw()
-    arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, **overrides}
-    with pytest.raises(ValueError, match=message):
+    arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, "record_s": 10.0}
+    if refusal == "truth role":
+        arguments["fsw_outputs"] = {"truth": stub.output_msg}
+    elif refusal in ("record_s", "duration_s"):
+        arguments[refusal] = 0.0
+    else:
+        plant.execute(1.0)
+    models_before = len(plant.simulation.TaskList[0].TaskModels)
+
+    with pytest.raises(error, match=message):
         run_case(plant, stub, **arguments)
     assert len(plant.simulation.TaskList[0].TaskModels) == models_before
 

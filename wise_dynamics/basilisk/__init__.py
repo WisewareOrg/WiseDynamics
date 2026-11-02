@@ -3,7 +3,7 @@
 `README.md` beside this file is the reference for the package.
 """
 
-from wise_dynamics.basilisk.plant import Plant, RecordedField
+from wise_dynamics.basilisk.plant import Plant, PlantConfig, RecordedField
 from wise_dynamics.basilisk.plants import PLANTS
 from wise_dynamics.basilisk.plants.imu_spacecraft import (
     ImuSpacecraft,
@@ -19,6 +19,7 @@ __all__ = [
     "ImuSpacecraftConfig",
     "OrbitElements",
     "Plant",
+    "PlantConfig",
     "RecordedField",
     "Recording",
     "RigidHub",

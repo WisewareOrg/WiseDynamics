@@ -1,27 +1,30 @@
-"""The WiseDynamics pytest plugin: Monte Carlo campaign options and fixtures.
+"""The WiseDynamics pytest plugin: a pytest session over `--sim-runs` cases is a Monte Carlo
+campaign of one plant.
 
 Installing `wise-dynamics` registers this module through its `pytest11` entry point.
-`wise_dynamics/basilisk/README.md` documents its options, fixtures and accessor.
+`wise_dynamics/basilisk/README.md` documents its options and fixtures.
 """
 
 import secrets
 import tempfile
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import pytest
 
-from wise_dynamics.campaign import Campaign, Case
-from wise_dynamics.run_file import Dataset
+from wise_dynamics.dispersion import apply_draws
+from wise_dynamics.provenance import distribution_version
+from wise_dynamics.run_file import Dataset, write_run
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
 
-__all__ = ["RunWriter", "campaign_from_config"]
+__all__ = ["RunWriter", "sim_out_dir"]
 
-_CAMPAIGN = pytest.StashKey[Campaign]()
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 
 
@@ -31,12 +34,44 @@ class RunWriter(Protocol):
     def __call__(
         self, datasets: Mapping[str, Dataset], extra_attrs: Mapping[str, Any] | None = None
     ) -> Path:
-        """Write `<out_dir>/run_<NNNN>.h5` and return its path; see `wise_dynamics.Case.write`."""
+        """Write `<out_dir>/run_<NNNN>.h5` and return its path.
+
+        Args:
+            datasets: Dataset name to `Dataset`, as `wise_dynamics.write_run` takes them.
+            extra_attrs: Further root attributes, for example the flight software's version as
+                `versions_<distribution>`.
+
+        Raises:
+            ValueError: An entry of `extra_attrs` names one of the case's own root attributes.
+            FileExistsError: The run file already exists.
+        """
         ...
 
 
+@dataclass(frozen=True)
+class _Options:
+    """The session's `--sim-*` options, parsed and checked once."""
+
+    plant: str
+    seed: int
+    runs: int
+    duration_s: float
+    out_dir: Path
+
+    def __post_init__(self) -> None:
+        if self.seed < 0:
+            raise ValueError(f"--sim-seed must be non-negative, got {self.seed}")
+        if self.runs < 1:
+            raise ValueError(f"--sim-runs must be at least 1, got {self.runs}")
+        if not self.duration_s > 0:
+            raise ValueError(f"--sim-duration-s must be positive, got {self.duration_s}")
+
+
+_OPTIONS = pytest.StashKey[_Options]()
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the `--sim-*` campaign options."""
+    """Register the `--sim-*` options."""
     group = parser.getgroup("wise-dynamics", "WiseDynamics Monte Carlo campaign")
     group.addoption(
         "--sim-runs", type=int, default=8, help="number of cases in the campaign (default: 8)"
@@ -62,11 +97,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Build the session's `Campaign` from the options and store it in `config.stash`.
+    """Parse and check the `--sim-*` options once, for every fixture of the session.
 
     The controlling process resolves the output directory to one absolute path, from
     `--sim-out` or a fresh name under the system temporary directory, and every pytest-xdist
-    worker receives that path. The directory itself is created by the first run file written.
+    worker receives that path. The first run file written creates the directory.
 
     Raises:
         pytest.UsageError: An option is out of range, or `--sim-out` already holds run files.
@@ -86,7 +121,7 @@ def pytest_configure(config: pytest.Config) -> None:
         out_dir = Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
 
     try:
-        campaign = Campaign(
+        options = _Options(
             plant=config.getoption("--sim-spacecraft"),
             seed=config.getoption("--sim-seed"),
             runs=config.getoption("--sim-runs"),
@@ -95,97 +130,148 @@ def pytest_configure(config: pytest.Config) -> None:
         )
     except ValueError as error:
         raise pytest.UsageError(f"wise-dynamics: {error}") from None
-    config.stash[_CAMPAIGN] = campaign
+    config.stash[_OPTIONS] = options
 
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
     """pytest-xdist hook: hand a starting worker the controller's output directory."""
-    node.workerinput[_WORKER_OUT_DIR] = str(campaign_from_config(node.config).out_dir)
+    node.workerinput[_WORKER_OUT_DIR] = str(sim_out_dir(node.config))
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parametrize every test that uses `sim_case_index` over the campaign's case numbers.
+    """Parametrize every test that uses `sim_case_index` over the case numbers.
 
     Raises:
-        pytest.UsageError: `--sim-spacecraft` names no known plant.
+        pytest.UsageError: `--sim-spacecraft` names no plant in `PLANTS`.
     """
     if "sim_case_index" not in metafunc.fixturenames:
         return
-    campaign = campaign_from_config(metafunc.config)
+    options = metafunc.config.stash[_OPTIONS]
     try:
-        _ = campaign.plant_type
+        _plant_type(options.plant)
     except ValueError as error:
         raise pytest.UsageError(f"wise-dynamics: --sim-spacecraft: {error}") from None
-    metafunc.parametrize("sim_case_index", range(campaign.runs), indirect=True)
+    metafunc.parametrize("sim_case_index", range(options.runs), indirect=True)
 
 
 def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> None:
-    """Report where the campaign's run files are, when the session wrote any."""
+    """Report where the run files are, when the session wrote any."""
     if hasattr(config, "workerinput"):
         return
-    out_dir = campaign_from_config(config).out_dir
+    out_dir = sim_out_dir(config)
     if out_dir.is_dir():
         count = len(list(out_dir.glob("run_*.h5")))
         terminalreporter.write_line(f"wise-dynamics: {count} run files in {out_dir}")
 
 
-def campaign_from_config(config: pytest.Config) -> Campaign:
-    """The session's `Campaign`, for a consumer's hooks, such as a session-finish check of the
-    campaign directory.
+def sim_out_dir(config: pytest.Config) -> Path:
+    """The directory this session's run files go to, for a consumer's hooks such as a
+    `pytest_sessionfinish` that checks the run files.
 
     Args:
-        config: The pytest config of the session, on the controller or a worker.
+        config: The session's pytest config, on the controller or a worker.
 
     Returns:
-        The `Campaign` built from the `--sim-*` options, with its absolute `out_dir`.
+        The absolute directory, the same on the controller and every worker. It exists once a
+        run file has been written.
     """
-    return config.stash[_CAMPAIGN]
-
-
-@pytest.fixture(scope="session")
-def sim_campaign(request: pytest.FixtureRequest) -> Campaign:
-    """The session's `Campaign`: plant name, seed, run count, case duration in seconds
-    (`duration_s`) and output directory."""
-    return campaign_from_config(request.config)
+    return config.stash[_OPTIONS].out_dir
 
 
 @pytest.fixture
 def sim_case_index(request: pytest.FixtureRequest) -> int:
-    """This case's number, `0 <= index < --sim-runs`; a test using it, directly or through
-    another `sim_` fixture, runs once per case."""
+    """This case's number, `0 <= index < --sim-runs`. A test using it, directly or through
+    `sim_draws`, `sim_plant` or `sim_run_writer`, runs once per case."""
     return request.param
 
 
 @pytest.fixture
-def sim_draws(sim_campaign: Campaign, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: configuration field name to the value the plant is built with.
+def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
+    """This case's draws: configuration field name to the value its plant is built with and its
+    run file records.
 
-    The default is the plant's standard dispersion drawn from the case's own seed stream. A
-    scenario supplies its own draws by overriding this fixture, drawing from
-    `sim_campaign.draws_rng(sim_case_index)`.
+    The default is the plant's standard dispersion, drawn from the case's own stream. A scenario
+    supplies its own draws by overriding this fixture.
     """
-    return sim_campaign.standard_draws(sim_case_index)
+    options = request.config.stash[_OPTIONS]
+    plant_type = _plant_type(options.plant)
+    draws_stream, _ = _streams(options.seed, sim_case_index)
+    rng = np.random.default_rng(draws_stream)
+    return plant_type.standard_dispersion.draw(plant_type.nominal(), rng)
 
 
 @pytest.fixture
-def sim_case(sim_campaign: Campaign, sim_case_index: int, sim_draws: Mapping[str, Any]) -> Case:
-    """This case: its index, its `sim_draws`, its configuration and sensor-noise seed, its run
-    path."""
-    return sim_campaign.case(sim_case_index, sim_draws)
+def sim_plant(
+    request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
+) -> "Plant[Any]":
+    """This case's plant: the nominal configuration with `sim_draws` applied, its sensor noise
+    seeded from the case's own stream."""
+    options = request.config.stash[_OPTIONS]
+    plant_type = _plant_type(options.plant)
+    config = apply_draws(plant_type.nominal(), sim_draws)
+    return plant_type(config, noise_seed=_noise_seed(options.seed, sim_case_index))
 
 
 @pytest.fixture
-def sim_plant(sim_case: Case) -> "Plant[Any]":
-    """This case's plant, built from `sim_case`'s configuration and sensor-noise seed."""
-    return sim_case.build_plant()
+def sim_run_writer(
+    request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
+) -> RunWriter:
+    """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`: `writer(datasets,
+    extra_attrs=None) -> Path`.
 
-
-@pytest.fixture
-def sim_run_writer(sim_case: Case) -> RunWriter:
-    """Writes this case's run file: `writer(datasets, extra_attrs=None) -> Path`.
-
-    The file is `<out_dir>/run_<NNNN>.h5` and carries the case's root attributes and
-    `draw_<name>` attributes; see `wise_dynamics.Case.write`.
+    The file carries the root attributes `case`, `seed`, `created_utc`, `producer`,
+    `versions_bsk`, `versions_wise_dynamics` and one `draw_<field>` per entry of `sim_draws`.
     """
-    return sim_case.write
+    options = request.config.stash[_OPTIONS]
+
+    def write(
+        datasets: Mapping[str, Dataset], extra_attrs: Mapping[str, Any] | None = None
+    ) -> Path:
+        attrs = _root_attrs(options, sim_case_index, sim_draws)
+        extra_attrs = extra_attrs or {}
+        reserved = sorted(set(attrs) & set(extra_attrs))
+        if reserved:
+            raise ValueError(f"extra_attrs may not set the reserved root attrs {reserved}")
+        path = options.out_dir / f"run_{sim_case_index:04d}.h5"
+        return write_run(path, datasets, {**attrs, **extra_attrs})
+
+    return write
+
+
+def _plant_type(name: str) -> "type[Plant[Any]]":
+    """The plant class `name` registers in `PLANTS`, imported with Basilisk on first use."""
+    from wise_dynamics.basilisk.plants import PLANTS
+
+    try:
+        return PLANTS[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown plant {name!r}; known plants: {', '.join(sorted(PLANTS))}"
+        ) from None
+
+
+def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:
+    """Case `index`'s two random streams: the first draws its configuration, the second seeds
+    its sensor noise."""
+    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+
+
+def _noise_seed(seed: int, index: int) -> int:
+    """Case `index`'s sensor-noise seed, from its second stream."""
+    _, noise_stream = _streams(seed, index)
+    return int(noise_stream.generate_state(1)[0])
+
+
+def _root_attrs(options: _Options, index: int, draws: Mapping[str, Any]) -> dict[str, Any]:
+    """The root attributes of case `index`'s run file."""
+    attrs: dict[str, Any] = {
+        "case": index,
+        "seed": options.seed,
+        "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "versions_wise_dynamics": distribution_version("wise-dynamics"),
+        **_plant_type(options.plant).provenance(),
+    }
+    for name, value in draws.items():
+        attrs[f"draw_{name}"] = np.asarray(value, dtype=float)
+    return attrs
