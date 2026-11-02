@@ -4,6 +4,7 @@ measured behaviour."""
 import dataclasses
 import gc
 import math
+import weakref
 
 import numpy as np
 import pytest
@@ -192,6 +193,7 @@ def test_a_reader_reads_the_live_value_after_its_plant_is_released():
     """A reader holds its plant, so reading it after the consumer releases its own reference to
     the plant gives the plant's output, not freed memory."""
     plant = ImuSpacecraft()
+    released = weakref.ref(plant)
     reader = plant.readers()["imu"]
     run_with_stub(plant, duration_s=20.0)
     gyro = list(reader().AngVelPlatform)
@@ -200,5 +202,6 @@ def test_a_reader_reads_the_live_value_after_its_plant_is_released():
     others = [ImuSpacecraft() for _ in range(10)]
 
     assert others
+    assert released() is not None, "the reader released its plant"
     assert any(component != 0.0 for component in gyro)
     assert list(reader().AngVelPlatform) == gyro
