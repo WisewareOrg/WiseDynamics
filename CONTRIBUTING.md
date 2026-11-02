@@ -19,5 +19,15 @@ A PR whose base is not the default branch needs the Development-field link writt
 WiseKiosk's [`link-pr` skill](https://github.com/WisewareOrg/WiseKiosk/blob/main/.claude/skills/link-pr/SKILL.md)
 for the GraphQL mutation; `Closes #N` in the body only writes that record on a default-base PR.
 
-`checks.yml` additionally runs `check-adrs`: `docs/decisions/` and its index table agree, and
-every citation of an ADR anywhere in the tracked tree pins that ADR's current rev.
+`checks.yml` runs on every pull request and on `main`:
+
+- `check-adrs` — `docs/decisions/` and its index agree, and every citation of an ADR in the
+  tracked tree pins that ADR's current rev.
+- `check-sim-independent` — `scripts/check-sim-independent.sh`; the root README's Independence
+  section states what it enforces.
+- `ruff` — `uv run ruff check .` and `uv run ruff format --check .`.
+- `pytest` — `uv run pytest`, the full suite.
+
+The same commands run locally after `uv sync`. A change that moves the golden reference
+regenerates it with `uv run python -m tests.test_golden_trajectory` and says why in its pull
+request.

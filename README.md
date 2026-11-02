@@ -1,26 +1,46 @@
 # WiseDynamics
 
-WiseDynamics is a library of Basilisk plant models for Wiseware's GNC work: it depends on no
-flight software, and a consumer pins a tagged release of this repository and runs its own Monte
-Carlo campaigns against it in its own test suite, rather than this repository depending on that
-consumer. Every simulation plant is a sibling directory under `sim/` — Basilisk first
-(`sim/basilisk/`), with other hosts such as Trick (`sim/trick/`) joining later as siblings rather
-than replacements.
+WiseDynamics is a library of spacecraft plant models for Wiseware's GNC work, with a one-case
+runner, an HDF5 run writer and a pytest plugin for Monte Carlo campaigns. Flight software pins a
+tagged release and runs its own scenario tests against these plants. Basilisk is the first
+simulation host ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
 
-Each host directory provides static plant models, a one-case runner, a run writer for the HDF5
-layout a consumer's analysis reads, and a pytest plugin exposing Monte Carlo options and
-fixtures (`--sim-runs`/`--sim-out`/`--sim-seed`/`--sim-duration-s`/`--sim-spacecraft`;
-`plant`/`draws`/`run_writer`). Installing the package registers the plugin with pytest
-automatically, via its own `pytest11` entry point. Listing it again in a consumer's own
-`pytest_plugins` makes pytest raise "Plugin already registered under a different name". A
-consumer builds its own flight-software module against the `plant` fixture's
-`readers()`/`initial_state()`/`mu`, and owns its own scenario and campaign tests. A campaign is
-that consumer's own test run at scale: `pytest <its scenario path> --sim-runs N --sim-out DIR
-[-n WORKERS]`.
+## Using it
+
+A consumer depends on a tag:
+
+```toml
+[project.optional-dependencies]
+sim = ["wise-dynamics"]
+
+[tool.uv.sources]
+wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0.1.0" }
+```
+
+Installing it registers the pytest plugin. A campaign is the consumer's scenario test at scale:
+
+```sh
+pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR
+```
+
+[`wise_dynamics/basilisk/README.md`](wise_dynamics/basilisk/README.md) is the reference: the
+plants and their parameters, a worked one-case example, campaigns, run files, and the plugin's
+options and fixtures.
+
+## Independence
+
+WiseDynamics depends on Basilisk, numpy, h5py and pytest. Flight software depends on
+WiseDynamics, and the dependency runs that one way: `scripts/check-sim-independent.sh` fails on a
+flight-software package named in `wise_dynamics/`, `tests/` or `pyproject.toml`.
 
 ## Layout
 
-- `sim/basilisk/` — the Basilisk simulation host, the first plant
-  ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
-- `sim/<host>/` — a future simulation host, as a sibling directory.
+- `wise_dynamics/` — the installed package: campaigns, dispersion, run files, the pytest plugin.
+- `wise_dynamics/basilisk/` — the Basilisk host: the plant contract, the plants, the runner.
+  A further simulation host is a sibling subpackage.
+- `tests/` — the regression suite that gates a Basilisk upgrade, including the golden reference
+  `tests/golden/`.
+- `scripts/` — CI gates.
 - `docs/decisions/` — this repository's ADRs.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers how a change is made and checked.

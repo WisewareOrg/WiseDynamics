@@ -1,11 +1,6 @@
 name: checks
 
-# check-adrs: repo-wide invariant that docs/decisions/ and its index agree, and every ADR
-# citation pins its ADR's current rev. check-sim-independent: sim/ and tests/ import no
-# flight-software package. ruff/pytest: the uv project's own lint and test suite. None of these
-# are required-status-check contexts (repository-floor.yml names only check-branch, pr-title and
-# repo-floor); these are the repo's own invariant gates, same pinned wise-ci/setup-uv actions
-# used elsewhere in the organisation.
+# The jobs are described in CONTRIBUTING.md's "CI checks" section.
 on:
   push:
     branches: [main]
@@ -38,8 +33,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: sim/ and tests/ depend on no flight software
-        run: scripts/check-sim-independent.sh
+      - run: scripts/check-sim-independent.sh
 
   ruff:
     name: ruff
