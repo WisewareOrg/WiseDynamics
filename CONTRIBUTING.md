@@ -19,7 +19,7 @@ A PR whose base is not the default branch needs the Development-field link writt
 WiseKiosk's [`link-pr` skill](https://github.com/WisewareOrg/WiseKiosk/blob/main/.claude/skills/link-pr/SKILL.md)
 for the GraphQL mutation; `Closes #N` in the body only writes that record on a default-base PR.
 
-`checks.yml` runs on every pull request and on `main`; its jobs are required checks:
+`checks.yml` runs on every pull request and on `main`:
 
 - `check-adrs` — `docs/decisions/` and its index agree, and every citation of an ADR in the
   tracked tree pins that ADR's current rev.
