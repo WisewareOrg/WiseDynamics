@@ -1,7 +1,7 @@
 # Basilisk
 
 Basilisk is a locked dependency (`bsk[all]`) of this repository's uv project, installed from
-prebuilt wheels. Basilisk is the first simulation host by ADR 0001 rev 2. This directory is a
+prebuilt wheels. Basilisk is the first simulation host by ADR 0001 rev 1. This directory is a
 plant library: a consumer that boots a named flight-software instance against one of these
 plants pins a tagged release of this repository.
 

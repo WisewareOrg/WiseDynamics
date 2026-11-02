@@ -2,13 +2,10 @@
 
 **Status:** accepted
 **Decided:** 2026-10-31 (issue #1 evaluation on the development host)
-**Rev:** 2
+**Rev:** 1
 
 ## Revisions
 
-- **rev 2** — 2026-10-31 — the sim is a pinned library that depends on no flight software;
-  campaigns live with the flight software they test (#6 add the Basilisk IMU dead-reckoning
-  scenario and 852-run campaign).
 - **rev 1** — 2026-10-31 — first written (#1 adopt Basilisk as the first simulation host).
 
 ## Context
@@ -42,10 +39,6 @@ simulation host, at `sim/basilisk/`.
 
 - Installed from prebuilt wheels as a locked dependency (`bsk[all]`) of this repository's uv
   project, the organisation's Python dependency manager. Never built from source here.
-- This repository is a library of static plant models that depends on no flight software;
-  consumers pin a tagged release and run their own campaigns against it.
-- Each case can be persisted as one HDF5 run file read by the consumer's analysis; Basilisk's
-  own retention format is never read downstream.
 
 What the evaluation established: the wheels install and import on the development host without a
 source build; a controller written as a Basilisk Python module runs inside the step loop alongside C
@@ -82,10 +75,6 @@ configuration tried; and the integration step, not the model set, is what sets t
 - An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
   same algorithm in C. Acceptable for design iteration; promotion to C++ in WiseGncDesign is the
   path when campaign throughput matters.
-- pytest-xdist, declared by the consumer's test suite, fans cases over workers; campaign speed
-  is set by the integration step and physical cores.
-- The shipped bskSim examples integrate at 0.1 s. A consumer's own scenario chooses its step
-  from the problem, not from the example, and states it.
 - A plant that cannot run Python constrains WiseGncDesign: adding Trick would require a C++
   variant of every algorithm meant to run there. That cost is stated in the ADR that adds Trick.
 - First use of a scenario that loads SPICE kernels or the World Magnetic Model downloads support

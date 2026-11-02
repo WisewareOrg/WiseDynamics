@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# sim/ and tests/ depend on no flight software (ADR 0001 rev 2): a match here means a
+# sim/ and tests/ depend on no flight software (ADR 0001 rev 1): a match here means a
 # flight-software package leaked in, including inside an import statement or a declared
 # dependency, under any name the gnc-* family might take (gnc_algorithms, gnc_cdh, gnc_analysis,
 # wise_gnc, and any future sibling). Substring matching, not word-bounded, so a match inside a
