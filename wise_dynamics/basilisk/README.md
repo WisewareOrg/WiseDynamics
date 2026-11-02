@@ -163,6 +163,8 @@ when pytest collects a test that uses `sim_case_index`, directly or through anot
 
 The controlling process resolves the output directory to one absolute path and hands it to
 every pytest-xdist worker; the first run file creates it, and the terminal summary names it.
+`sim_run_writer` returns each run file's path, so a session-end check of the run files finds the
+directory from them.
 
 | fixture | gives |
 |---|---|
