@@ -48,13 +48,15 @@ class Plant[ConfigT: PlantConfig](ABC):
     """A spacecraft plant on its own Basilisk simulation, process and task.
 
     A plant runs once: `execute` initializes and runs the simulation, and a new plant is built
-    for the next run. What a plant hands out, from `readers()`, `truth_messages()` and the
+    for the next run. Each reader `readers()` returns holds its plant, so it reads the plant's
+    live output for as long as it is held. The messages `truth_messages()` returns and the
     Basilisk objects a subclass exposes as attributes, along with anything reached through them,
-    is valid while the plant is referenced. A `Recording` holds its own data and outlives its
-    plant.
+    are valid while the plant is referenced: a recorder holds its message, so a message holding
+    its plant would form a loop through Basilisk's C++ objects that the garbage collector leaves
+    in place. A `Recording` holds its own data and outlives its plant.
 
-    A subclass implements `nominal()`, `_build()` and the abstract members below, and sets three
-    class attributes:
+    A subclass implements `nominal()`, `_build()`, `_readers()` and the abstract members below,
+    and sets three class attributes:
 
     - `mu`: the central body's gravitational parameter its gravity model uses, in m^3/s^2.
     - `standard_dispersion`: the vehicle's standard per-case dispersion of its configuration.
@@ -113,10 +115,17 @@ class Plant[ConfigT: PlantConfig](ABC):
         """The name of the one task every model of this plant runs in."""
         return self._task_name
 
-    @abstractmethod
     def readers(self) -> dict[str, MessageReader]:
         """The plant's sensor outputs by role, each a Basilisk message reader already subscribed
-        to its sensor, for a flight-software module to read."""
+        to its sensor, for a flight-software module to read. Each reader holds this plant."""
+        handed_out = self._readers()
+        for reader in handed_out.values():
+            reader._plant = self
+        return handed_out
+
+    @abstractmethod
+    def _readers(self) -> dict[str, MessageReader]:
+        """The sensor readers `readers()` returns, built afresh on each call."""
 
     @abstractmethod
     def truth_messages(self) -> dict[str, Message]:

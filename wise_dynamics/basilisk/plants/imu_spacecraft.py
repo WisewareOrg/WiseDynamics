@@ -169,7 +169,7 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         """The nominal vehicle, `ImuSpacecraftConfig()`."""
         return ImuSpacecraftConfig()
 
-    def readers(self) -> dict[str, MessageReader]:
+    def _readers(self) -> dict[str, MessageReader]:
         """Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output."""
         imu_reader = messaging.IMUSensorMsgReader()
         imu_reader.subscribeTo(self.imu.sensorOutMsg)

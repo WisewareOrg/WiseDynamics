@@ -2,6 +2,7 @@
 measured behaviour."""
 
 import dataclasses
+import gc
 import math
 
 import numpy as np
@@ -185,3 +186,19 @@ def test_orbit_elements_outside_a_closed_orbit_are_refused(elements, message):
 def test_a_plant_with_a_non_positive_step_is_refused():
     with pytest.raises(ValueError, match="step must be positive"):
         ImuSpacecraft(ImuSpacecraftConfig(step_s=0.0))
+
+
+def test_a_reader_reads_the_live_value_after_its_plant_is_released():
+    """A reader holds its plant, so reading it after the consumer releases its own reference to
+    the plant gives the plant's output, not freed memory."""
+    plant = ImuSpacecraft()
+    reader = plant.readers()["imu"]
+    run_with_stub(plant, duration_s=20.0)
+    gyro = list(reader().AngVelPlatform)
+    del plant
+    gc.collect()
+    others = [ImuSpacecraft() for _ in range(10)]
+
+    assert others
+    assert any(component != 0.0 for component in gyro)
+    assert list(reader().AngVelPlatform) == gyro

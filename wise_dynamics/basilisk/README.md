@@ -38,9 +38,12 @@ noise_seed)`. Each plant class provides:
 - `config`, the configuration it was built from;
 - `add_model(module)` and `execute(duration_s)`. A plant runs once.
 
-What a plant hands out, from `readers()`, `truth_messages()`, `spacecraft` and `imu`, along
-with anything reached through them such as `spacecraft.gravField.gravBodies`, is valid while the
-plant is referenced. A `Recording` holds its own data and outlives its plant.
+Each reader `readers()` returns holds its plant, so it reads the plant's live output for as long
+as it is held. The messages `truth_messages()` returns, `spacecraft` and `imu`, along with
+anything reached through them such as `spacecraft.gravField.gravBodies`, are valid while the
+plant is referenced: a recorder holds its message, so a message holding its plant would form a
+loop through Basilisk's C++ objects that the garbage collector leaves in place. A `Recording`
+holds its own data and outlives its plant.
 
 ### `imu_spacecraft`: `ImuSpacecraft`
 
