@@ -24,11 +24,20 @@ def test_initial_state_returns_exactly_the_settled_keys():
     assert set(ImuSpacecraft().initial_state()) == {"sigma0_BN", "r0_N", "v0_N", "omega0_BN_B"}
 
 
-def test_mu_is_earth_point_mass_and_the_gravity_model_uses_it():
+def test_mu_is_earth_point_mass():
     assert ImuSpacecraft.mu == EARTH_MU_M3_S2
-    plant = ImuSpacecraft()
+
+
+def test_the_gravity_model_takes_mu_from_the_class():
+    """A subclass with a different `mu` builds a gravity body with that `mu`, which Basilisk's
+    own Earth default differs from."""
+
+    class OtherMu(ImuSpacecraft):
+        mu = EARTH_MU_M3_S2 * 1.001
+
+    plant = OtherMu()
     (earth,) = plant.spacecraft.gravField.gravBodies
-    assert earth.mu == ImuSpacecraft.mu
+    assert earth.mu == OtherMu.mu
 
 
 def test_recorded_fields_name_the_run_file_datasets_with_their_units():

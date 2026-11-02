@@ -57,3 +57,17 @@ def test_one_orbit_follows_two_body_motion():
     velocity_error_m_s = np.linalg.norm(np.array(truth.v_BN_N)[-1] - v_N)
     assert position_error_m < POSITION_TOL_M, f"position off by {position_error_m} m"
     assert velocity_error_m_s < VELOCITY_TOL_M_S, f"velocity off by {velocity_error_m_s} m/s"
+
+
+def test_the_orbit_follows_the_class_mu():
+    """A plant whose class `mu` differs from Basilisk's Earth default moves on the two-body orbit
+    of its own `mu`."""
+
+    class OtherMu(ImuSpacecraft):
+        mu = EARTH_MU_M3_S2 * 1.001
+
+    duration_s = 1000.0
+    truth = run_with_stub(OtherMu(), duration_s=duration_s, record_s=100.0)["truth"]
+    r_N, v_N = kepler_state(OtherMu.nominal().orbit, OtherMu.mu, duration_s)
+    assert np.linalg.norm(np.array(truth.r_BN_N)[-1] - r_N) < POSITION_TOL_M
+    assert np.linalg.norm(np.array(truth.v_BN_N)[-1] - v_N) < VELOCITY_TOL_M_S
