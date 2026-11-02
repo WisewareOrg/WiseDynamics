@@ -10,13 +10,12 @@
 
 ## Context
 
-WiseDynamics is a plant library for Wiseware's GNC work, depending on no flight software: a
-consumer that hosts a named algorithm against one of its plants pins a tagged release of this
-repository rather than this repository depending on that consumer. WiseDynamics owns every
-simulation plant and the generic running/exporting mechanics (a one-case runner, a run writer, a
-pytest plugin for Monte Carlo options and fixtures); a scenario or campaign that boots a named
-flight-software instance lives with the flight software it tests. Which plants it supports is the
-one trade this project has to make, and this ADR makes the first of them.
+WiseDynamics is the simulation home of a three-repository GNC project. Flight code lives in
+WiseGncDesign and must not depend on any simulation tool. Analysis lives in WiseGncAnalysis and
+reads recorded runs through a data contract, never a simulator's native output. WiseDynamics owns
+every simulation plant, the wrappers that host WiseGncDesign algorithms in each plant, the Monte
+Carlo drivers, and the exporters to the data contract. Which plants it supports is the one trade
+this project has to make, and this ADR makes the first of them.
 
 The constraints a first plant has to meet:
 
@@ -39,6 +38,13 @@ simulation host, at `sim/basilisk/`.
 
 - Installed from prebuilt wheels as a locked dependency (`bsk[all]`) of this repository's uv
   project, the organisation's Python dependency manager. Never built from source here.
+- Scenarios are Python scripts. WiseGncDesign algorithms enter the loop through thin wrapper
+  modules written here: a Basilisk Python module around a Python algorithm, a Basilisk C++ module
+  around a C++ one. Nothing algorithmic lives in this repository.
+- Campaigns use Basilisk's Monte Carlo controller and dispersion classes, in-process, with no
+  clock pacing.
+- Recorded runs are exported to the WiseGncAnalysis data contract; Basilisk's own retention
+  format is never read by analysis.
 
 What the evaluation established: the wheels install and import on the development host without a
 source build; a controller written as a Basilisk Python module runs inside the step loop alongside C
@@ -75,6 +81,10 @@ configuration tried; and the integration step, not the model set, is what sets t
 - An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
   same algorithm in C. Acceptable for design iteration; promotion to C++ in WiseGncDesign is the
   path when campaign throughput matters.
+- The Monte Carlo harness adds no material fixed cost per run; campaign speed is set by the
+  integration step and the number of physical cores.
+- The shipped bskSim examples integrate at 0.1 s. Scenarios here choose their step from the
+  problem, not from the example, and state it.
 - A plant that cannot run Python constrains WiseGncDesign: adding Trick would require a C++
   variant of every algorithm meant to run there. That cost is stated in the ADR that adds Trick.
 - First use of a scenario that loads SPICE kernels or the World Magnetic Model downloads support
