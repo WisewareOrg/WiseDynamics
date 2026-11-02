@@ -38,6 +38,10 @@ noise_seed)`. Each plant class provides:
 - `config`, the configuration it was built from;
 - `add_model(module)` and `execute(duration_s)`. A plant runs once.
 
+What a plant hands out, from `readers()`, `truth_messages()`, `spacecraft` and `imu`, along
+with anything reached through them such as `spacecraft.gravField.gravBodies`, is valid while the
+plant is referenced. A `Recording` holds its own data and outlives its plant.
+
 ### `imu_spacecraft`: `ImuSpacecraft`
 
 A rigid hub in a 500 km, 45 degree low Earth orbit under point-mass Earth gravity, tumbling, with

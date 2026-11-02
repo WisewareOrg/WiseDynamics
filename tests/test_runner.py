@@ -1,7 +1,11 @@
 """`run_case` and `Recording`: what a case records and how it becomes run-file datasets."""
 
+import gc
+import weakref
+
 import numpy as np
 import pytest
+from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from tests.support import StubFsw, run_with_stub
@@ -69,3 +73,52 @@ def test_a_field_absent_from_its_recorder_is_named():
     recording = run_with_stub(ImuSpacecraft(), duration_s=10.0)
     with pytest.raises(ValueError, match="r_BN_N"):
         recording.datasets({"bad": RecordedField("imu", "r_BN_N", "m")})
+
+
+def churn_plants() -> list[ImuSpacecraft]:
+    """New plants allocated after a plant is freed, reusing its memory."""
+    gc.collect()
+    return [ImuSpacecraft() for _ in range(10)]
+
+
+def test_a_recording_outlives_its_plant():
+    plant = ImuSpacecraft()
+    released = weakref.ref(plant)
+    recording = run_with_stub(plant, duration_s=50.0)
+    before = recording.datasets(plant.recorded_fields)
+    fields = dict(plant.recorded_fields)
+    del plant
+    others = churn_plants()
+
+    assert released() is None, "the plant is still referenced"
+    after = recording.datasets(fields)
+    assert others
+    for name, dataset in before.items():
+        assert np.array_equal(after[name].data, dataset.data), name
+
+
+class ReadingFsw(sysModel.SysModel):
+    """A flight-software module holding the plant's IMU reader, as a hosted algorithm does."""
+
+    def __init__(self, reader) -> None:
+        super().__init__()
+        self.ModelTag = "reading_fsw"
+        self.reader = reader
+        self.output_msg = messaging.NavAttMsg()
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        payload = messaging.NavAttMsgPayload()
+        payload.omega_BN_B = self.reader().AngVelPlatform
+        self.output_msg.write(payload, CurrentSimNanos, self.moduleID)
+
+
+def test_a_plant_is_freed_after_its_case():
+    """A case whose flight software holds the plant's reader leaves nothing referencing the
+    plant once the case's own references go, so a campaign's plants do not accumulate."""
+    plant = ImuSpacecraft()
+    released = weakref.ref(plant)
+    fsw = ReadingFsw(plant.readers()["imu"])
+    run_case(plant, fsw, fsw_outputs={"fsw": fsw.output_msg}, duration_s=20.0)
+    del plant, fsw
+    gc.collect()
+    assert released() is None, "the plant is still referenced after its case"

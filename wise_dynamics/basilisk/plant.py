@@ -48,8 +48,13 @@ class Plant[ConfigT: PlantConfig](ABC):
     """A spacecraft plant on its own Basilisk simulation, process and task.
 
     A plant runs once: `execute` initializes and runs the simulation, and a new plant is built
-    for the next run. A subclass implements `nominal()`, `_build()` and the abstract members
-    below, and sets three class attributes:
+    for the next run. What a plant hands out, from `readers()`, `truth_messages()` and the
+    Basilisk objects a subclass exposes as attributes, along with anything reached through them,
+    is valid while the plant is referenced. A `Recording` holds its own data and outlives its
+    plant.
+
+    A subclass implements `nominal()`, `_build()` and the abstract members below, and sets three
+    class attributes:
 
     - `mu`: the central body's gravitational parameter its gravity model uses, in m^3/s^2.
     - `standard_dispersion`: the vehicle's standard per-case dispersion of its configuration.
