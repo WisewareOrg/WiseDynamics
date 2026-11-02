@@ -4,6 +4,10 @@ from Basilisk.architecture import messaging, sysModel
 
 from wise_dynamics.basilisk import Plant, Recording, run_case
 
+EARTH_MU_M3_S2 = 3.986004360e14
+"""Earth's mu in Basilisk 2.12.1's `gravBodyFactory().createEarth()`, in m^3/s^2, stated here
+independently of the plant."""
+
 
 class StubFsw(sysModel.SysModel):
     """Writes `FIXED_SIGMA_BN` to `output_msg`, a `NavAttMsg`, every step."""

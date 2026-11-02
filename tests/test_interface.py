@@ -2,10 +2,8 @@
 
 import inspect
 
+from tests.support import EARTH_MU_M3_S2
 from wise_dynamics.basilisk import PLANTS, ImuSpacecraft, Plant
-
-# Earth's mu in Basilisk 2.12.1's gravBodyFactory().createEarth(), m^3/s^2.
-EARTH_MU_M3_S2 = 3.986004360e14
 
 
 def test_imu_spacecraft_is_the_registered_plant_and_implements_the_contract():

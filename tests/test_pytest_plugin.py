@@ -383,7 +383,7 @@ def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
     result = pytester.runpytest_subprocess("--sim-out", str(out_dir))
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines([f"ERROR: --sim-out {out_dir} already holds 1 run files*"])
+    result.stderr.fnmatch_lines([f"ERROR: --sim-out {out_dir} already holds 1 run file;*"])
 
 
 def test_consumer_options_with_short_names_coexist_with_the_plugin(pytester):

@@ -114,7 +114,7 @@ def pytest_configure(config: pytest.Config) -> None:
         stale = sorted(out_dir.glob("run_*.h5"))
         if stale:
             raise pytest.UsageError(
-                f"--sim-out {out_dir} already holds {len(stale)} run files; "
+                f"--sim-out {out_dir} already holds {_run_files(len(stale))}; "
                 "give each campaign a directory of its own"
             )
     else:
@@ -162,7 +162,7 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     out_dir = config.stash[_OPTIONS].out_dir
     if out_dir.is_dir():
         count = len(list(out_dir.glob("run_*.h5")))
-        terminalreporter.write_line(f"wise-dynamics: {count} run files in {out_dir}")
+        terminalreporter.write_line(f"wise-dynamics: {_run_files(count)} in {out_dir}")
 
 
 @pytest.fixture
@@ -235,6 +235,11 @@ def sim_run_writer(
         return write_run(path, datasets, {**attrs, **extra_attrs})
 
     return write
+
+
+def _run_files(count: int) -> str:
+    """`count` run files, in words."""
+    return f"{count} run file" if count == 1 else f"{count} run files"
 
 
 def _plant_type(name: str) -> "type[Plant[Any]]":
