@@ -17,16 +17,15 @@ import numpy as np
 
 from support import StubFsw
 from wise_dynamics.basilisk import run_case
-from wise_dynamics.pytest_plugin import sim_out_dir
 
 
-def test_case(request, sim_plant, sim_run_writer):
+def test_case(sim_duration_s, sim_plant, sim_run_writer):
     stub = StubFsw()
     recording = run_case(
         sim_plant,
         stub,
         fsw_outputs={"stub": stub.output_msg},
-        duration_s=request.config.getoption("--sim-duration-s"),
+        duration_s=sim_duration_s,
         record_s=1.0,
     )
     sim_run_writer(
@@ -34,7 +33,6 @@ def test_case(request, sim_plant, sim_run_writer):
         extra_attrs={
             "probe_noise_seed": sim_plant.imu.RNGSeed,
             "probe_gyro_bias_P": np.array(sim_plant.imu.senRotBias, dtype=float).flatten(),
-            "probe_out_dir": str(sim_out_dir(request.config)),
         },
     )
 """
@@ -73,6 +71,7 @@ def run_campaign(campaign_dir: pytest.Pytester, out: str, *args: str, passed: in
                 {
                     "name": path.name,
                     "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
+                    "t_s": run_file["t_s"][:],
                     "gyro_P": run_file["imu/gyro_P"][:],
                     "sigma_BN": run_file["truth/sigma_BN"][:],
                     "omega_BN_B": run_file["truth/omega_BN_B"][:],
@@ -197,25 +196,45 @@ def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
     assert not np.allclose(first["gyro_P"][1:], second["gyro_P"][1:])
 
 
-def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign_dir):
-    campaign_dir.makeconftest(
-        """
-        import numpy as np
-        import pytest
+OWN_DRAWS_CONFTEST = """
+import pytest
 
-        @pytest.fixture
-        def sim_draws(request, sim_case_index):
-            rng = np.random.default_rng([request.config.getoption("--sim-seed"), sim_case_index])
-            return {"gyro_bias_P": rng.normal(0.0, 1e-3, size=3)}
-        """
-    )
+@pytest.fixture
+def sim_draws(sim_draws_rng):
+    return {"gyro_bias_P": sim_draws_rng.normal(0.0, 1e-3, size=3)}
+"""
+
+
+def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
+    """Case `index`'s two streams, derived as the README states."""
+    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+
+
+def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign_dir):
+    """The plant is built from the scenario's draws with the case's own noise seed, and the
+    run file records exactly those draws."""
+    campaign_dir.makeconftest(OWN_DRAWS_CONFTEST)
     runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
 
     for index, run in enumerate(runs):
-        expected = np.random.default_rng([0, index]).normal(0.0, 1e-3, size=3)
+        draws_stream, noise_stream = case_streams(0, index)
+        expected = np.random.default_rng(draws_stream).normal(0.0, 1e-3, size=3)
         assert draws_of(run).keys() == {"gyro_bias_P"}
         assert np.array_equal(draws_of(run)["gyro_bias_P"], expected)
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], expected)
+        assert run["attrs"]["probe_noise_seed"] == int(noise_stream.generate_state(1)[0])
+
+
+def test_scenario_draws_differ_between_neighbouring_cases_of_neighbouring_seeds(campaign_dir):
+    """Case 1 of seed 0 and case 0 of seed 1, the pair a seed-plus-index scheme collides."""
+    campaign_dir.makeconftest(OWN_DRAWS_CONFTEST)
+    _, case_1_of_seed_0 = run_campaign(campaign_dir, "seed0", "--sim-runs", "2", passed=2)
+    case_0_of_seed_1, _ = run_campaign(
+        campaign_dir, "seed1", "--sim-runs", "2", "--sim-seed", "1", passed=2
+    )
+    assert not np.allclose(
+        draws_of(case_1_of_seed_0)["gyro_bias_P"], draws_of(case_0_of_seed_1)["gyro_bias_P"]
+    )
 
 
 def test_a_campaign_reproduces_from_its_seed(campaign_dir):
@@ -281,17 +300,13 @@ def test_workers_share_the_default_out_dir(campaign_dir, monkeypatch):
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {files[0].parent}"])
 
 
-def test_sim_out_dir_is_one_absolute_path_on_the_controller_and_every_worker(campaign_dir):
+def test_workers_write_to_the_relative_out_dir_the_controller_resolved(campaign_dir):
     """Each worker changes directory before the plugin configures it, and `--sim-out` is
-    relative; every worker and the controller still report the one directory the controller
-    resolved, and the run files land there."""
-    report = campaign_dir.path / "controller_out_dir.txt"
+    relative; the run files still land in the one directory the controller resolved."""
     campaign_dir.makeconftest(
-        f"""
+        """
         import os
         import pytest
-
-        from wise_dynamics.pytest_plugin import sim_out_dir
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_configure(config):
@@ -299,23 +314,20 @@ def test_sim_out_dir_is_one_absolute_path_on_the_controller_and_every_worker(cam
                 worker_dir = config.rootpath / config.workerinput["workerid"]
                 worker_dir.mkdir()
                 os.chdir(worker_dir)
-
-        def pytest_sessionfinish(session):
-            if not hasattr(session.config, "workerinput"):
-                open({str(report)!r}, "w").write(str(sim_out_dir(session.config)))
         """
     )
     campaign_dir.runpytest_subprocess(
         "-n", "2", "--sim-runs", "2", "--sim-out", "out", *SHORT
     ).assert_outcomes(passed=2)
 
-    out_dir = campaign_dir.path / "out"
-    assert report.read_text() == str(out_dir)
-    files = sorted(out_dir.glob("run_*.h5"))
-    assert len(files) == 2
-    for path in files:
-        with h5py.File(path, "r") as run_file:
-            assert run_file.attrs["probe_out_dir"] == str(out_dir)
+    in_out_dir = sorted((campaign_dir.path / "out").glob("run_*.h5"))
+    assert len(in_out_dir) == 2
+    assert sorted(campaign_dir.path.rglob("run_*.h5")) == in_out_dir
+
+
+def test_each_case_runs_for_sim_duration_s(campaign_dir):
+    (run,) = run_campaign(campaign_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
+    assert run["t_s"][-1] == 4.0
 
 
 def test_a_campaign_runs_without_xdist(campaign_dir):

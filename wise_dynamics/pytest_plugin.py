@@ -23,7 +23,7 @@ from wise_dynamics.run_file import Dataset, write_run
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
 
-__all__ = ["RunWriter", "sim_out_dir"]
+__all__ = ["RunWriter"]
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 
@@ -136,7 +136,7 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
     """pytest-xdist hook: hand a starting worker the controller's output directory."""
-    node.workerinput[_WORKER_OUT_DIR] = str(sim_out_dir(node.config))
+    node.workerinput[_WORKER_OUT_DIR] = str(node.config.stash[_OPTIONS].out_dir)
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -159,31 +159,30 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     """Report where the run files are, when the session wrote any."""
     if hasattr(config, "workerinput"):
         return
-    out_dir = sim_out_dir(config)
+    out_dir = config.stash[_OPTIONS].out_dir
     if out_dir.is_dir():
         count = len(list(out_dir.glob("run_*.h5")))
         terminalreporter.write_line(f"wise-dynamics: {count} run files in {out_dir}")
 
 
-def sim_out_dir(config: pytest.Config) -> Path:
-    """The directory this session's run files go to, for a consumer's hooks such as a
-    `pytest_sessionfinish` that checks the run files.
-
-    Args:
-        config: The session's pytest config, on the controller or a worker.
-
-    Returns:
-        The absolute directory, the same on the controller and every worker. It exists once a
-        run file has been written.
-    """
-    return config.stash[_OPTIONS].out_dir
-
-
 @pytest.fixture
 def sim_case_index(request: pytest.FixtureRequest) -> int:
     """This case's number, `0 <= index < --sim-runs`. A test using it, directly or through
-    `sim_draws`, `sim_plant` or `sim_run_writer`, runs once per case."""
+    another per-case `sim_` fixture, runs once per case."""
     return request.param
+
+
+@pytest.fixture
+def sim_duration_s(request: pytest.FixtureRequest) -> float:
+    """Each case's simulated duration, in seconds: `--sim-duration-s`."""
+    return request.config.stash[_OPTIONS].duration_s
+
+
+@pytest.fixture
+def sim_draws_rng(request: pytest.FixtureRequest, sim_case_index: int) -> np.random.Generator:
+    """A fresh generator on this case's draws stream, the stream the standard draws come from,
+    for a scenario that draws its own dispersion in `sim_draws`."""
+    return _draws_rng(request.config.stash[_OPTIONS].seed, sim_case_index)
 
 
 @pytest.fixture
@@ -192,12 +191,11 @@ def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[st
     run file records.
 
     The default is the plant's standard dispersion, drawn from the case's own stream. A scenario
-    supplies its own draws by overriding this fixture.
+    supplies its own draws by overriding this fixture, drawing them from `sim_draws_rng`.
     """
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
-    draws_stream, _ = _streams(options.seed, sim_case_index)
-    rng = np.random.default_rng(draws_stream)
+    rng = _draws_rng(options.seed, sim_case_index)
     return plant_type.standard_dispersion.draw(plant_type.nominal(), rng)
 
 
@@ -255,6 +253,12 @@ def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:
     """Case `index`'s two random streams: the first draws its configuration, the second seeds
     its sensor noise."""
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+
+
+def _draws_rng(seed: int, index: int) -> np.random.Generator:
+    """A fresh generator on case `index`'s first stream."""
+    draws_stream, _ = _streams(seed, index)
+    return np.random.default_rng(draws_stream)
 
 
 def _noise_seed(seed: int, index: int) -> int:

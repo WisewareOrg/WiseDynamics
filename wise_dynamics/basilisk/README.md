@@ -12,7 +12,7 @@ distribution; each symbol's docstring carries its full contract.
 | `wise_dynamics/dispersion.py` | `Dispersion`, `apply_draws`, `DataclassConfig`: per-case normal dispersion of a configuration's 3-vector fields |
 | `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
 | `wise_dynamics/run_file.py` | `Dataset` and `write_run`: one HDF5 run file |
-| `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `sim_out_dir`, `RunWriter` |
+| `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `RunWriter` |
 | `wise_dynamics/basilisk/plant.py` | `Plant`, the contract every plant meets; `PlantConfig`; `RecordedField` |
 | `wise_dynamics/basilisk/runner.py` | `run_case` and `Recording` |
 | `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one module per plant |
@@ -150,8 +150,8 @@ and leaves no file when a write fails. The plugin's `sim_run_writer` writes a ca
 Installing `wise-dynamics` registers the plugin through its `pytest11` entry point, so a
 consumer's `conftest.py` names nothing; naming the module in `pytest_plugins` as well makes
 pytest raise "Plugin already registered under a different name". The plugin imports Basilisk
-when pytest collects a test that uses `sim_case_index`, directly or through `sim_draws`,
-`sim_plant` or `sim_run_writer`.
+when pytest collects a test that uses `sim_case_index`, directly or through another per-case
+`sim_` fixture.
 
 | option | default | meaning |
 |---|---|---|
@@ -166,7 +166,9 @@ every pytest-xdist worker; the first run file creates it, and the terminal summa
 
 | fixture | gives |
 |---|---|
-| `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
+| `sim_case_index` | the case number; a test using it, directly or through the per-case fixtures below, runs once per case |
+| `sim_duration_s` | each case's simulated duration in seconds, `--sim-duration-s` |
+| `sim_draws_rng` | a fresh numpy `Generator` on the case's draws stream |
 | `sim_draws` | the case's draws; override it to supply a scenario's own |
 | `sim_plant` | the case's plant: the nominal configuration with `sim_draws` applied, its sensor noise seeded from the case's stream |
 | `sim_run_writer` | `writer(datasets, extra_attrs=None) -> Path`, writing the case's run file with `sim_draws` recorded |
@@ -180,27 +182,32 @@ recorded case reruns alone from its file's `seed` and `case` attributes:
 pytest <scenario> --sim-seed S --sim-runs N "<scenario>::test_case[k]"
 ```
 
-A scenario supplying its own draws overrides `sim_draws`, seeding its own generator from
-`--sim-seed` and `sim_case_index`; whichever draws a case has are both what its plant is built
-with and what its run file records.
+A scenario supplying its own draws overrides `sim_draws` and draws them from `sim_draws_rng`,
+the stream the standard draws come from; whichever draws a case has are both what its plant is
+built with and what its run file records:
 
-`sim_out_dir(config) -> Path` gives the session's absolute output directory, the same on the
-controller and every worker, for example to a `pytest_sessionfinish` that checks the run files.
-The case duration and the run count are the options themselves,
-`config.getoption("--sim-duration-s")` and `config.getoption("--sim-runs")`. A consumer's
-scenario test:
+```python
+import pytest
+
+
+@pytest.fixture
+def sim_draws(sim_draws_rng):
+    return {"gyro_bias_P": sim_draws_rng.normal(0.0, 1e-3, size=3)}
+```
+
+A consumer's scenario test:
 
 ```python
 from wise_dynamics.basilisk import run_case
 
 
-def test_case(request, sim_plant, sim_run_writer):
+def test_case(sim_duration_s, sim_plant, sim_run_writer):
     fsw = build_flight_software(sim_plant.readers(), sim_plant.initial_state(), sim_plant.mu)
     recording = run_case(
         sim_plant,
         fsw,
         fsw_outputs=fsw.outputs,
-        duration_s=request.config.getoption("--sim-duration-s"),
+        duration_s=sim_duration_s,
     )
     datasets = recording.datasets({**sim_plant.recorded_fields, **ESTIMATE_FIELDS})
     sim_run_writer(datasets, extra_attrs={"versions_flight_software": FSW_VERSION})
@@ -214,5 +221,5 @@ A release changes these only as a breaking change: the import paths and names in
 [Modules](#modules); the `Plant` members in [Plants](#plants); the roles, initial-state keys and
 dataset names in the `ImuSpacecraft` tables; the `run_case` and `Recording` signatures in
 [Running one case](#running-one-case); the root attributes in [Run files](#run-files); and the
-options, fixtures, case seeding and `sim_out_dir` in [pytest plugin](#pytest-plugin). `tests/test_interface.py` and `tests/test_pytest_plugin.py`
-hold them.
+options, fixtures and case seeding in [pytest plugin](#pytest-plugin).
+`tests/test_interface.py` and `tests/test_pytest_plugin.py` hold them.
