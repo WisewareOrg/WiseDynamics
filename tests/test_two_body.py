@@ -7,6 +7,7 @@ import numpy as np
 from tests.support import run_with_stub
 from wise_dynamics.basilisk import ImuSpacecraft, OrbitElements
 
+# Earth's mu in Basilisk 2.12.1's gravBodyFactory().createEarth(), m^3/s^2.
 EARTH_MU_M3_S2 = 3.986004360e14
 DURATION_S = 5700.0
 

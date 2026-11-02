@@ -3,15 +3,15 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol
 
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
 
-from wise_dynamics.campaign import distribution_version
-from wise_dynamics.dispersion import Dispersion
+from wise_dynamics.dispersion import DataclassConfig, Dispersion
+from wise_dynamics.provenance import distribution_version
 
-__all__ = ["Plant", "RecordedField"]
+__all__ = ["Plant", "PlantConfig", "RecordedField"]
 
 # Basilisk's SWIG-generated message, reader and module classes are typed as `Any`.
 type Message = Any
@@ -35,47 +35,61 @@ class RecordedField:
     units: str
 
 
-class Plant[ConfigT](ABC):
+class PlantConfig(DataclassConfig, Protocol):
+    """A plant's configuration: a dataclass carrying the plant's step."""
+
+    @property
+    def step_s(self) -> float:
+        """The dynamics and sensor step, in seconds."""
+        ...
+
+
+class Plant[ConfigT: PlantConfig](ABC):
     """A spacecraft plant on its own Basilisk simulation, process and task.
 
-    A subclass builds its models in its constructor, which has the signature
-    `__init__(self, config: ConfigT | None = None, *, noise_seed: int = 0)`, with `None`
-    selecting `nominal()`. A plant runs once: `execute` initializes and runs the simulation,
-    and a new plant is built for the next run.
+    A plant runs once: `execute` initializes and runs the simulation, and a new plant is built
+    for the next run. A subclass implements `nominal()`, `_build()` and the abstract members
+    below, and sets two class attributes:
 
-    Class attributes a subclass sets:
-        standard_dispersion: The vehicle's standard per-case dispersion of its configuration.
-        recorded_fields: Run-file dataset name to the truth message field it records, with
-            units, covering every field of `truth_messages()` a run file carries.
+    - `standard_dispersion`: the vehicle's standard per-case dispersion of its configuration.
+    - `recorded_fields`: run-file dataset name to the truth message field it records, with
+      units, covering every field of `truth_messages()` a run file carries.
     """
 
     standard_dispersion: ClassVar[Dispersion]
     recorded_fields: ClassVar[Mapping[str, RecordedField]]
 
-    def __init__(self, config: ConfigT, *, step_s: float) -> None:
-        """Create the plant's simulation, with one process holding one task.
+    def __init__(self, config: ConfigT | None = None, *, noise_seed: int = 0) -> None:
+        """Build the plant: its simulation, one process holding one task at `config.step_s`, and
+        the subclass's models.
 
         Args:
-            config: The configuration the subclass builds from, kept as `config`.
-            step_s: The task's period, in seconds: the dynamics, sensor and flight-software
-                step.
+            config: The configuration to build; `None` selects `nominal()`.
+            noise_seed: Seed of the plant's sensor-noise generators.
 
         Raises:
-            ValueError: `step_s` is not positive.
+            ValueError: `config.step_s` is not positive.
         """
+        self._config = self.nominal() if config is None else config
+        step_s = self._config.step_s
         if not step_s > 0:
             raise ValueError(f"step must be positive, got {step_s} s")
-        self._config = config
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._task_name = "plant_task"
         process = self._simulation.CreateNewProcess("plant_process")
         process.addTask(self._simulation.CreateNewTask(self._task_name, macros.sec2nano(step_s)))
         self._executed = False
+        self._build(self._config, noise_seed)
 
     @classmethod
     @abstractmethod
     def nominal(cls) -> ConfigT:
         """The vehicle's nominal configuration."""
+
+    @abstractmethod
+    def _build(self, config: ConfigT, noise_seed: int) -> None:
+        """Add the plant's models to its task, built from `config`, with sensor noise seeded by
+        `noise_seed`."""
 
     @property
     def config(self) -> ConfigT:

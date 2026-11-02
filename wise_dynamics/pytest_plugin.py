@@ -6,25 +6,33 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 
 import secrets
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import pytest
 
-from wise_dynamics.campaign import Campaign
+from wise_dynamics.campaign import Campaign, Case
 from wise_dynamics.run_file import Dataset
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
 
-__all__ = ["campaign_from_config"]
+__all__ = ["RunWriter", "campaign_from_config"]
 
 _CAMPAIGN = pytest.StashKey[Campaign]()
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 
-type RunWriter = Callable[[Mapping[str, Dataset], Mapping[str, Any] | None], Path]
+
+class RunWriter(Protocol):
+    """The `sim_run_writer` fixture's value: writes the case's run file."""
+
+    def __call__(
+        self, datasets: Mapping[str, Dataset], extra_attrs: Mapping[str, Any] | None = None
+    ) -> Path:
+        """Write `<out_dir>/run_<NNNN>.h5` and return its path; see `wise_dynamics.Case.write`."""
+        ...
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -161,20 +169,23 @@ def sim_draws(sim_campaign: Campaign, sim_case_index: int) -> Mapping[str, np.nd
 
 
 @pytest.fixture
-def sim_plant(
-    sim_campaign: Campaign, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> "Plant[Any]":
-    """This case's plant, built from `sim_draws` with the case's own sensor-noise seed."""
-    return sim_campaign.case(sim_case_index, sim_draws).build_plant()
+def sim_case(sim_campaign: Campaign, sim_case_index: int, sim_draws: Mapping[str, Any]) -> Case:
+    """This case: its index, its `sim_draws`, its configuration and sensor-noise seed, its run
+    path."""
+    return sim_campaign.case(sim_case_index, sim_draws)
 
 
 @pytest.fixture
-def sim_run_writer(
-    sim_campaign: Campaign, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> RunWriter:
+def sim_plant(sim_case: Case) -> "Plant[Any]":
+    """This case's plant, built from `sim_case`'s configuration and sensor-noise seed."""
+    return sim_case.build_plant()
+
+
+@pytest.fixture
+def sim_run_writer(sim_case: Case) -> RunWriter:
     """Writes this case's run file: `writer(datasets, extra_attrs=None) -> Path`.
 
     The file is `<out_dir>/run_<NNNN>.h5` and carries the case's root attributes and
     `draw_<name>` attributes; see `wise_dynamics.Case.write`.
     """
-    return sim_campaign.case(sim_case_index, sim_draws).write
+    return sim_case.write

@@ -39,3 +39,11 @@ def test_a_run_file_is_written_once(tmp_path):
 def test_a_dataset_without_units_is_refused(tmp_path):
     with pytest.raises(ValueError, match="t_s"):
         write_run(tmp_path / "run_0000.h5", {"t_s": Dataset(np.zeros(1), "")}, {})
+
+
+def test_a_failed_write_leaves_no_file(tmp_path):
+    path = tmp_path / "run_0000.h5"
+    with pytest.raises(TypeError):
+        write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {"bad": None})
+    assert not path.exists()
+    write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {})

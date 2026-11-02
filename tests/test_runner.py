@@ -45,6 +45,23 @@ def test_a_flight_software_role_equal_to_a_truth_role_is_refused():
         run_case(ImuSpacecraft(), stub, fsw_outputs={"truth": stub.output_msg}, duration_s=1.0)
 
 
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"duration_s": 0.0}, "duration must be positive"),
+        ({"record_s": 0.0}, "recording period must be positive"),
+    ],
+)
+def test_refused_arguments_leave_the_plant_unchanged(overrides, message):
+    plant = ImuSpacecraft()
+    models_before = len(plant.simulation.TaskList[0].TaskModels)
+    stub = StubFsw()
+    arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, **overrides}
+    with pytest.raises(ValueError, match=message):
+        run_case(plant, stub, **arguments)
+    assert len(plant.simulation.TaskList[0].TaskModels) == models_before
+
+
 def test_a_field_absent_from_its_recorder_is_named():
     recording = run_with_stub(ImuSpacecraft(), duration_s=10.0)
     with pytest.raises(ValueError, match="r_BN_N"):

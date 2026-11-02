@@ -32,6 +32,8 @@ def write_run(
 ) -> Path:
     """Write one run file, creating its parent directories as needed.
 
+    A write that fails part-way removes the file it created and re-raises.
+
     Args:
         path: The file to create. Its parent directories are created when absent.
         datasets: Dataset name to `Dataset`. A name may contain `/` to place the dataset in a
@@ -45,6 +47,7 @@ def write_run(
     Raises:
         FileExistsError: `path` already exists; a run file is written exactly once.
         ValueError: A dataset has an empty units string.
+        TypeError: An attribute or dataset value is of a type HDF5 cannot store.
     """
     path = Path(path)
     for name, (_, units) in datasets.items():
@@ -52,10 +55,15 @@ def write_run(
             raise ValueError(f"dataset {name!r} has an empty units string")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(path, "w-") as run_file:
-        for name, value in attrs.items():
-            run_file.attrs[name] = value
-        for name, (data, units) in datasets.items():
-            dataset = run_file.create_dataset(name, data=np.asarray(data, dtype=np.float64))
-            dataset.attrs["units"] = units
+    run_file = h5py.File(path, "w-")
+    try:
+        with run_file:
+            for name, value in attrs.items():
+                run_file.attrs[name] = value
+            for name, (data, units) in datasets.items():
+                dataset = run_file.create_dataset(name, data=np.asarray(data, dtype=np.float64))
+                dataset.attrs["units"] = units
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return path

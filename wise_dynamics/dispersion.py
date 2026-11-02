@@ -4,11 +4,17 @@ import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, ClassVar, Protocol
 
 import numpy as np
 
-__all__ = ["Dispersion", "apply_draws"]
+__all__ = ["DataclassConfig", "Dispersion", "apply_draws"]
+
+
+class DataclassConfig(Protocol):
+    """Any dataclass instance: the shape of a plant configuration."""
+
+    __dataclass_fields__: ClassVar[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -26,7 +32,7 @@ class Dispersion:
     def __post_init__(self) -> None:
         object.__setattr__(self, "std", MappingProxyType(dict(self.std)))
 
-    def draw(self, nominal: Any, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    def draw(self, nominal: DataclassConfig, rng: np.random.Generator) -> dict[str, np.ndarray]:
         """Draw one set of dispersed values around a nominal configuration.
 
         Args:
@@ -48,7 +54,7 @@ class Dispersion:
         }
 
 
-def apply_draws[ConfigT](config: ConfigT, draws: Mapping[str, Any]) -> ConfigT:
+def apply_draws[ConfigT: DataclassConfig](config: ConfigT, draws: Mapping[str, Any]) -> ConfigT:
     """Return a copy of a configuration with drawn 3-vector values in place of its own.
 
     Args:
@@ -72,7 +78,7 @@ def apply_draws[ConfigT](config: ConfigT, draws: Mapping[str, Any]) -> ConfigT:
     return dataclasses.replace(config, **replacements)
 
 
-def _vector_field(config: Any, name: str) -> np.ndarray:
+def _vector_field(config: DataclassConfig, name: str) -> np.ndarray:
     """The named 3-vector field of a configuration dataclass, as a float array."""
     names = {field.name for field in dataclasses.fields(config)}
     if name not in names:

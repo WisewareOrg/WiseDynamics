@@ -5,8 +5,9 @@ import math
 import numpy as np
 import pytest
 
-from wise_dynamics import Dispersion, apply_draws
+from wise_dynamics import Dispersion
 from wise_dynamics.basilisk import ImuSpacecraft, ImuSpacecraftConfig
+from wise_dynamics.dispersion import apply_draws
 
 D2R = math.pi / 180.0
 

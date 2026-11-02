@@ -167,3 +167,21 @@ def test_a_plant_runs_once():
     plant.execute(1.0)
     with pytest.raises(RuntimeError, match="already run"):
         plant.execute(1.0)
+
+
+@pytest.mark.parametrize(
+    ("elements", "message"),
+    [
+        ({"semi_major_axis_m": 0.0}, "semi-major axis must be positive"),
+        ({"eccentricity": 1.0}, r"eccentricity must be in \[0, 1\)"),
+        ({"eccentricity": -0.1}, r"eccentricity must be in \[0, 1\)"),
+    ],
+)
+def test_orbit_elements_outside_a_closed_orbit_are_refused(elements, message):
+    with pytest.raises(ValueError, match=message):
+        OrbitElements(**elements)
+
+
+def test_a_plant_with_a_non_positive_step_is_refused():
+    with pytest.raises(ValueError, match="step must be positive"):
+        ImuSpacecraft(ImuSpacecraftConfig(step_s=0.0))

@@ -5,11 +5,9 @@ This module loads with numpy, h5py and the standard library. `Campaign.plant` na
 plant class.
 """
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib.metadata import distribution
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -17,12 +15,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from wise_dynamics.dispersion import apply_draws
+from wise_dynamics.provenance import distribution_version
 from wise_dynamics.run_file import Dataset, write_run
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
 
-__all__ = ["Campaign", "Case", "distribution_version"]
+__all__ = ["Campaign", "Case"]
 
 
 @dataclass(frozen=True)
@@ -105,12 +104,7 @@ class Campaign:
         """
         return np.random.default_rng(self._streams(index)[0])
 
-    def noise_seed(self, index: int) -> int:
-        """The integer seed of case `index`'s sensor-noise generator, from its second stream.
-
-        Raises:
-            ValueError: `index` is outside the campaign.
-        """
+    def _noise_seed(self, index: int) -> int:
         return int(self._streams(index)[1].generate_state(1)[0])
 
     def standard_draws(self, index: int) -> dict[str, np.ndarray]:
@@ -140,7 +134,8 @@ class Case:
         draws: Configuration field name to the value this case uses in place of the nominal
             one, stored as read-only float arrays.
         config: The plant's nominal configuration with `draws` applied.
-        noise_seed: The integer seed of this case's sensor-noise generator.
+        noise_seed: The integer seed of this case's sensor-noise generator, from the second of
+            its random streams.
 
     Raises:
         ValueError: `index` is outside the campaign, or a draw names a field the plant's
@@ -159,7 +154,7 @@ class Case:
         object.__setattr__(self, "draws", MappingProxyType(frozen))
         config = apply_draws(self.campaign.plant_type.nominal(), frozen)
         object.__setattr__(self, "config", config)
-        object.__setattr__(self, "noise_seed", self.campaign.noise_seed(self.index))
+        object.__setattr__(self, "noise_seed", self.campaign._noise_seed(self.index))
 
     def build_plant(self) -> "Plant[Any]":
         """A new plant built from `config`, its sensor noise seeded with `noise_seed`."""
@@ -212,24 +207,3 @@ class Case:
         if reserved:
             raise ValueError(f"extra_attrs may not set the reserved root attrs {reserved}")
         return write_run(self.run_path, datasets, {**attrs, **extra_attrs})
-
-
-def distribution_version(name: str) -> str:
-    """The installed version of a distribution, with the commit it was installed from.
-
-    Args:
-        name: The distribution name, for example `"wise-dynamics"` or `"bsk"`.
-
-    Returns:
-        The version from the distribution's metadata. When the install recorded a version-control
-        commit in its `direct_url.json`, `+` and the commit's first 12 characters are appended,
-        for example `"0.1.0+04150b23305d"`.
-
-    Raises:
-        importlib.metadata.PackageNotFoundError: `name` is not installed.
-        json.JSONDecodeError: The install's `direct_url.json` is malformed.
-    """
-    installed = distribution(name)
-    direct_url = installed.read_text("direct_url.json")
-    commit = json.loads(direct_url).get("vcs_info", {}).get("commit_id") if direct_url else None
-    return f"{installed.version}+{commit[:12]}" if commit else installed.version

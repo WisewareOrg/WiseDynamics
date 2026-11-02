@@ -83,7 +83,8 @@ def run_case(
 
     Adds `fsw_module` to the plant's task after the plant's own models, records every message
     of `plant.truth_messages()` and of `fsw_outputs` every `record_s` from t = 0, and runs the
-    plant for `duration_s`. The plant runs once, so a second case needs a new plant.
+    plant for `duration_s`. The arguments are checked before the plant is changed. The plant
+    runs once, so a second case needs a new plant.
 
     Args:
         plant: The plant to run.
@@ -107,6 +108,8 @@ def run_case(
         raise ValueError(f"fsw_outputs reuses the plant's truth roles {collisions}")
     if not record_s > 0:
         raise ValueError(f"recording period must be positive, got {record_s} s")
+    if not duration_s > 0:
+        raise ValueError(f"duration must be positive, got {duration_s} s")
 
     plant.add_model(fsw_module)
     period_ns = macros.sec2nano(record_s)

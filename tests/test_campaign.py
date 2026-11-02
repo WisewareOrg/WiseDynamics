@@ -1,6 +1,5 @@
 """`Campaign` and `Case`: seeding, draws, the plant a case builds, and its run file."""
 
-import json
 import re
 from importlib.metadata import version
 from pathlib import Path
@@ -9,8 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
-import wise_dynamics.campaign
-from wise_dynamics import Campaign, Dataset, distribution_version
+from wise_dynamics import Campaign, Dataset
 
 # Case 5 of campaign seed 0, as recorded by wise-dynamics at 04150b2: every campaign recorded
 # since reproduces only while these hold.
@@ -43,7 +41,7 @@ def test_a_case_is_the_same_whatever_the_campaign_size(tmp_path):
 def test_cases_and_seeds_differ(tmp_path):
     first, second = make_campaign(tmp_path).case(0), make_campaign(tmp_path).case(1)
     other_seed = make_campaign(tmp_path, seed=1).case(0)
-    assert first.noise_seed != second.noise_seed != other_seed.noise_seed
+    assert len({first.noise_seed, second.noise_seed, other_seed.noise_seed}) == 3
     for name in first.draws:
         assert not np.allclose(first.draws[name], second.draws[name])
         assert not np.allclose(first.draws[name], other_seed.draws[name])
@@ -122,43 +120,3 @@ def test_out_dir_is_absolute(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     campaign = Campaign("imu_spacecraft", seed=0, runs=1, duration_s=1.0, out_dir=Path("runs"))
     assert campaign.out_dir == tmp_path / "runs"
-
-
-class _FakeDistribution:
-    def __init__(self, direct_url: str | None) -> None:
-        self.version = "1.2.3"
-        self._direct_url = direct_url
-
-    def read_text(self, filename: str) -> str | None:
-        return self._direct_url if filename == "direct_url.json" else None
-
-
-@pytest.mark.parametrize(
-    ("direct_url", "expected"),
-    [
-        (None, "1.2.3"),
-        (json.dumps({"url": "file:///src", "dir_info": {}}), "1.2.3"),
-        (
-            json.dumps({"vcs_info": {"vcs": "git", "commit_id": "0123456789abcdef0123"}}),
-            "1.2.3+0123456789ab",
-        ),
-    ],
-)
-def test_distribution_version_appends_a_recorded_commit(monkeypatch, direct_url, expected):
-    monkeypatch.setattr(
-        wise_dynamics.campaign, "distribution", lambda _: _FakeDistribution(direct_url)
-    )
-    assert distribution_version("anything") == expected
-
-
-def test_distribution_version_raises_on_a_malformed_direct_url(monkeypatch):
-    monkeypatch.setattr(wise_dynamics.campaign, "distribution", lambda _: _FakeDistribution("{"))
-    with pytest.raises(json.JSONDecodeError):
-        distribution_version("anything")
-
-
-def test_distribution_version_raises_for_a_missing_distribution():
-    from importlib.metadata import PackageNotFoundError
-
-    with pytest.raises(PackageNotFoundError):
-        distribution_version("wise-dynamics-absent-distribution")

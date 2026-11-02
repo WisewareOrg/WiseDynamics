@@ -13,7 +13,8 @@ from typing import ClassVar
 
 import numpy as np
 from Basilisk.architecture import messaging
-from Basilisk.simulation import imuSensor, spacecraft
+from Basilisk.simulation import imuSensor
+from Basilisk.simulation import spacecraft as bsk_spacecraft
 from Basilisk.utilities import orbitalMotion, simHelpers, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
@@ -37,6 +38,9 @@ class OrbitElements:
         raan_rad: Right ascension of the ascending node, in radians.
         arg_periapsis_rad: Argument of periapsis, in radians.
         true_anomaly_rad: True anomaly at t = 0, in radians.
+
+    Raises:
+        ValueError: `semi_major_axis_m` is not positive, or `eccentricity` is outside [0, 1).
     """
 
     semi_major_axis_m: float = 6871.0e3
@@ -45,6 +49,12 @@ class OrbitElements:
     raan_rad: float = 48.2 * D2R
     arg_periapsis_rad: float = 347.8 * D2R
     true_anomaly_rad: float = 85.3 * D2R
+
+    def __post_init__(self) -> None:
+        if not self.semi_major_axis_m > 0:
+            raise ValueError(f"semi-major axis must be positive, got {self.semi_major_axis_m} m")
+        if not 0 <= self.eccentricity < 1:
+            raise ValueError(f"eccentricity must be in [0, 1), got {self.eccentricity}")
 
     def to_inertial(self, mu: float) -> tuple[np.ndarray, np.ndarray]:
         """Position and velocity of the orbit at its true anomaly.
@@ -139,9 +149,10 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         }
     )
 
-    def __init__(self, config: ImuSpacecraftConfig | None = None, *, noise_seed: int = 0) -> None:
-        config = self.nominal() if config is None else config
-        super().__init__(config, step_s=config.step_s)
+    spacecraft: bsk_spacecraft.Spacecraft
+    imu: imuSensor.ImuSensor
+
+    def _build(self, config: ImuSpacecraftConfig, noise_seed: int) -> None:
         self.spacecraft = self._build_hub(config)
         self._mu = self._build_gravity()
         r_N, v_N = config.orbit.to_inertial(self._mu)
@@ -185,8 +196,8 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
             "omega0_BN_B": np.array(hub.omega_BN_BInit, dtype=float).flatten(),
         }
 
-    def _build_hub(self, config: ImuSpacecraftConfig) -> spacecraft.Spacecraft:
-        hub_object = spacecraft.Spacecraft()
+    def _build_hub(self, config: ImuSpacecraftConfig) -> bsk_spacecraft.Spacecraft:
+        hub_object = bsk_spacecraft.Spacecraft()
         hub_object.ModelTag = "spacecraft"
         hub_object.hub.mHub = config.hub.mass_kg
         hub_object.hub.r_BcB_B = _column((0.0, 0.0, 0.0))

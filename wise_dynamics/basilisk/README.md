@@ -9,23 +9,24 @@ contract.
 
 | module | holds |
 |---|---|
-| `wise_dynamics/campaign.py` | `Campaign` and `Case`: seeding, draws, the plant a case builds, its run file; `distribution_version` |
-| `wise_dynamics/dispersion.py` | `Dispersion` and `apply_draws`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/campaign.py` | `Campaign` and `Case`: seeding, draws, the plant a case builds, its run file |
+| `wise_dynamics/dispersion.py` | `Dispersion`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
 | `wise_dynamics/run_file.py` | `Dataset` and `write_run`: one HDF5 run file |
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `campaign_from_config` |
-| `wise_dynamics/basilisk/plant.py` | `Plant`, the contract every plant meets; `RecordedField` |
+| `wise_dynamics/basilisk/plant.py` | `Plant`, the contract every plant meets; `PlantConfig`; `RecordedField` |
 | `wise_dynamics/basilisk/runner.py` | `run_case` and `Recording` |
 | `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one module per plant |
 
-`wise_dynamics` re-exports `Campaign`, `Case`, `Dataset`, `Dispersion`, `apply_draws`,
-`distribution_version` and `write_run`. `wise_dynamics.basilisk` re-exports `Plant`,
-`RecordedField`, `Recording`, `run_case`, `PLANTS` and the `ImuSpacecraft` classes.
+Consumers import from the two packages, `wise_dynamics` and `wise_dynamics.basilisk`; each
+declares its public names in `__all__`.
 
 ## Plants
 
 A plant is a `Plant` subclass: it owns its own Basilisk simulation with one process and one
-task, built in its constructor `(config=None, *, noise_seed=0)` from a frozen configuration
-dataclass. Each plant class provides:
+task, built by the constructor `(config=None, *, noise_seed=0)` from a frozen configuration
+dataclass, which carries the step as `step_s`. A subclass adds its models in `_build(config,
+noise_seed)`. Each plant class provides:
 
 - `nominal()`, the vehicle's nominal configuration;
 - `standard_dispersion`, the vehicle's standard per-case dispersion;
@@ -34,6 +35,7 @@ dataclass. Each plant class provides:
 - `readers()`, sensor outputs by role as subscribed Basilisk message readers;
 - `truth_messages()`, recordable output messages by role;
 - `initial_state()`, the initial condition by key;
+- `config`, the configuration it was built from;
 - `add_model(module)` and `execute(duration_s)`. A plant runs once.
 
 ### `imu_spacecraft`: `ImuSpacecraft`
@@ -100,9 +102,10 @@ first. A flight-software module reads `plant.readers()` and starts from
 >>> from Basilisk.fswAlgorithms import inertial3D
 >>> from wise_dynamics import Campaign
 >>> from wise_dynamics.basilisk import RecordedField, run_case
+>>> scratch = tempfile.TemporaryDirectory()
 >>> campaign = Campaign(
 ...     "imu_spacecraft", seed=0, runs=852, duration_s=60.0,
-...     out_dir=Path(tempfile.mkdtemp()) / "campaign",
+...     out_dir=Path(scratch.name) / "campaign",
 ... )
 >>> case = campaign.case(417)
 >>> plant = case.build_plant()
@@ -123,6 +126,7 @@ first. A flight-software module reads `plant.readers()` and starts from
 (7, 3)
 >>> case.write(datasets).name
 'run_0417.h5'
+>>> scratch.cleanup()
 
 ```
 
@@ -167,7 +171,7 @@ attributes:
 Installing `wise-dynamics` registers the plugin through its `pytest11` entry point, so a
 consumer's `conftest.py` names nothing; naming the module in `pytest_plugins` as well makes
 pytest raise "Plugin already registered under a different name". The plugin imports Basilisk
-only when a `sim_` fixture builds a plant.
+when pytest collects a test that uses a `sim_` fixture.
 
 | option | default | meaning |
 |---|---|---|
@@ -185,7 +189,8 @@ every pytest-xdist worker; the first run file creates it, and the terminal summa
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_campaign` | the session's `Campaign` (session scope) |
 | `sim_draws` | the case's draws; override it to supply a scenario's own |
-| `sim_plant` | the case's plant, built from `sim_draws` |
+| `sim_case` | the case's `Case`, built from `sim_draws` |
+| `sim_plant` | the case's plant, from `sim_case.build_plant()` |
 | `sim_run_writer` | `writer(datasets, extra_attrs=None) -> Path`, the case's `Case.write` |
 
 `campaign_from_config(config)` returns the session's `Campaign` from any hook, for example a
