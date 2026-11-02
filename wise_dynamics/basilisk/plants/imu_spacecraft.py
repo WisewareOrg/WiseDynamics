@@ -130,6 +130,10 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         imu: The Basilisk `ImuSensor`.
     """
 
+    mu: ClassVar[float] = 3.986004360e14
+    """Earth's gravitational parameter, in m^3/s^2: the point-mass gravity model's and the orbit
+    conversion's."""
+
     standard_dispersion: ClassVar[Dispersion] = Dispersion(
         {
             "sigma0_BN": 0.01,
@@ -154,8 +158,8 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
 
     def _build(self, config: ImuSpacecraftConfig, noise_seed: int) -> None:
         self.spacecraft = self._build_hub(config)
-        self._mu = self._build_gravity()
-        r_N, v_N = config.orbit.to_inertial(self._mu)
+        self._build_gravity()
+        r_N, v_N = config.orbit.to_inertial(self.mu)
         self.spacecraft.hub.r_CN_NInit = r_N.tolist()
         self.spacecraft.hub.v_CN_NInit = v_N.tolist()
         self.imu = self._build_imu(config, noise_seed)
@@ -164,11 +168,6 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
     def nominal(cls) -> ImuSpacecraftConfig:
         """The nominal vehicle, `ImuSpacecraftConfig()`."""
         return ImuSpacecraftConfig()
-
-    @property
-    def mu(self) -> float:
-        """Earth's gravitational parameter as the gravity model uses it, in m^3/s^2."""
-        return self._mu
 
     def readers(self) -> dict[str, MessageReader]:
         """Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output."""
@@ -209,12 +208,12 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         self.add_model(hub_object)
         return hub_object
 
-    def _build_gravity(self) -> float:
+    def _build_gravity(self) -> None:
         self._gravity = simIncludeGravBody.gravBodyFactory()
         earth = self._gravity.createEarth()
         earth.isCentralBody = True
+        earth.mu = self.mu
         self._gravity.addBodiesTo(self.spacecraft)
-        return float(earth.mu)
 
     def _build_imu(self, config: ImuSpacecraftConfig, noise_seed: int) -> imuSensor.ImuSensor:
         imu = imuSensor.ImuSensor()

@@ -24,7 +24,8 @@ def test_initial_state_returns_exactly_the_settled_keys():
     assert set(ImuSpacecraft().initial_state()) == {"sigma0_BN", "r0_N", "v0_N", "omega0_BN_B"}
 
 
-def test_mu_is_basilisk_earth_point_mass():
+def test_mu_is_earth_point_mass_on_the_class_and_the_plant():
+    assert ImuSpacecraft.mu == EARTH_MU_M3_S2
     assert ImuSpacecraft().mu == EARTH_MU_M3_S2
 
 

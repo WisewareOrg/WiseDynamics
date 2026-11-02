@@ -30,7 +30,8 @@ noise_seed)`. Each plant class provides:
 - `nominal()`, the vehicle's nominal configuration;
 - `standard_dispersion`, the vehicle's standard per-case dispersion;
 - `recorded_fields`, run-file dataset name to recorded message field and units;
-- `mu`, the central body's gravitational parameter in m^3/s^2;
+- `mu`, a class attribute: the central body's gravitational parameter its gravity model uses,
+  in m^3/s^2;
 - `readers()`, sensor outputs by role as subscribed Basilisk message readers;
 - `truth_messages()`, recordable output messages by role;
 - `initial_state()`, the initial condition by key;

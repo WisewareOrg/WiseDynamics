@@ -49,13 +49,15 @@ class Plant[ConfigT: PlantConfig](ABC):
 
     A plant runs once: `execute` initializes and runs the simulation, and a new plant is built
     for the next run. A subclass implements `nominal()`, `_build()` and the abstract members
-    below, and sets two class attributes:
+    below, and sets three class attributes:
 
+    - `mu`: the central body's gravitational parameter its gravity model uses, in m^3/s^2.
     - `standard_dispersion`: the vehicle's standard per-case dispersion of its configuration.
     - `recorded_fields`: run-file dataset name to the truth message field it records, with
       units, covering every field of `truth_messages()` a run file carries.
     """
 
+    mu: ClassVar[float]
     standard_dispersion: ClassVar[Dispersion]
     recorded_fields: ClassVar[Mapping[str, RecordedField]]
 
@@ -105,11 +107,6 @@ class Plant[ConfigT: PlantConfig](ABC):
     def task_name(self) -> str:
         """The name of the one task every model of this plant runs in."""
         return self._task_name
-
-    @property
-    @abstractmethod
-    def mu(self) -> float:
-        """The central body's gravitational parameter, in m^3/s^2."""
 
     @abstractmethod
     def readers(self) -> dict[str, MessageReader]:
