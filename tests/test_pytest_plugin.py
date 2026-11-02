@@ -1,147 +1,316 @@
-"""Checks `sim.basilisk.pytest_plugin`: its own provenance helper reads this package's installed
-version from distribution metadata; a 2-case campaign run through its fixtures, with a stub
-flight-software module, writes one run file per case, each carrying its own draws and its own
-distinct sensor noise; a campaign fanned over workers shares one output directory; a campaign
-still runs where pytest-xdist is absent; and a session with no case creates no directory at
-all."""
+"""The pytest plugin, exercised through real pytest sessions in subprocesses, loaded by its
+`pytest11` entry point."""
 
-import textwrap
-from importlib.metadata import version as pkg_version
+import json
+from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
-from sim.basilisk.pytest_plugin import _wise_dynamics_version
+import tests.support
+from wise_dynamics import Campaign
 
-_CAMPAIGN_SOURCE = textwrap.dedent(
-    """
-    import numpy as np
-    import pytest
-    from Basilisk.architecture import messaging, sysModel
+CAMPAIGN_TEST = """
+import numpy as np
 
-    from sim.basilisk.run import run_case
-
-
-    @pytest.fixture
-    def draws():
-        # Zero draws for every case, overriding the plugin's own dispersed `draws` fixture: the
-        # only thing left free to differ between cases is each one's own IMU noise seed, so a
-        # difference in recorded `gyro` below traces to that seed alone.
-        return {
-            "sigma0_BN": np.zeros(3),
-            "omega0_BN_B": np.zeros(3),
-            "gyro_bias": np.zeros(3),
-            "accel_bias": np.zeros(3),
-        }
+from support import StubFsw
+from wise_dynamics.basilisk import run_case
 
 
-    class _StubFsw(sysModel.SysModel):
-        def __init__(self):
-            super().__init__()
-            self.output_msg = messaging.NavAttMsg()
-
-        def UpdateState(self, CurrentSimNanos):
-            payload = messaging.NavAttMsgPayload()
-            payload.sigma_BN = [0.1, 0.2, 0.3]
-            self.output_msg.write(payload, CurrentSimNanos, self.moduleID)
-
-
-    def test_case(case_index, plant, run_writer):
-        stub = _StubFsw()
-        stub.ModelTag = "stub"
-        recorders = run_case(
-            plant, stub, {"stub_out": stub.output_msg}, duration_s=2.0, record_s=1.0
-        )
-        path = run_writer(
-            {
-                "sigma_BN": (np.array(recorders["truth"].sigma_BN), "-"),
-                "gyro": (np.array(recorders["imu"].AngVelPlatform), "rad/s"),
-            }
-        )
-        assert path.exists()
-    """
-)
-
-
-def test_version_matches_installed_distribution_metadata():
-    reported = _wise_dynamics_version()
-    assert reported.startswith(pkg_version("wise-dynamics"))
-
-
-def test_two_case_campaign_runs_with_distinct_noise_and_recorded_draws(pytester):
-    """Each case's own run file carries different IMU noise and the draws the plugin dispersed
-    for that case. The campaign's own `draws` fixture is overridden to zero so every case starts
-    identical and tumble-free; `gyro` then isolates the IMU noise seed alone (R1: a shared seed
-    across cases would make it identical), and the `draw_*` attrs are checked regardless (R5: a
-    writer that drops them would leave these attrs out). Relies on the `pytest11` entry point
-    to load the plugin in the subprocess -- no `conftest.py` declaration is written here."""
-    pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
-
-    out_dir = pytester.path / "out"
-    result = pytester.runpytest_subprocess("--sim-runs", "2", "--sim-out", str(out_dir))
-
-    result.assert_outcomes(passed=2)
-    written = sorted(out_dir.glob("run_*.h5"))
-    assert len(written) == 2
-
-    cases = [h5py.File(path, "r") for path in written]
-    try:
-        gyro_0 = np.array(cases[0]["gyro"])
-        gyro_1 = np.array(cases[1]["gyro"])
-        assert not np.allclose(gyro_0, gyro_1), "both cases recorded identical IMU noise"
-
-        for case in cases:
-            for name in ("sigma0_BN", "omega0_BN_B", "gyro_bias", "accel_bias"):
-                assert f"draw_{name}" in case.attrs, f"draw_{name} missing from {case.filename}"
-    finally:
-        for case in cases:
-            case.close()
-
-
-def test_default_out_dir_is_shared_across_xdist_workers_without_out(pytester, monkeypatch):
-    """Without `--sim-out`, `pytest_configure` falls back to `tempfile.mkdtemp`; under `-n W` each
-    worker is its own process, so without `pytest_configure_node` handing every worker the
-    controller's own resolved directory, each would pick its own and a campaign's files would
-    scatter. `TMPDIR` is redirected into this test's own tmp path only so the test can find
-    where the default directory landed; it plays no part in the plugin's own logic."""
-    monkeypatch.setenv("TMPDIR", str(pytester.path))
-    pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
-
-    result = pytester.runpytest_subprocess("-n", "2", "--sim-runs", "2")
-
-    result.assert_outcomes(passed=2)
-    run_files = list(pytester.path.rglob("run_*.h5"))
-    assert len(run_files) == 2
-    out_dirs = {path.parent for path in run_files}
-    assert len(out_dirs) == 1, f"run files scattered across directories: {out_dirs}"
-
-
-def test_campaign_runs_with_xdist_absent(pytester):
-    """`-p no:xdist` leaves xdist's own hookspecs unregistered -- the same state as xdist not
-    being installed at all. Loaded via the `pytest11` entry point, this plugin configures that
-    session regardless, so its `pytest_configure_node` (an xdist hookimpl with no matching
-    hookspec there) must not make pytest itself refuse to start."""
-    pytester.makepyfile(test_campaign=_CAMPAIGN_SOURCE)
-
-    out_dir = pytester.path / "out"
-    result = pytester.runpytest_subprocess(
-        "-p", "no:xdist", "--sim-runs", "1", "--sim-out", str(out_dir)
+def test_case(sim_campaign, sim_draws, sim_plant, sim_run_writer):
+    for name, value in sim_draws.items():
+        assert np.array_equal(getattr(sim_plant.config, name), value)
+    stub = StubFsw()
+    recording = run_case(
+        sim_plant,
+        stub,
+        fsw_outputs={"stub": stub.output_msg},
+        duration_s=sim_campaign.duration_s,
+        record_s=1.0,
     )
+    sim_run_writer(recording.datasets(sim_plant.recorded_fields))
+"""
 
-    result.assert_outcomes(passed=1)
+SHORT = ("--sim-duration-s", "3")
+
+
+@pytest.fixture
+def campaign_dir(pytester: pytest.Pytester) -> pytest.Pytester:
+    """A pytester directory holding the stub module and a one-test campaign."""
+    pytester.makepyfile(support=Path(tests.support.__file__).read_text())
+    pytester.makepyfile(test_campaign=CAMPAIGN_TEST)
+    return pytester
+
+
+def run_files(out_dir: Path) -> list[h5py.File]:
+    return [h5py.File(path, "r") for path in sorted(out_dir.glob("run_*.h5"))]
+
+
+def draws_of(run_file: h5py.File) -> dict[str, np.ndarray]:
+    return {
+        name.removeprefix("draw_"): np.array(value)
+        for name, value in run_file.attrs.items()
+        if name.startswith("draw_")
+    }
+
+
+def test_each_case_records_the_standard_draws_its_plant_used(campaign_dir):
+    out_dir = campaign_dir.path / "out"
+    result = campaign_dir.runpytest_subprocess("--sim-runs", "3", "--sim-out", str(out_dir), *SHORT)
+
+    result.assert_outcomes(passed=3)
+    campaign = Campaign("imu_spacecraft", seed=0, runs=3, duration_s=3.0, out_dir=out_dir)
+    files = run_files(out_dir)
+    assert [f.attrs["case"] for f in files] == [0, 1, 2]
+    for index, run_file in enumerate(files):
+        draws = draws_of(run_file)
+        expected = campaign.standard_draws(index)
+        assert draws.keys() == expected.keys()
+        for name, value in expected.items():
+            assert np.array_equal(draws[name], value), (index, name)
+        assert np.array_equal(run_file["truth/sigma_BN"][0], draws["sigma0_BN"])
+        assert np.allclose(
+            run_file["truth/omega_BN_B"][0], draws["omega0_BN_B"], rtol=0, atol=1e-15
+        )
+    for name in draws_of(files[0]):
+        assert not np.allclose(draws_of(files[0])[name], draws_of(files[1])[name])
+
+
+def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
+    """With every case at the nominal vehicle, the gyro record differs between cases through
+    each case's own noise seed alone."""
+    campaign_dir.makeconftest(
+        """
+        import pytest
+
+        @pytest.fixture
+        def sim_draws():
+            return {}
+        """
+    )
+    out_dir = campaign_dir.path / "out"
+    campaign_dir.runpytest_subprocess(
+        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
+    ).assert_outcomes(passed=2)
+
+    first, second = run_files(out_dir)
+    assert not draws_of(first) and not draws_of(second)
+    assert np.array_equal(first["truth/sigma_BN"][:], second["truth/sigma_BN"][:])
+    assert not np.allclose(first["imu/gyro_P"][1:], second["imu/gyro_P"][1:])
+
+
+def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign_dir):
+    campaign_dir.makeconftest(
+        """
+        import pytest
+
+        @pytest.fixture
+        def sim_draws(sim_campaign, sim_case_index):
+            rng = sim_campaign.draws_rng(sim_case_index)
+            return {"gyro_bias_P": rng.normal(0.0, 1e-3, size=3)}
+        """
+    )
+    out_dir = campaign_dir.path / "out"
+    campaign_dir.runpytest_subprocess(
+        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
+    ).assert_outcomes(passed=2)
+
+    campaign = Campaign("imu_spacecraft", seed=0, runs=2, duration_s=3.0, out_dir=out_dir)
+    for index, run_file in enumerate(run_files(out_dir)):
+        expected = campaign.draws_rng(index).normal(0.0, 1e-3, size=3)
+        assert draws_of(run_file).keys() == {"gyro_bias_P"}
+        assert np.array_equal(draws_of(run_file)["gyro_bias_P"], expected)
+
+
+def test_a_campaign_reproduces_from_its_seed(campaign_dir):
+    def campaign_data(seed: str, name: str) -> list[dict[str, np.ndarray]]:
+        out_dir = campaign_dir.path / name
+        campaign_dir.runpytest_subprocess(
+            "--sim-runs", "2", "--sim-seed", seed, "--sim-out", str(out_dir), *SHORT
+        ).assert_outcomes(passed=2)
+        return [
+            {**draws_of(f), **{key: f[key][:] for key in ("imu/gyro_P", "truth/sigma_BN")}}
+            for f in run_files(out_dir)
+        ]
+
+    first, again, other = campaign_data("3", "a"), campaign_data("3", "b"), campaign_data("4", "c")
+    for case_first, case_again, case_other in zip(first, again, other, strict=True):
+        for key, value in case_first.items():
+            assert np.array_equal(value, case_again[key]), key
+            assert not np.array_equal(value, case_other[key]), key
+
+
+def test_consumer_fixtures_with_common_names_leave_the_campaign_unchanged(campaign_dir):
+    campaign_dir.makeconftest(
+        """
+        import numpy as np
+        import pytest
+
+        @pytest.fixture
+        def rng():
+            return np.random.default_rng(1234)
+
+        @pytest.fixture
+        def seed():
+            return 99
+
+        @pytest.fixture
+        def out_dir(tmp_path):
+            return tmp_path
+
+        @pytest.fixture
+        def plant():
+            return None
+
+        @pytest.fixture
+        def draws():
+            return {}
+        """
+    )
+    out_dir = campaign_dir.path / "out"
+    campaign_dir.runpytest_subprocess(
+        "--sim-runs", "2", "--sim-out", str(out_dir), *SHORT
+    ).assert_outcomes(passed=2)
+
+    campaign = Campaign("imu_spacecraft", seed=0, runs=2, duration_s=3.0, out_dir=out_dir)
+    for index, run_file in enumerate(run_files(out_dir)):
+        for name, value in campaign.standard_draws(index).items():
+            assert np.array_equal(draws_of(run_file)[name], value)
+
+
+def test_campaign_from_config_returns_the_options(pytester, tmp_path):
+    report = tmp_path / "campaign.json"
+    pytester.makepyfile(
+        f"""
+        import json
+
+        from wise_dynamics.pytest_plugin import campaign_from_config
+
+        def test_campaign(request, sim_campaign):
+            campaign = campaign_from_config(request.config)
+            assert campaign is sim_campaign
+            fields = ("plant", "seed", "runs", "duration_s", "out_dir")
+            values = {{name: str(getattr(campaign, name)) for name in fields}}
+            open({str(report)!r}, "w").write(json.dumps(values))
+        """
+    )
+    pytester.runpytest_subprocess(
+        "--sim-runs",
+        "3",
+        "--sim-seed",
+        "7",
+        "--sim-duration-s",
+        "12.5",
+        "--sim-spacecraft",
+        "imu_spacecraft",
+        "--sim-out",
+        "relative/out",
+    ).assert_outcomes(passed=1)
+
+    assert json.loads(report.read_text()) == {
+        "plant": "imu_spacecraft",
+        "seed": "7",
+        "runs": "3",
+        "duration_s": "12.5",
+        "out_dir": str(pytester.path / "relative" / "out"),
+    }
+
+
+def test_workers_share_the_default_out_dir(campaign_dir, monkeypatch):
+    """`TMPDIR` points the default directory into this test's own directory, where it can be
+    found."""
+    monkeypatch.setenv("TMPDIR", str(campaign_dir.path))
+    result = campaign_dir.runpytest_subprocess("-n", "2", "--sim-runs", "2", *SHORT)
+
+    result.assert_outcomes(passed=2)
+    files = list(campaign_dir.path.rglob("run_*.h5"))
+    assert len(files) == 2
+    assert len({path.parent for path in files}) == 1
+    result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {files[0].parent}"])
+
+
+def test_workers_share_a_relative_out_dir_resolved_by_the_controller(campaign_dir):
+    """Each worker changes directory before the plugin configures it; the run files still land
+    in the directory the controller resolved."""
+    campaign_dir.makeconftest(
+        """
+        import os
+        import pytest
+
+        @pytest.hookimpl(tryfirst=True)
+        def pytest_configure(config):
+            if hasattr(config, "workerinput"):
+                worker_dir = config.rootpath / config.workerinput["workerid"]
+                worker_dir.mkdir()
+                os.chdir(worker_dir)
+        """
+    )
+    campaign_dir.runpytest_subprocess(
+        "-n", "2", "--sim-runs", "2", "--sim-out", "out", *SHORT
+    ).assert_outcomes(passed=2)
+    assert len(list((campaign_dir.path / "out").glob("run_*.h5"))) == 2
+
+
+def test_a_campaign_runs_without_xdist(campaign_dir):
+    out_dir = campaign_dir.path / "out"
+    campaign_dir.runpytest_subprocess(
+        "-p", "no:xdist", "--sim-runs", "1", "--sim-out", str(out_dir), *SHORT
+    ).assert_outcomes(passed=1)
     assert len(list(out_dir.glob("run_*.h5"))) == 1
 
 
-def test_a_session_with_no_case_creates_no_out_dir(pytester, monkeypatch):
-    """`pytest_configure` computes the default `out_dir` path without creating it, because this
-    plugin, loaded via the `pytest11` entry point, configures every session of a consumer that
-    has `wise-dynamics` installed -- most of which run no case and call `run_writer` never.
-    `TMPDIR` is redirected into this test's own tmp path only so the test can assert nothing
-    landed there; it plays no part in the plugin's own logic."""
+def test_a_session_with_no_case_creates_no_directory(pytester, monkeypatch):
     monkeypatch.setenv("TMPDIR", str(pytester.path))
-    pytester.makepyfile(test_nothing="def test_nothing():\n    pass\n")
-
-    result = pytester.runpytest_subprocess()
-
-    result.assert_outcomes(passed=1)
+    pytester.makepyfile("def test_nothing():\n    pass\n")
+    pytester.runpytest_subprocess().assert_outcomes(passed=1)
     assert not list(pytester.path.glob("wise_dynamics_*"))
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("--sim-runs", "0", "a campaign needs at least one run, got 0"),
+        ("--sim-duration-s", "0", "case duration must be positive, got 0.0 s"),
+        ("--sim-seed", "-1", "campaign seed must be non-negative, got -1"),
+    ],
+)
+def test_out_of_range_options_are_usage_errors(pytester, option, value, message):
+    pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
+    result = pytester.runpytest_subprocess(option, value)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines([f"ERROR: wise-dynamics: {message}"])
+
+
+def test_an_unknown_spacecraft_fails_collection_naming_it_and_the_known_ones(pytester):
+    pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
+    result = pytester.runpytest_subprocess("--sim-spacecraft", "bogus")
+    assert result.ret == pytest.ExitCode.INTERRUPTED
+    result.stdout.fnmatch_lines(
+        [
+            "*UsageError: wise-dynamics: --sim-spacecraft: unknown plant 'bogus'; "
+            "known plants: imu_spacecraft"
+        ]
+    )
+
+
+def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
+    out_dir = pytester.path / "out"
+    out_dir.mkdir()
+    (out_dir / "run_0000.h5").write_bytes(b"")
+    pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
+    result = pytester.runpytest_subprocess("--sim-out", str(out_dir))
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines([f"ERROR: --sim-out {out_dir} already holds 1 run files*"])
+
+
+def test_consumer_options_with_short_names_coexist_with_the_plugin(pytester):
+    pytester.makeconftest(
+        """
+        def pytest_addoption(parser):
+            for name in ("--runs", "--out", "--seed", "--duration-s", "--spacecraft"):
+                parser.addoption(name, action="store")
+        """
+    )
+    pytester.makepyfile("def test_nothing():\n    pass\n")
+    pytester.runpytest_subprocess("--out", "x").assert_outcomes(passed=1)

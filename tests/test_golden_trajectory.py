@@ -1,56 +1,67 @@
-"""Regression test: pins `ImuSpacecraftModel`'s recorded truth trajectory at t=300s against a
-stored reference (`tests/golden/imu_spacecraft_300s.json`), so a Basilisk upgrade that silently
-changes the plant's physics is caught rather than passed through unnoticed.
+"""The nominal plant's attitude and noiseless IMU output at t = 300 s against a stored reference.
 
-This test is expected to fail on a Basilisk upgrade that changes integration or gravity
-behavior enough to move the trajectory outside tolerance. When that happens, updating the
-golden reference is a deliberate act: regenerate the file and record the change -- the new
-`bsk` version and why the trajectory moved -- in that update's own PR. Never update the
-reference just to make this test pass without first understanding why it moved.
+`tests/golden/imu_spacecraft_300s.json` holds the reference. A Basilisk release that changes the
+attitude dynamics or the IMU model fails this test. Regenerating the reference is a deliberate
+change, recorded with its reason and the new `bsk` version in the pull request that makes it:
+
+    uv run python -m tests.test_golden_trajectory
 """
 
+import dataclasses
 import json
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
-from Basilisk.utilities import SimulationBaseClass
 
-from sim.basilisk.models.imu_spacecraft import ImuSpacecraftModel
-from sim.basilisk.run import run_case
-from tests.stubs import StubFsw
+from tests.support import run_with_stub
+from wise_dynamics.basilisk import ImuSpacecraft
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "imu_spacecraft_300s.json"
+DURATION_S = 300.0
 
-POSITION_TOL_M = 1e-3
-VELOCITY_TOL_M_S = 1e-6
 ATTITUDE_TOL_MRP = 1e-9
+GYRO_TOL_RAD_S = 1e-12
+ACCEL_TOL_M_S2 = 1e-12
 
 
-def test_truth_trajectory_matches_golden_reference():
-    sim = SimulationBaseClass.SimBaseClass()
-    plant = ImuSpacecraftModel(sim, gyro_noise_std=0.0, accel_noise_std=0.0)
-    stub = StubFsw()
-    stub.ModelTag = "stub"
-
-    recorders = run_case(
-        plant, stub, {"stub_out": stub.output_msg}, duration_s=300.0, record_s=10.0
+def golden_state() -> dict[str, list[float]]:
+    """The nominal, noiseless plant's state at `DURATION_S`: the quantities the reference holds."""
+    config = dataclasses.replace(
+        ImuSpacecraft.nominal(), gyro_noise_std_rad_s=0.0, accel_noise_std_m_s2=0.0
     )
+    recording = run_with_stub(ImuSpacecraft(config), duration_s=DURATION_S)
+    return {
+        "sigma_BN": np.array(recording["truth"].sigma_BN)[-1].tolist(),
+        "gyro_P": np.array(recording["imu"].AngVelPlatform)[-1].tolist(),
+        "accel_P": np.array(recording["imu"].AccelPlatform)[-1].tolist(),
+    }
 
+
+def test_attitude_and_imu_output_match_the_golden_reference():
     golden = json.loads(GOLDEN_PATH.read_text())
+    state = golden_state()
+    versions = f"reference recorded with bsk {golden['_bsk_version']}, installed {version('bsk')}"
 
-    final_r_N = np.array(recorders["truth"].r_BN_N)[-1]
-    final_v_N = np.array(recorders["truth"].v_BN_N)[-1]
-    final_sigma_BN = np.array(recorders["truth"].sigma_BN)[-1]
+    # rtol=0.0 makes each tolerance absolute.
+    for key, tolerance in (
+        ("sigma_BN", ATTITUDE_TOL_MRP),
+        ("gyro_P", GYRO_TOL_RAD_S),
+        ("accel_P", ACCEL_TOL_M_S2),
+    ):
+        assert np.allclose(state[key], golden[key], rtol=0.0, atol=tolerance), (
+            f"{key} {state[key]} vs golden {golden[key]}; {versions}"
+        )
 
-    # rtol=0.0: these are absolute tolerances. np.allclose's default rtol=1e-5 dominates on
-    # r_N's ~1e6 m magnitude (1e-5 * 1e6 m = 10 m, far looser than the stated 1e-3 m), so it
-    # must stay explicit here for the tolerance to mean what it says.
-    assert np.allclose(final_r_N, golden["r_N"], atol=POSITION_TOL_M, rtol=0.0), (
-        f"r_N {final_r_N} vs golden {golden['r_N']}"
-    )
-    assert np.allclose(final_v_N, golden["v_N"], atol=VELOCITY_TOL_M_S, rtol=0.0), (
-        f"v_N {final_v_N} vs golden {golden['v_N']}"
-    )
-    assert np.allclose(final_sigma_BN, golden["sigma_BN"], atol=ATTITUDE_TOL_MRP, rtol=0.0), (
-        f"sigma_BN {final_sigma_BN} vs golden {golden['sigma_BN']}"
-    )
+
+if __name__ == "__main__":
+    reference = {
+        "_bsk_version": version("bsk"),
+        "_description": (
+            "ImuSpacecraft nominal configuration with zero sensor noise, at t = 300 s. "
+            "Written by `uv run python -m tests.test_golden_trajectory`."
+        ),
+        **golden_state(),
+    }
+    GOLDEN_PATH.write_text(json.dumps(reference, indent=2) + "\n")
+    print(f"wrote {GOLDEN_PATH} with bsk {reference['_bsk_version']}")

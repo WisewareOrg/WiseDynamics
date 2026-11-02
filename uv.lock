@@ -1261,9 +1261,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bsk", extras = ["all"] },
-    { name = "h5py" },
-    { name = "numpy" },
+    { name = "bsk", extras = ["all"], specifier = "~=2.12.1" },
+    { name = "h5py", specifier = ">=3.11" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
 
