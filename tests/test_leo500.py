@@ -59,7 +59,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
-    dynamics, _ = scenario._simulation.TaskList
+    dynamics, _, _ = scenario._simulation.TaskList
     assert dynamics.TaskData.TaskPeriod == 500_000_000
     assert dynamics.TaskModels[:2] == vehicle.models()
     hub = vehicle.spacecraft.hub
@@ -80,9 +80,10 @@ def test_the_placement_reaches_the_basilisk_objects():
 def test_the_nominal_step_is_the_task_period():
     scenario = Leo500()
     scenario.run(_Guidance(), {}, duration_s=1.0)
-    dynamics, fsw = scenario._simulation.TaskList
+    dynamics, fsw, record = scenario._simulation.TaskList
     assert dynamics.TaskData.TaskPeriod == 20_000_000
     assert fsw.TaskData.TaskPeriod == 1_000_000_000
+    assert record.TaskData.TaskPeriod == 10_000_000_000
 
 
 def test_the_scenario_builds_and_holds_its_vehicle():
