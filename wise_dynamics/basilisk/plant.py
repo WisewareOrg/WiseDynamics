@@ -7,9 +7,6 @@ from typing import Any, ClassVar
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
 
-from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.dispersion import Dispersion
-
 __all__ = ["Plant"]
 
 _TASK = "plant_task"
@@ -18,63 +15,39 @@ _TASK = "plant_task"
 class Plant(ABC):
     """A spacecraft plant on its own Basilisk simulation, process and task.
 
-    A plant runs once: `execute` initializes and runs the simulation, and a new plant is built
-    for the next run. Each reader `readers()` returns holds its plant, so it reads the plant's
-    live output for as long as it is held. The messages `truth_messages()` returns and the
-    Basilisk objects a subclass exposes as attributes, along with anything reached through them,
-    are valid while the plant is referenced: a recorder holds its message, so a message holding
-    its plant would form a loop through Basilisk's C++ objects that the garbage collector leaves
-    in place.
+    A subclass takes its parameters as constructor keywords, calls `super().__init__(step_s=...)`
+    and adds its models with `add_model`. A plant runs once: `execute` initializes and runs the
+    simulation, and a new plant is built for the next run. Each reader `readers()` returns holds
+    its plant, so it reads the plant's live output for as long as it is held. The messages in
+    `recorded_fields()` and the Basilisk objects a subclass exposes as attributes are valid while
+    the plant is referenced: a recorder holds its message, so a message holding its plant would
+    form a loop through Basilisk's C++ objects that the garbage collector leaves in place.
 
-    A subclass implements `nominal()`, `_build()`, `_readers()`, `truth_messages()` and
-    `initial_state()`, and sets three class attributes:
+    A subclass sets two class attributes:
 
     - `mu`: the central body's gravitational parameter its gravity model uses, in m^3/s^2.
-    - `standard_dispersion`: the vehicle's standard per-case dispersion of its configuration.
-    - `recorded_fields`: run-file dataset name to the truth message field it records, with
-      units, covering every field of `truth_messages()` a run file carries.
+    - `standard_dispersion`: constructor keyword to its per-axis 1-sigma, drawn in this order.
     """
 
     mu: ClassVar[float]
-    standard_dispersion: ClassVar[Dispersion]
-    recorded_fields: ClassVar[Mapping[str, RecordedField]]
+    standard_dispersion: ClassVar[Mapping[str, float]]
 
-    def __init__(self, config: Any = None, *, noise_seed: int = 0) -> None:
-        """Build the plant: its simulation, one process holding one task at `config.step_s`, and
-        the subclass's models.
+    def __init__(self, *, step_s: float) -> None:
+        """Create the plant's simulation, with one process holding one task.
 
         Args:
-            config: The configuration dataclass to build, carrying the step as `step_s` in
-                seconds; `None` selects `nominal()`.
-            noise_seed: Seed of the plant's sensor-noise generators.
+            step_s: The task's period, in seconds: the dynamics and sensor step.
 
         Raises:
-            ValueError: `config.step_s` is not positive.
+            ValueError: `step_s` is not positive.
         """
-        self._config = self.nominal() if config is None else config
-        step_s = self._config.step_s
         if not step_s > 0:
             raise ValueError(f"step must be positive, got {step_s} s")
+        self.step_s = step_s
         self._simulation = SimulationBaseClass.SimBaseClass()
         process = self._simulation.CreateNewProcess("plant_process")
         process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(step_s)))
         self._executed = False
-        self._build(self._config, noise_seed)
-
-    @classmethod
-    @abstractmethod
-    def nominal(cls) -> Any:
-        """The vehicle's nominal configuration."""
-
-    @abstractmethod
-    def _build(self, config: Any, noise_seed: int) -> None:
-        """Add the plant's models to its task, built from `config`, with sensor noise seeded by
-        `noise_seed`."""
-
-    @property
-    def config(self) -> Any:
-        """The configuration this plant was built from."""
-        return self._config
 
     def readers(self) -> dict[str, Any]:
         """The plant's sensor outputs by role, each a Basilisk message reader already subscribed
@@ -89,8 +62,8 @@ class Plant(ABC):
         """The sensor readers `readers()` returns, built afresh on each call."""
 
     @abstractmethod
-    def truth_messages(self) -> dict[str, Any]:
-        """The plant's recordable output messages by role."""
+    def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
+        """Run-file dataset path to the `(message, field, units)` it records from this plant."""
 
     @abstractmethod
     def initial_state(self) -> dict[str, np.ndarray]:

@@ -6,7 +6,6 @@ mounting, constant biases and white noise. `wise_dynamics/basilisk/README.md` ta
 parameters with their units and frames.
 """
 
-from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar
 
@@ -14,34 +13,54 @@ import numpy as np
 from Basilisk.architecture import messaging
 from Basilisk.simulation import imuSensor
 from Basilisk.simulation import spacecraft as bsk_spacecraft
-from Basilisk.utilities import simHelpers, simIncludeGravBody
+from Basilisk.utilities import orbitalMotion, simHelpers, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
 from wise_dynamics.basilisk.plant import Plant
-from wise_dynamics.basilisk.plants.imu_spacecraft_config import ImuSpacecraftConfig
-from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.dispersion import Dispersion
 
 __all__ = ["ImuSpacecraft"]
 
+type Vector3 = tuple[float, float, float]
+
 
 class ImuSpacecraft(Plant):
-    """A tumbling rigid spacecraft in low Earth orbit with one IMU.
+    """A tumbling rigid spacecraft in low Earth orbit with one IMU. The defaults are the nominal
+    vehicle, and each keyword is kept as an attribute of the same name.
 
     Args:
-        config: The vehicle; `None` selects `nominal()`.
+        semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
+        eccentricity: Eccentricity of the initial orbit, `0 <= e < 1`.
+        inclination_rad: Inclination, in radians.
+        raan_rad: Right ascension of the ascending node, in radians.
+        arg_periapsis_rad: Argument of periapsis, in radians.
+        true_anomaly_rad: True anomaly at t = 0, in radians.
+        mass_kg: Hub mass, in kilograms.
+        inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2, as three
+            rows.
+        sigma0_BN: Initial attitude, the MRP of the body frame relative to inertial.
+        omega0_BN_B: Initial body rate relative to inertial, in body axes, in rad/s.
+        gyro_bias_P: Constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+        gyro_noise_std_rad_s: Per-sample 1-sigma white noise on each gyro axis, in rad/s.
+        accel_noise_std_m_s2: Per-sample 1-sigma white noise on each accelerometer axis, in
+            m/s^2.
+        step_s: The dynamics and sensor step, in seconds.
         noise_seed: Seed of the IMU's white-noise generator.
 
     Attributes:
         spacecraft: The Basilisk `Spacecraft` hub.
         imu: The Basilisk `ImuSensor`.
+
+    Raises:
+        ValueError: `semi_major_axis_m` or `step_s` is not positive, or `eccentricity` is outside
+            [0, 1).
     """
 
     mu: ClassVar[float] = 3.986004360e14
     """Earth's gravitational parameter, in m^3/s^2: the point-mass gravity model's and the orbit
     conversion's."""
 
-    standard_dispersion: ClassVar[Dispersion] = Dispersion(
+    standard_dispersion: ClassVar[MappingProxyType[str, float]] = MappingProxyType(
         {
             "sigma0_BN": 0.01,
             "omega0_BN_B": 0.2 * D2R,
@@ -49,32 +68,88 @@ class ImuSpacecraft(Plant):
             "accel_bias_P": 1e-4,
         }
     )
-    recorded_fields: ClassVar[Mapping[str, RecordedField]] = MappingProxyType(
-        {
-            "truth/sigma_BN": RecordedField("truth", "sigma_BN", "MRP"),
-            "truth/omega_BN_B": RecordedField("truth", "omega_BN_B", "rad/s"),
-            "truth/r_N": RecordedField("truth", "r_BN_N", "m"),
-            "truth/v_N": RecordedField("truth", "v_BN_N", "m/s"),
-            "imu/gyro_P": RecordedField("imu", "AngVelPlatform", "rad/s"),
-            "imu/accel_P": RecordedField("imu", "AccelPlatform", "m/s^2"),
-        }
-    )
 
-    spacecraft: bsk_spacecraft.Spacecraft
-    imu: imuSensor.ImuSensor
+    def __init__(
+        self,
+        *,
+        semi_major_axis_m: float = 6871.0e3,
+        eccentricity: float = 0.0001,
+        inclination_rad: float = 45.0 * D2R,
+        raan_rad: float = 48.2 * D2R,
+        arg_periapsis_rad: float = 347.8 * D2R,
+        true_anomaly_rad: float = 85.3 * D2R,
+        mass_kg: float = 750.0,
+        inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = (
+            (900.0, 0.0, 0.0),
+            (0.0, 800.0, 0.0),
+            (0.0, 0.0, 600.0),
+        ),
+        sigma0_BN: Vector3 = (0.1, 0.2, -0.3),
+        omega0_BN_B: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R),
+        gyro_bias_P: Vector3 = (1e-4, -2e-4, 5e-5),
+        accel_bias_P: Vector3 = (1e-4, -5e-5, 2e-4),
+        gyro_noise_std_rad_s: float = 5e-5,
+        accel_noise_std_m_s2: float = 5e-5,
+        step_s: float = 1.0,
+        noise_seed: int = 0,
+    ) -> None:
+        r_N, v_N = _orbit_to_inertial(
+            self.mu,
+            semi_major_axis_m,
+            eccentricity,
+            inclination_rad,
+            raan_rad,
+            arg_periapsis_rad,
+            true_anomaly_rad,
+        )
+        super().__init__(step_s=step_s)
+        self.semi_major_axis_m = semi_major_axis_m
+        self.eccentricity = eccentricity
+        self.inclination_rad = inclination_rad
+        self.raan_rad = raan_rad
+        self.arg_periapsis_rad = arg_periapsis_rad
+        self.true_anomaly_rad = true_anomaly_rad
+        self.mass_kg = mass_kg
+        self.inertia_B_kg_m2 = inertia_B_kg_m2
+        self.sigma0_BN = sigma0_BN
+        self.omega0_BN_B = omega0_BN_B
+        self.gyro_bias_P = gyro_bias_P
+        self.accel_bias_P = accel_bias_P
+        self.gyro_noise_std_rad_s = gyro_noise_std_rad_s
+        self.accel_noise_std_m_s2 = accel_noise_std_m_s2
+        self.noise_seed = noise_seed
 
-    def _build(self, config: ImuSpacecraftConfig, noise_seed: int) -> None:
-        self.spacecraft = self._build_hub(config)
-        self._build_gravity()
-        r_N, v_N = config.orbit.to_inertial(self.mu)
-        self.spacecraft.hub.r_CN_NInit = r_N.tolist()
-        self.spacecraft.hub.v_CN_NInit = v_N.tolist()
-        self.imu = self._build_imu(config, noise_seed)
+        self.spacecraft = bsk_spacecraft.Spacecraft()
+        self.spacecraft.ModelTag = "spacecraft"
+        hub = self.spacecraft.hub
+        hub.mHub = mass_kg
+        hub.r_BcB_B = _column((0.0, 0.0, 0.0))
+        hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(
+            [element for row in inertia_B_kg_m2 for element in row]
+        )
+        hub.sigma_BNInit = _column(sigma0_BN)
+        hub.omega_BN_BInit = _column(omega0_BN_B)
+        self.add_model(self.spacecraft)
 
-    @classmethod
-    def nominal(cls) -> ImuSpacecraftConfig:
-        """The nominal vehicle, `ImuSpacecraftConfig()`."""
-        return ImuSpacecraftConfig()
+        self._gravity = simIncludeGravBody.gravBodyFactory()
+        earth = self._gravity.createEarth()
+        earth.isCentralBody = True
+        earth.mu = self.mu
+        self._gravity.addBodiesTo(self.spacecraft)
+        hub.r_CN_NInit = r_N.tolist()
+        hub.v_CN_NInit = v_N.tolist()
+
+        self.imu = imuSensor.ImuSensor()
+        self.imu.ModelTag = "imu"
+        self.imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
+        self.imu.sensorPos_B = _column((0.0, 0.0, 0.0))
+        self.imu.dcm_PB = np.eye(3).tolist()
+        self.imu.senRotBias = _column(gyro_bias_P)
+        self.imu.senTransBias = _column(accel_bias_P)
+        self.imu.PMatrixGyro = (gyro_noise_std_rad_s * np.eye(3)).tolist()
+        self.imu.PMatrixAccel = (accel_noise_std_m_s2 * np.eye(3)).tolist()
+        self.imu.RNGSeed = int(noise_seed)
+        self.add_model(self.imu)
 
     def _readers(self) -> dict[str, Any]:
         """Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output."""
@@ -82,9 +157,19 @@ class ImuSpacecraft(Plant):
         imu_reader.subscribeTo(self.imu.sensorOutMsg)
         return {"imu": imu_reader}
 
-    def truth_messages(self) -> dict[str, Any]:
-        """Role `truth`, the hub's `SCStatesMsg`, and role `imu`, the IMU's `IMUSensorMsg`."""
-        return {"truth": self.spacecraft.scStateOutMsg, "imu": self.imu.sensorOutMsg}
+    def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
+        """The hub's `SCStatesMsg` attitude, rate, position and velocity under `truth/`, and the
+        IMU's `IMUSensorMsg` gyro and accelerometer outputs under `imu/`."""
+        truth = self.spacecraft.scStateOutMsg
+        imu = self.imu.sensorOutMsg
+        return {
+            "truth/sigma_BN": (truth, "sigma_BN", "MRP"),
+            "truth/omega_BN_B": (truth, "omega_BN_B", "rad/s"),
+            "truth/r_N": (truth, "r_BN_N", "m"),
+            "truth/v_N": (truth, "v_BN_N", "m/s"),
+            "imu/gyro_P": (imu, "AngVelPlatform", "rad/s"),
+            "imu/accel_P": (imu, "AccelPlatform", "m/s^2"),
+        }
 
     def initial_state(self) -> dict[str, np.ndarray]:
         """The hub's initial condition, each a float array of shape `(3,)`.
@@ -102,41 +187,26 @@ class ImuSpacecraft(Plant):
             "omega0_BN_B": np.array(hub.omega_BN_BInit, dtype=float).flatten(),
         }
 
-    def _build_hub(self, config: ImuSpacecraftConfig) -> bsk_spacecraft.Spacecraft:
-        hub_object = bsk_spacecraft.Spacecraft()
-        hub_object.ModelTag = "spacecraft"
-        hub_object.hub.mHub = config.hub.mass_kg
-        hub_object.hub.r_BcB_B = _column((0.0, 0.0, 0.0))
-        hub_object.hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(
-            [element for row in config.hub.inertia_B_kg_m2 for element in row]
-        )
-        hub_object.hub.sigma_BNInit = _column(config.sigma0_BN)
-        hub_object.hub.omega_BN_BInit = _column(config.omega0_BN_B)
-        self.add_model(hub_object)
-        return hub_object
 
-    def _build_gravity(self) -> None:
-        self._gravity = simIncludeGravBody.gravBodyFactory()
-        earth = self._gravity.createEarth()
-        earth.isCentralBody = True
-        earth.mu = self.mu
-        self._gravity.addBodiesTo(self.spacecraft)
+def _orbit_to_inertial(
+    mu: float, a_m: float, e: float, i_rad: float, raan_rad: float, argp_rad: float, f_rad: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Inertial position (m) and velocity (m/s) of a classical-element orbit.
 
-    def _build_imu(self, config: ImuSpacecraftConfig, noise_seed: int) -> imuSensor.ImuSensor:
-        imu = imuSensor.ImuSensor()
-        imu.ModelTag = "imu"
-        imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
-        imu.sensorPos_B = _column((0.0, 0.0, 0.0))
-        imu.dcm_PB = np.eye(3).tolist()
-        imu.senRotBias = _column(config.gyro_bias_P)
-        imu.senTransBias = _column(config.accel_bias_P)
-        imu.PMatrixGyro = (config.gyro_noise_std_rad_s * np.eye(3)).tolist()
-        imu.PMatrixAccel = (config.accel_noise_std_m_s2 * np.eye(3)).tolist()
-        imu.RNGSeed = int(noise_seed)
-        self.add_model(imu)
-        return imu
+    Raises:
+        ValueError: `a_m` is not positive, or `e` is outside [0, 1).
+    """
+    if not a_m > 0:
+        raise ValueError(f"semi-major axis must be positive, got {a_m} m")
+    if not 0 <= e < 1:
+        raise ValueError(f"eccentricity must be in [0, 1), got {e}")
+    elements = orbitalMotion.ClassicElements()
+    elements.a, elements.e, elements.i = a_m, e, i_rad
+    elements.Omega, elements.omega, elements.f = raan_rad, argp_rad, f_rad
+    r_N, v_N = orbitalMotion.elem2rv(mu, elements)
+    return np.asarray(r_N, dtype=float), np.asarray(v_N, dtype=float)
 
 
-def _column(vector: tuple[float, float, float]) -> list[list[float]]:
+def _column(vector: Vector3) -> list[list[float]]:
     """A 3-vector in Basilisk's column form, `[[x], [y], [z]]`."""
     return [[float(component)] for component in vector]

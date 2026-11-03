@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 import tests.support
+from wise_dynamics import draw_standard
 from wise_dynamics.basilisk import ImuSpacecraft
 
 SCENARIO_TEST = """
@@ -20,16 +21,15 @@ from wise_dynamics.basilisk import run_case
 
 
 def test_case(sim_duration_s, sim_plant, sim_run_writer):
-    stub = StubFsw()
-    recording = run_case(
+    datasets = run_case(
         sim_plant,
-        stub,
-        fsw_outputs={"stub": stub.output_msg},
+        StubFsw(),
+        fields=sim_plant.recorded_fields(),
         duration_s=sim_duration_s,
         record_s=1.0,
     )
     sim_run_writer(
-        recording.datasets(sim_plant.recorded_fields),
+        datasets,
         extra_attrs={
             "probe_noise_seed": sim_plant.imu.RNGSeed,
             "probe_gyro_bias_P": np.array(sim_plant.imu.senRotBias, dtype=float).flatten(),
@@ -97,7 +97,7 @@ def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     """The standard draws of case `index`, from its first stream."""
     draws_stream, _ = case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
-    return ImuSpacecraft.standard_dispersion.draw(ImuSpacecraft.nominal(), rng)
+    return draw_standard(ImuSpacecraft, rng)
 
 
 def test_case_seeding_matches_recorded_runs(scenario_dir):
@@ -161,7 +161,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
     probes = {"probe_noise_seed", "probe_gyro_bias_P"}
-    draws = {f"draw_{name}" for name in ImuSpacecraft.standard_dispersion.std}
+    draws = {f"draw_{name}" for name in ImuSpacecraft.standard_dispersion}
     assert (
         set(attrs)
         == {
@@ -191,6 +191,26 @@ def test_extra_attrs_cannot_replace_a_root_attr(pytester):
     pytester.runpytest_subprocess(
         "--sim-runs", "1", "--sim-out", str(pytester.path / "out")
     ).assert_outcomes(passed=1)
+
+
+def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario_dir):
+    """The plant is built from the overriding `sim_draws`, and the run file records exactly those
+    draws."""
+    scenario_dir.makeconftest(
+        """
+        import pytest
+
+        @pytest.fixture
+        def sim_draws():
+            return {"gyro_bias_P": [1e-3, 2e-3, 3e-3]}
+        """
+    )
+    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
+
+    for run in runs:
+        assert draws_of(run).keys() == {"gyro_bias_P"}
+        assert np.array_equal(draws_of(run)["gyro_bias_P"], [1e-3, 2e-3, 3e-3])
+        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], [1e-3, 2e-3, 3e-3])
 
 
 def test_a_session_reproduces_from_its_seed(scenario_dir):

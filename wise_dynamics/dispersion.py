@@ -1,85 +1,39 @@
-"""Per-case normal dispersion of a plant's 3-vector configuration fields."""
+"""A plant's standard per-case dispersion, drawn as constructor keyword overrides."""
 
-import dataclasses
-from collections.abc import Mapping
-from dataclasses import dataclass
-from types import MappingProxyType
+import inspect
 from typing import Any
 
 import numpy as np
 
-__all__ = ["Dispersion", "apply_draws"]
+__all__ = ["draw_standard"]
 
 
-@dataclass(frozen=True)
-class Dispersion:
-    """Independent zero-mean normal perturbations of named 3-vector fields of a configuration.
+def draw_standard(plant_type: type, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    """Draw one set of a plant's dispersed constructor keywords.
 
-    Attributes:
-        std: Configuration field name to its per-axis 1-sigma, in that field's own units. The
-            mapping's order is the order values are drawn in, which is part of a session's
-            reproducibility.
-    """
-
-    std: Mapping[str, float]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "std", MappingProxyType(dict(self.std)))
-
-    def draw(self, nominal: Any, rng: np.random.Generator) -> dict[str, np.ndarray]:
-        """Draw one set of dispersed values around a nominal configuration.
-
-        Args:
-            nominal: A configuration dataclass instance holding each named field as a 3-vector.
-            rng: The generator the perturbations are drawn from, three normal samples per field
-                in `std` order.
-
-        Returns:
-            Field name to its dispersed value, `nominal`'s value plus the perturbation, as a
-            float array of shape `(3,)`.
-
-        Raises:
-            ValueError: A name in `std` is a field `nominal` lacks, or holds something other than
-                a 3-vector.
-        """
-        return {
-            name: _vector_field(nominal, name) + rng.normal(0.0, std, size=3)
-            for name, std in self.std.items()
-        }
-
-
-def apply_draws(config: Any, draws: Mapping[str, Any]) -> Any:
-    """Return a copy of a configuration with drawn 3-vector values in place of its own.
+    For each entry of `plant_type.standard_dispersion`, in its order, the constructor's default
+    for that keyword plus three independent zero-mean normal samples with that 1-sigma.
 
     Args:
-        config: A frozen configuration dataclass instance.
-        draws: Field name to its new 3-vector value.
+        plant_type: A plant class: its `standard_dispersion` maps a 3-vector constructor keyword to
+            its per-axis 1-sigma in that keyword's units.
+        rng: The generator the samples are drawn from.
 
     Returns:
-        A new configuration of the same type, each drawn field replaced by a tuple of floats.
+        Keyword to its drawn value, a float array of shape `(3,)`, ready for
+        `plant_type(**draws)`.
 
     Raises:
-        ValueError: A draw names a field `config` lacks, or a value or field that is not a
-            3-vector.
+        ValueError: A `standard_dispersion` key is a keyword the constructor lacks or whose
+            default is not a 3-vector.
     """
-    replacements = {}
-    for name, value in draws.items():
-        _vector_field(config, name)
-        vector = np.asarray(value, dtype=float)
-        if vector.shape != (3,):
-            raise ValueError(f"draw {name!r} has shape {vector.shape}, expected (3,)")
-        replacements[name] = tuple(float(component) for component in vector)
-    return dataclasses.replace(config, **replacements)
-
-
-def _vector_field(config: Any, name: str) -> np.ndarray:
-    """The named 3-vector field of a configuration dataclass, as a float array."""
-    names = {field.name for field in dataclasses.fields(config)}
-    if name not in names:
-        raise ValueError(
-            f"{type(config).__name__} has no field {name!r}; its fields are {sorted(names)}"
-        )
-    vector = np.asarray(getattr(config, name), dtype=float)
-    if vector.shape != (3,):
-        raise ValueError(f"{type(config).__name__}.{name} is not a 3-vector")
-    return vector
+    defaults = inspect.signature(plant_type).parameters
+    draws: dict[str, np.ndarray] = {}
+    for name, std in plant_type.standard_dispersion.items():
+        if name not in defaults:
+            raise ValueError(f"{plant_type.__name__} has no keyword {name!r}")
+        nominal: Any = np.asarray(defaults[name].default, dtype=float)
+        if nominal.shape != (3,):
+            raise ValueError(f"{plant_type.__name__}'s {name!r} default is not a 3-vector")
+        draws[name] = nominal + rng.normal(0.0, std, size=3)
+    return draws

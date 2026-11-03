@@ -1,13 +1,12 @@
-"""`Dispersion` and `apply_draws`, and the IMU spacecraft's standard dispersion."""
+"""`draw_standard`, and the IMU spacecraft's standard dispersion."""
 
 import math
 
 import numpy as np
 import pytest
 
-from wise_dynamics import Dispersion
-from wise_dynamics.basilisk import ImuSpacecraft, ImuSpacecraftConfig
-from wise_dynamics.dispersion import apply_draws
+from wise_dynamics import draw_standard
+from wise_dynamics.basilisk import ImuSpacecraft
 
 D2R = math.pi / 180.0
 
@@ -21,11 +20,11 @@ def test_standard_dispersion_has_the_specified_widths():
         "gyro_bias_P": 1e-4,
         "accel_bias_P": 1e-4,
     }
-    nominal = ImuSpacecraft.nominal()
+    nominal = ImuSpacecraft()
     rng = np.random.default_rng(2026)
-    draws = [ImuSpacecraft.standard_dispersion.draw(nominal, rng) for _ in range(2000)]
+    draws = [draw_standard(ImuSpacecraft, rng) for _ in range(2000)]
 
-    assert list(ImuSpacecraft.standard_dispersion.std) == list(widths)
+    assert list(ImuSpacecraft.standard_dispersion) == list(widths)
     for name, width in widths.items():
         values = np.array([draw[name] for draw in draws])
         offsets = values - np.array(getattr(nominal, name))
@@ -33,25 +32,14 @@ def test_standard_dispersion_has_the_specified_widths():
         assert np.all(np.abs(offsets.mean(axis=0)) < 5 * width / math.sqrt(2000)), name
 
 
-def test_apply_draws_replaces_the_named_fields_only():
-    config = apply_draws(ImuSpacecraftConfig(), {"gyro_bias_P": np.array([1.0, 2.0, 3.0])})
-    assert config.gyro_bias_P == (1.0, 2.0, 3.0)
-    assert config == ImuSpacecraftConfig(gyro_bias_P=(1.0, 2.0, 3.0))
-
-
 @pytest.mark.parametrize(
-    ("draws", "message"),
+    ("dispersion", "message"),
     [
-        ({"gyro_bias": np.zeros(3)}, "no field 'gyro_bias'"),
-        ({"step_s": np.zeros(3)}, "not a 3-vector"),
-        ({"gyro_bias_P": np.zeros(2)}, r"shape \(2,\)"),
+        ({"gyro_bias": 1e-4}, "no keyword 'gyro_bias'"),
+        ({"mass_kg": 1.0}, "'mass_kg' default is not a 3-vector"),
     ],
 )
-def test_apply_draws_refuses_a_draw_that_fits_no_vector_field(draws, message):
+def test_draw_standard_refuses_a_width_for_no_3_vector_keyword(monkeypatch, dispersion, message):
+    monkeypatch.setattr(ImuSpacecraft, "standard_dispersion", dispersion)
     with pytest.raises(ValueError, match=message):
-        apply_draws(ImuSpacecraftConfig(), draws)
-
-
-def test_draw_refuses_an_unknown_field():
-    with pytest.raises(ValueError, match="no field 'mass'"):
-        Dispersion({"mass": 1.0}).draw(ImuSpacecraftConfig(), np.random.default_rng(0))
+        draw_standard(ImuSpacecraft, np.random.default_rng(0))

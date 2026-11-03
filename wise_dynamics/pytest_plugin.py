@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from wise_dynamics.dispersion import apply_draws
+from wise_dynamics.dispersion import draw_standard
 from wise_dynamics.run_file import write_run
 from wise_dynamics.session_options import SessionOptions
 
@@ -139,7 +139,7 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: configuration field name to the value its plant is built with and its
+    """This case's draws: plant constructor keyword to the value its plant is built with and its
     run file records.
 
     The default is the plant's standard dispersion, drawn from the case's own stream. A scenario
@@ -148,20 +148,18 @@ def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[st
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
     draws_stream, _ = _streams(options.seed, sim_case_index)
-    rng = np.random.default_rng(draws_stream)
-    return plant_type.standard_dispersion.draw(plant_type.nominal(), rng)
+    return draw_standard(plant_type, np.random.default_rng(draws_stream))
 
 
 @pytest.fixture
 def sim_plant(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> "Plant":
-    """This case's plant: the nominal configuration with `sim_draws` applied, its sensor noise
-    seeded from the case's own stream."""
+    """This case's plant: the plant built with `sim_draws` as keywords, its sensor noise seeded
+    from the case's own stream."""
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
-    config = apply_draws(plant_type.nominal(), sim_draws)
-    return plant_type(config, noise_seed=_noise_seed(options.seed, sim_case_index))
+    return plant_type(**sim_draws, noise_seed=_noise_seed(options.seed, sim_case_index))
 
 
 @pytest.fixture

@@ -16,10 +16,8 @@ def test_imu_spacecraft_is_the_registered_plant_and_implements_the_interface():
     assert not inspect.isabstract(ImuSpacecraft)
 
 
-def test_readers_has_role_imu_and_truth_messages_has_roles_truth_and_imu():
-    plant = ImuSpacecraft()
-    assert set(plant.readers()) == {"imu"}
-    assert set(plant.truth_messages()) == {"truth", "imu"}
+def test_readers_has_role_imu():
+    assert set(ImuSpacecraft().readers()) == {"imu"}
 
 
 def test_initial_state_returns_exactly_its_documented_keys():
@@ -31,7 +29,8 @@ def test_mu_is_earth_point_mass():
 
 
 def test_recorded_fields_name_the_run_file_datasets_with_their_units():
-    assert {name: field.units for name, field in ImuSpacecraft.recorded_fields.items()} == {
+    fields = ImuSpacecraft().recorded_fields()
+    assert {name: units for name, (_, _, units) in fields.items()} == {
         "truth/sigma_BN": "MRP",
         "truth/omega_BN_B": "rad/s",
         "truth/r_N": "m",
@@ -46,21 +45,11 @@ def test_recorded_fields_name_the_run_file_datasets_with_their_units():
     [
         (
             wise_dynamics,
-            {"Dispersion", "write_run"},
+            {"draw_standard", "write_run"},
         ),
         (
             wise_dynamics.basilisk,
-            {
-                "PLANTS",
-                "ImuSpacecraft",
-                "ImuSpacecraftConfig",
-                "OrbitElements",
-                "Plant",
-                "RecordedField",
-                "Recording",
-                "RigidHub",
-                "run_case",
-            },
+            {"PLANTS", "ImuSpacecraft", "Plant", "run_case"},
         ),
     ],
     ids=["wise_dynamics", "wise_dynamics.basilisk"],

@@ -1,4 +1,4 @@
-"""`run_case` and `Recording`: what a case records and how it becomes run-file datasets."""
+"""`run_case`: what a case records, as run-file datasets, and what it refuses."""
 
 import gc
 import weakref
@@ -9,42 +9,40 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from tests.support import StubFsw, run_with_stub
-from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, Recording, run_case
+from wise_dynamics.basilisk import ImuSpacecraft, run_case
 
 
-def test_recording_holds_truth_and_flight_software_roles_on_the_record_cadence():
-    recording = run_with_stub(ImuSpacecraft(), duration_s=50.0, record_s=10.0)
-    datasets = recording.datasets(
-        {
-            **ImuSpacecraft.recorded_fields,
-            "est/sigma_BN": RecordedField("stub", "sigma_BN", "MRP"),
-        }
-    )
+def test_a_case_records_its_fields_on_the_record_cadence():
+    plant = ImuSpacecraft()
+    fields = plant.recorded_fields()
+    datasets = run_with_stub(plant, duration_s=50.0, record_s=10.0)
     t_s, units = datasets["t_s"]
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
-    assert list(datasets) == ["t_s", *ImuSpacecraft.recorded_fields, "est/sigma_BN"]
-    for name, field in ImuSpacecraft.recorded_fields.items():
+    assert list(datasets) == ["t_s", *fields, "stub/sigma_BN"]
+    for name, (_, _, field_units) in fields.items():
         assert datasets[name][0].shape == (6, 3)
-        assert datasets[name][1] == field.units
-    assert np.allclose(datasets["est/sigma_BN"][0][-1], StubFsw.FIXED_SIGMA_BN)
+        assert datasets[name][1] == field_units
+    assert np.allclose(datasets["stub/sigma_BN"][0][-1], StubFsw.FIXED_SIGMA_BN)
 
 
 def test_run_case_runs_a_stock_basilisk_module():
     module = inertial3D.inertial3D()
     module.ModelTag = "inertial3D"
     module.sigma_R0N = [0.1, 0.0, 0.0]
-    recording = run_case(
-        ImuSpacecraft(), module, fsw_outputs={"att_ref": module.attRefOutMsg}, duration_s=20.0
+    datasets = run_case(
+        ImuSpacecraft(),
+        module,
+        fields={"ref/sigma_RN": (module.attRefOutMsg, "sigma_RN", "MRP")},
+        duration_s=20.0,
     )
-    sigma_RN = recording.datasets({"ref": RecordedField("att_ref", "sigma_RN", "MRP")})["ref"]
-    assert np.allclose(sigma_RN[0][-1], [0.1, 0.0, 0.0])
+    assert np.allclose(datasets["ref/sigma_RN"][0][-1], [0.1, 0.0, 0.0])
 
 
 @pytest.mark.parametrize(
     ("refusal", "error", "message"),
     [
-        ("truth role", ValueError, r"truth roles \['truth'\]"),
+        ("no fields", ValueError, "at least one field to record"),
         ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("already run", RuntimeError, "already run"),
@@ -53,9 +51,9 @@ def test_run_case_runs_a_stock_basilisk_module():
 def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     plant = ImuSpacecraft()
     stub = StubFsw()
-    arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, "record_s": 10.0}
-    if refusal == "truth role":
-        arguments["fsw_outputs"] = {"truth": stub.output_msg}
+    arguments = {"fields": plant.recorded_fields(), "duration_s": 10.0, "record_s": 10.0}
+    if refusal == "no fields":
+        arguments["fields"] = {}
     elif refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
     else:
@@ -67,10 +65,15 @@ def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     assert len(plant._simulation.TaskList[0].TaskModels) == models_before
 
 
-def test_a_field_absent_from_its_recorder_is_named():
-    recording = run_with_stub(ImuSpacecraft(), duration_s=10.0)
+def test_a_field_absent_from_its_message_is_named():
+    plant = ImuSpacecraft()
     with pytest.raises(ValueError, match="r_BN_N"):
-        recording.datasets({"bad": RecordedField("imu", "r_BN_N", "m")})
+        run_case(
+            plant,
+            StubFsw(),
+            fields={"bad": (plant.imu.sensorOutMsg, "r_BN_N", "m")},
+            duration_s=10.0,
+        )
 
 
 class ReadingFsw(sysModel.SysModel):
@@ -94,12 +97,7 @@ def test_a_plant_is_freed_after_its_case():
     plant = ImuSpacecraft()
     released = weakref.ref(plant)
     fsw = ReadingFsw(plant.readers()["imu"])
-    run_case(plant, fsw, fsw_outputs={"fsw": fsw.output_msg}, duration_s=20.0)
+    run_case(plant, fsw, fields=plant.recorded_fields(), duration_s=20.0)
     del plant, fsw
     gc.collect()
     assert released() is None, "the plant is still referenced after its case"
-
-
-def test_a_recording_needs_a_recorder():
-    with pytest.raises(ValueError, match="at least one recorder"):
-        Recording({})
