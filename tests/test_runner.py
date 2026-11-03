@@ -8,6 +8,7 @@ import pytest
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
+from tests.silent_spacecraft import SilentSpacecraft
 from tests.support import StubFsw, run_with_stub
 from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, Recording, run_case
 
@@ -50,14 +51,17 @@ def test_run_case_runs_a_stock_basilisk_module():
         ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("already run", RuntimeError, "already run"),
+        ("nothing to record", ValueError, "at least one message to record"),
     ],
 )
 def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
-    plant = ImuSpacecraft()
+    plant = SilentSpacecraft() if refusal == "nothing to record" else ImuSpacecraft()
     stub = StubFsw()
     arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, "record_s": 10.0}
     if refusal == "truth role":
         arguments["fsw_outputs"] = {"truth": stub.output_msg}
+    elif refusal == "nothing to record":
+        arguments["fsw_outputs"] = {}
     elif refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
     else:
