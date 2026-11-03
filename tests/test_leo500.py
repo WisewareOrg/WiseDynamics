@@ -31,12 +31,12 @@ class Placed(Leo500):
     true_anomaly_rad = 40.0 * D2R
     sigma0_BN = (0.05, -0.1, 0.2)
     omega0_BN_B_rad_s = (0.01, -0.02, 0.03)
-    step_s = 0.5
 
 
 def test_the_scenario_is_its_class_attributes():
     """Read from the class, as a consumer reads it without building a scenario."""
-    assert inspect.signature(Leo500).parameters == {}
+    (fidelity,) = inspect.signature(Leo500).parameters.values()
+    assert (fidelity.name, fidelity.default) == ("fidelity", "lo")
     assert Leo500.mu_m3_s2 == {"earth": 3.986004360e14}
     assert Leo500.semi_major_axis_m == 6871.0e3
     assert Leo500.eccentricity == 0.0001
@@ -46,7 +46,6 @@ def test_the_scenario_is_its_class_attributes():
     assert Leo500.true_anomaly_rad == 85.3 * D2R
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
-    assert Leo500.step_s == 0.02
     assert Leo500.record_s == 10.0
 
 
@@ -60,7 +59,6 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
     dynamics, _, _ = scenario._simulation.TaskList
-    assert dynamics.TaskData.TaskPeriod == 500_000_000
     assert dynamics.TaskModels[:2] == vehicle.models()
     hub = vehicle.spacecraft.hub
     assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), Placed.sigma0_BN)
@@ -75,15 +73,6 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert elements.Omega == pytest.approx(Placed.raan_rad, abs=1e-12)
     assert elements.omega == pytest.approx(Placed.arg_periapsis_rad, abs=1e-9)
     assert elements.f == pytest.approx(Placed.true_anomaly_rad, abs=1e-9)
-
-
-def test_the_nominal_step_is_the_task_period():
-    scenario = Leo500()
-    scenario.run(_Guidance(), {}, duration_s=1.0)
-    dynamics, fsw, record = scenario._simulation.TaskList
-    assert dynamics.TaskData.TaskPeriod == 20_000_000
-    assert fsw.TaskData.TaskPeriod == 1_000_000_000
-    assert record.TaskData.TaskPeriod == 10_000_000_000
 
 
 def test_the_scenario_builds_and_holds_its_vehicle():

@@ -45,6 +45,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="simulated duration of each case, in seconds (default: 5700)",
     )
     group.addoption(
+        "--sim-fidelity",
+        choices=("hi", "med", "lo"),
+        default="lo",
+        help="integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.05 s "
+        "(default: lo)",
+    )
+    group.addoption(
         "--sim-scenario",
         default="leo500",
         help="name of the scenario in wise_dynamics.basilisk.SCENARIOS (default: leo500)",
@@ -132,11 +139,13 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
-    """This case's scenario: `--sim-scenario`, dispersed with its own `draw` from the case's first
-    stream and its vehicle's sensor noise seeded from the case's second. Its vehicle is
+    """This case's scenario: `--sim-scenario` at `--sim-fidelity`, dispersed from the case's first
+    stream, with its vehicle's sensor noise seeded from the case's second. Its vehicle is
     `sim_scenario.vehicle`."""
     draws_stream, noise_stream = _streams(sim_case_index)
-    scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
+    scenario = _scenario_type(request.config.getoption("--sim-scenario"))(
+        request.config.getoption("--sim-fidelity")
+    )
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
     )
@@ -152,7 +161,7 @@ def sim_run_file(
     """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
 
     Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
-    them, it returns the file's path. The file's root attributes are `case`, `seed`,
+    them, it returns the file's path. The file's root attributes are `case`, `seed`, `fidelity`,
     `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
     one `draw_<name>` per value the scenario drew, with `attrs` beside them; `attrs` naming one of
     those raises `ValueError`.
@@ -160,6 +169,7 @@ def sim_run_file(
     own: dict[str, Any] = {
         "case": sim_case_index,
         "seed": _SEED,
+        "fidelity": sim_scenario.fidelity,
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
+from Basilisk.simulation import svIntegrators
 
 from wise_dynamics.basilisk import Leo500
 
@@ -38,6 +39,30 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     sigma_RN, units = datasets["guidance/sigma_RN"]
     assert units == "MRP"
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)
+
+
+@pytest.mark.parametrize(
+    ("fidelity", "step_ns", "integrator_type"),
+    [
+        ("hi", 20_000_000, svIntegrators.svIntegratorRK4),
+        ("med", 50_000_000, svIntegrators.svIntegratorRK4),
+        ("lo", 50_000_000, svIntegrators.svIntegratorRK2),
+    ],
+)
+def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(
+    fidelity, step_ns, integrator_type
+):
+    scenario = Leo500(fidelity)
+    scenario.disperse(np.random.default_rng(0), noise_seed=1)
+    scenario.run(_Guidance(), {}, duration_s=1.0)
+    dynamics, fsw, record = scenario._simulation.TaskList
+    assert dynamics.TaskData.TaskPeriod == step_ns
+    assert fsw.TaskData.TaskPeriod == 1_000_000_000
+    assert record.TaskData.TaskPeriod == 10_000_000_000
+    assert dynamics.TaskModels[:2] == scenario.vehicle.models()
+    (integrator,) = scenario._integrators
+    assert type(integrator) is integrator_type
+    assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this)
 
 
 def test_a_scenario_runs_once():

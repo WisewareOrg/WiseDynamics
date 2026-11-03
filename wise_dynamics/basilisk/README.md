@@ -37,24 +37,33 @@ HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
 
-A scenario is a `Scenario` subclass whose class attributes are its environment, its placement, its
-step `step_s` and its recording period `record_s`, with units and frames in its class docstring. Its
-constructor takes no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle`
+A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
+its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
+one argument, the fidelity, and builds its vehicle, places it, and holds it as `scenario.vehicle`
 and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
 `rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
 `rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
 `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
+The fidelity, from `Scenario`, sets the integration step `step_s` and the integrator `run` gives
+every vehicle's spacecraft. The differences are measured on Leo500 at the end of one 5700 s orbit,
+against hi:
+
+| fidelity | integrator | step | position | attitude |
+|---|---|---|---|---|
+| `hi` | RK4 | 0.02 s | (reference) | (reference) |
+| `med` | RK4 | 0.05 s | 1.9 um | 5.9e-13 rad |
+| `lo` | RK2 | 0.05 s | 17.7 cm | 9.05 urad |
+
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
 `vehicles`, `step_s` and `record_s`, and runs once. The vehicles run every `step_s`. The
 flight-software module runs in its own task at its own `period_s`, an attribute it declares in
 seconds, after the vehicles at each instant they share, so it reads that instant's sensor output.
 The recorders run every `record_s`, after both, so truth and flight output are recorded from the
-same instant. `fsw_fields` maps a
-dataset path to a flight-software `(message, field, units)`, as `recorded_fields()` does for a
-vehicle, and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then
-the vehicle's fields, then `fsw_fields`.
+same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
+`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
+`(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
 
 ## pytest plugin
 
@@ -67,13 +76,14 @@ consumer's `conftest.py` names nothing.
 | `--sim-out` | a new directory under the system temporary directory | where run files go; a directory already holding run files is refused |
 | `--sim-duration-s` | 5700 | simulated seconds per case |
 | `--sim-scenario` | `leo500` | the scenario's name in `SCENARIOS` |
+| `--sim-fidelity` | `lo` | `hi`, `med` or `lo`, as the Scenarios section defines them |
 
 | fixture | gives |
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | `--sim-duration-s` |
-| `sim_scenario` | the case's scenario, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_scenario` | the case's scenario at `--sim-fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`
@@ -81,10 +91,10 @@ is and reruns alone: `pytest <test file> --sim-runs N "<test file>::test_case[k]
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
-`period_s` = 1.0, so it steps at 1 Hz while the default scenario steps at 50 Hz. Its output joins
-the run file through `fsw_fields`. `pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it
-as a Monte Carlo run; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer
-adds itself:
+`period_s` = 1.0, so it steps at 1 Hz while the default fidelity steps the vehicle at 20 Hz. Its
+output joins the run file through `fsw_fields`.
+`pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run; `-n` runs
+workers in parallel and needs `pytest-xdist`, which a consumer adds itself:
 
 ```python
 from Basilisk.fswAlgorithms import inertial3D

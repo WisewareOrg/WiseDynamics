@@ -156,6 +156,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert run["name"] == "run_0001.h5"
     assert attrs["case"] == 1
     assert attrs["seed"] == 0
+    assert attrs["fidelity"] == "lo"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
@@ -166,6 +167,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
         == {
             "case",
             "seed",
+            "fidelity",
             "created_utc",
             "versions_bsk",
             "versions_wise_dynamics",

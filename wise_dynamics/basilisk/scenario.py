@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
 __all__ = ["Scenario"]
@@ -15,21 +16,36 @@ _RECORD_TASK = "record_task"
 _DYNAMICS_PRIORITY = 2
 _FSW_PRIORITY = 1
 _RECORD_PRIORITY = 0
+_FIDELITY = {
+    "hi": (0.02, svIntegrators.svIntegratorRK4),
+    "med": (0.05, svIntegrators.svIntegratorRK4),
+    "lo": (0.05, svIntegrators.svIntegratorRK2),
+}
 
 
 class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
-    A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles`, `step_s` and `record_s`; `run` reads them.
+    A subclass's constructor calls `super().__init__(fidelity)`, builds its vehicles and places
+    them, and sets `vehicles` and `record_s`; `run` reads them.
+
+    The fidelity sets the integration step and the integrator `run` gives every vehicle's
+    spacecraft: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at 0.05 s and `"lo"` RK2 at 0.05 s.
+
+    Args:
+        fidelity: `"hi"`, `"med"` or `"lo"`.
 
     Attributes:
+        fidelity: The fidelity the scenario was built at.
+        step_s: The integration and sensor step, in seconds, set by the fidelity.
         vehicles: The vehicles `run` adds to the simulation, in order.
-        step_s: The integration and sensor step, in seconds.
         record_s: The recording period, in seconds.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fidelity: str = "lo") -> None:
+        self.fidelity = fidelity
+        self.step_s, self._integrator_type = _FIDELITY[fidelity]
+        self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
@@ -42,7 +58,8 @@ class Scenario:
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
-        Builds the simulation with one process holding three tasks, which run in this order at
+        Gives every vehicle's spacecraft the fidelity's integrator, then builds the simulation with
+        one process holding three tasks, which run in this order at
         each instant they share. The dynamics task, every `step_s`, holds each vehicle's models.
         The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
         the sensors' output of that instant. The record task, every `record_s` from t = 0, holds
@@ -70,6 +87,9 @@ class Scenario:
 
         fields = {}
         for vehicle in self.vehicles:
+            integrator = self._integrator_type(vehicle.spacecraft)
+            vehicle.spacecraft.setIntegrator(integrator)
+            self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
         period_ns = macros.sec2nano(self.record_s)
