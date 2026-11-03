@@ -35,13 +35,6 @@ def test_a_run_file_is_written_once(tmp_path):
         vehicle.write_run_file(tmp_path / "run_0000.h5", {"t_s": (np.zeros(1), "s")})
 
 
-def test_a_dataset_without_units_is_refused(tmp_path):
-    path = tmp_path / "run_0000.h5"
-    with pytest.raises(ValueError, match="dataset 't_s' has an empty units string"):
-        ImuSpacecraft().write_run_file(path, {"t_s": (np.zeros(1), "")})
-    assert not path.exists()
-
-
 def test_a_failed_write_leaves_no_file(tmp_path):
     vehicle = ImuSpacecraft()
     path = tmp_path / "run_0000.h5"

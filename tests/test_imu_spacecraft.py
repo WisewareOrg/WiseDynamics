@@ -1,5 +1,5 @@
 """`ImuSpacecraft`: its nominal vehicle, how its keywords reach the Basilisk objects it builds, its
-draws, its reader, and what it records."""
+reader, and what it records."""
 
 import inspect
 
@@ -32,10 +32,6 @@ def test_nominal_vehicle_is_the_specified_one():
     assert ImuSpacecraft.gyro_noise_std_rad_s == 5e-5
     assert ImuSpacecraft.accel_noise_std_m_s2 == 5e-5
     assert ImuSpacecraft.noise_seed == 0
-    assert ImuSpacecraft.standard_dispersion == {
-        "gyro_bias_P_rad_s": 1e-4,
-        "accel_bias_P_m_s2": 1e-4,
-    }
 
 
 def test_each_keyword_defaults_to_its_class_attribute():
@@ -75,15 +71,6 @@ def test_keywords_reach_the_basilisk_objects():
     assert np.array_equal(np.array(imu.sensorPos_B).flatten(), np.zeros(3))
     assert imu.RNGSeed == 11
     assert vehicle.models() == [vehicle.spacecraft, imu]
-
-
-def test_draw_adds_normal_samples_to_the_defaults_in_dispersion_order():
-    draws = ImuSpacecraft.draw(np.random.default_rng(7))
-    rng = np.random.default_rng(7)
-    assert list(draws) == list(ImuSpacecraft.standard_dispersion)
-    for name, std in ImuSpacecraft.standard_dispersion.items():
-        expected = np.asarray(getattr(ImuSpacecraft, name)) + rng.normal(0.0, std, size=3)
-        assert np.array_equal(draws[name], expected), name
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():

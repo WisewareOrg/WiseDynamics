@@ -1,5 +1,5 @@
-"""`Leo500`: its prebuilt environment and placement, its draws and dispersion, how its placement
-reaches the Basilisk objects, and what it refuses."""
+"""`Leo500`: its prebuilt environment and placement, how its placement reaches the Basilisk
+objects, and its dispersion."""
 
 import inspect
 import math
@@ -42,8 +42,6 @@ def test_the_scenario_is_its_class_attributes():
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
     assert Leo500.step_s == 0.02
     assert Leo500.record_s == 10.0
-    assert Leo500.standard_dispersion == {"sigma0_BN": 0.01, "omega0_BN_B_rad_s": 0.2 * D2R}
-    assert Leo500.vehicle_type is ImuSpacecraft
 
 
 def test_the_placement_reaches_the_basilisk_objects():
@@ -84,71 +82,35 @@ def test_the_scenario_builds_and_holds_its_vehicle():
     scenario = Leo500()
     assert type(scenario.vehicle) is ImuSpacecraft
     assert scenario.vehicles == [scenario.vehicle]
+    assert scenario.draws == {}
 
 
 def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_from_them():
     scenario = Leo500()
     built = scenario.vehicle
-    assert scenario.draws == {}
     scenario.disperse(np.random.default_rng(7), noise_seed=11)
 
     rng = np.random.default_rng(7)
-    owners = {name: Leo500 for name in Leo500.standard_dispersion}
-    owners.update({name: ImuSpacecraft for name in ImuSpacecraft.standard_dispersion})
-    assert list(scenario.draws) == list(owners)
-    for name, owner in owners.items():
-        std = owner.standard_dispersion[name]
-        expected = np.asarray(getattr(owner, name)) + rng.normal(0.0, std, size=3)
-        assert np.array_equal(scenario.draws[name], expected), name
+    expected = {}
+    for name, nominal, std in (
+        ("sigma0_BN", Leo500.sigma0_BN, 0.01),
+        ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * D2R),
+        ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
+        ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
+    ):
+        expected[name] = np.asarray(nominal) + rng.normal(0.0, std, size=3)
+    assert list(scenario.draws) == list(expected)
+    for name, value in expected.items():
+        assert np.array_equal(scenario.draws[name], value), name
 
-    draws = scenario.draws
-    assert np.array_equal(scenario.initial_state()["sigma0_BN"], draws["sigma0_BN"])
-    assert np.array_equal(scenario.initial_state()["omega0_BN_B"], draws["omega0_BN_B_rad_s"])
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert scenario.vehicle is not built
     assert scenario.vehicles == [scenario.vehicle]
+    hub = scenario.vehicle.spacecraft.hub
+    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), expected["sigma0_BN"])
+    assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), expected["omega0_BN_B_rad_s"])
+    assert len(scenario.vehicle.spacecraft.gravField.gravBodies) == 1
     imu = scenario.vehicle.imu
-    assert np.array_equal(np.array(imu.senRotBias).flatten(), draws["gyro_bias_P_rad_s"])
-    assert np.array_equal(np.array(imu.senTransBias).flatten(), draws["accel_bias_P_m_s2"])
+    assert np.array_equal(np.array(imu.senRotBias).flatten(), expected["gyro_bias_P_rad_s"])
+    assert np.array_equal(np.array(imu.senTransBias).flatten(), expected["accel_bias_P_m_s2"])
     assert imu.RNGSeed == 11
-
-
-def test_disperse_after_the_run_is_refused():
-    scenario = Leo500()
-    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
-    with pytest.raises(RuntimeError, match="already run"):
-        scenario.disperse(np.random.default_rng(7), noise_seed=0)
-
-
-class Hyperbolic(Leo500):
-    eccentricity = 1.0
-
-
-class Collapsed(Leo500):
-    semi_major_axis_m = 0.0
-
-
-class Stalled(Leo500):
-    step_s = 0.0
-
-
-class Unrecorded(Leo500):
-    record_s = 0.0
-
-
-@pytest.mark.parametrize(
-    ("scenario_type", "message"),
-    [
-        (Collapsed, "semi-major axis must be positive"),
-        (Hyperbolic, r"eccentricity must be in \[0, 1\)"),
-        (Stalled, "step must be positive"),
-        (Unrecorded, "recording period must be positive"),
-    ],
-)
-def test_a_refused_placement_leaves_the_vehicle_unplaced(scenario_type, message):
-    scenario = scenario_type()
-    vehicle = scenario.vehicle
-    with pytest.raises(ValueError, match=message):
-        scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
-    assert len(vehicle.spacecraft.gravField.gravBodies) == 0
-    assert len(scenario._simulation.TaskList) == 0

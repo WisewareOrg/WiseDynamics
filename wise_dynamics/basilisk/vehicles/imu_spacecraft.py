@@ -5,7 +5,7 @@ biases and white noise. `wise_dynamics/basilisk/README.md` tabulates its paramet
 units and frames.
 """
 
-from typing import Any, ClassVar
+from typing import Any
 
 import numpy as np
 from Basilisk.architecture import messaging
@@ -40,16 +40,9 @@ class ImuSpacecraft(Vehicle):
         noise_seed: Seed of the IMU's white-noise generator.
 
     Attributes:
-        standard_dispersion: The per-axis 1-sigma of `gyro_bias_P_rad_s`, in rad/s, and of
-            `accel_bias_P_m_s2`, in m/s^2.
         spacecraft: The Basilisk `Spacecraft` hub.
         imu: The Basilisk `ImuSensor`.
     """
-
-    standard_dispersion: ClassVar[dict[str, float]] = {
-        "gyro_bias_P_rad_s": 1e-4,
-        "accel_bias_P_m_s2": 1e-4,
-    }
 
     mass_kg: float = 750.0
     inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = (

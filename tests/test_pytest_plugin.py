@@ -81,6 +81,16 @@ def _draws_of(run: dict) -> dict[str, np.ndarray]:
     }
 
 
+_DISPERSION = (
+    ("sigma0_BN", Leo500.sigma0_BN, 0.01),
+    ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * np.pi / 180.0),
+    ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
+    ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
+)
+"""Leo500's dispersion, name, nominal and per-axis 1-sigma, in draw order, as its docstring
+states."""
+
+
 def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
     """Case `index`'s two streams, derived as the README states."""
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
@@ -91,9 +101,8 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     draws_stream, _ = _case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
     return {
-        name: np.asarray(getattr(owner, name)) + rng.normal(0.0, std, size=3)
-        for owner in (Leo500, ImuSpacecraft)
-        for name, std in owner.standard_dispersion.items()
+        name: np.asarray(nominal) + rng.normal(0.0, std, size=3)
+        for name, nominal, std in _DISPERSION
     }
 
 
@@ -147,9 +156,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
     probes = {"probe_noise_seed", "probe_gyro_bias_P_rad_s"}
-    draws = {
-        f"draw_{name}" for owner in (Leo500, ImuSpacecraft) for name in owner.standard_dispersion
-    }
+    draws = {f"draw_{name}" for name, _, _ in _DISPERSION}
     assert (
         set(attrs)
         == {
@@ -182,21 +189,15 @@ def test_attrs_cannot_replace_the_run_files_own(pytester):
     assert not out_dir.exists()
 
 
-def test_the_scenario_option_selects_a_registered_scenario_and_its_vehicle(scenario_dir):
-    """A second scenario, registered by the consumer's conftest with a vehicle class of its own,
-    is the scenario and vehicle the session builds when `--sim-scenario` names it."""
+def test_the_scenario_option_selects_a_registered_scenario(scenario_dir):
+    """A second scenario, registered by the consumer's conftest, is the scenario the session
+    builds when `--sim-scenario` names it: its attitude is dispersed about its own nominal."""
     scenario_dir.makeconftest(
         """
-        from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft, Leo500
-
-        class Biased(ImuSpacecraft):
-            gyro_bias_P_rad_s = (1.0, 2.0, 3.0)
-            standard_dispersion = {}
+        from wise_dynamics.basilisk import SCENARIOS, Leo500
 
         class Flipped(Leo500):
             sigma0_BN = (-0.1, -0.2, 0.3)
-            standard_dispersion = {}
-            vehicle_type = Biased
 
         SCENARIOS["flipped"] = Flipped
         """
@@ -204,8 +205,7 @@ def test_the_scenario_option_selects_a_registered_scenario_and_its_vehicle(scena
     (run,) = _run_session(
         scenario_dir, "out", "--sim-runs", "1", "--sim-scenario", "flipped", passed=1
     )
-    assert np.array_equal(run["sigma_BN"][0], [-0.1, -0.2, 0.3])
-    assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1.0, 2.0, 3.0])
+    assert np.allclose(run["sigma_BN"][0], [-0.1, -0.2, 0.3], rtol=0, atol=0.1)
 
 
 def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):

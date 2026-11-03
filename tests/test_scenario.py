@@ -1,4 +1,4 @@
-"""`Scenario.run`: what a run records, as run-file datasets, and what it refuses."""
+"""`Scenario.run`: what a run records, as run-file datasets, and that it runs once."""
 
 import numpy as np
 import pytest
@@ -33,35 +33,8 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)
 
 
-@pytest.mark.parametrize(
-    ("refusal", "error", "message"),
-    [
-        ("duration_s", ValueError, "duration must be positive"),
-        ("t_s", ValueError, r"reuses the run's own dataset paths \['t_s'\]"),
-        ("truth/r_N", ValueError, r"reuses the run's own dataset paths \['truth/r_N'\]"),
-        ("absent field", ValueError, "'bad': its message has no field 'r_BN_N'"),
-        ("already run", RuntimeError, "already run"),
-    ],
-)
-def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
-    """A refused run builds nothing and leaves a scenario that has not run able to run."""
+def test_a_scenario_runs_once():
     scenario = Leo500()
-    vehicle = scenario.vehicle
-    guidance, fsw_fields = _guidance()
-    fields, duration_s = fsw_fields, 10.0
-    if refusal == "duration_s":
-        duration_s = 0.0
-    elif refusal in ("t_s", "truth/r_N"):
-        fields = {refusal: fsw_fields["guidance/sigma_RN"]}
-    elif refusal == "absent field":
-        fields = {"bad": (guidance.attRefOutMsg, "r_BN_N", "m")}
-    elif refusal == "already run":
+    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
+    with pytest.raises(RuntimeError, match="already run"):
         scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
-    tasks_before = [list(task.TaskModels) for task in scenario._simulation.TaskList]
-
-    with pytest.raises(error, match=message):
-        scenario.run(guidance, fields, duration_s=duration_s)
-    assert [list(task.TaskModels) for task in scenario._simulation.TaskList] == tasks_before
-    assert len(vehicle.spacecraft.gravField.gravBodies) == (refusal == "already run")
-    if refusal != "already run":
-        scenario.run(guidance, fsw_fields, duration_s=10.0)

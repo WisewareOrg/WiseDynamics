@@ -12,8 +12,8 @@ raises.
 | module | holds |
 |---|---|
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's options and `sim_*` fixtures |
-| `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the interface every vehicle meets, its draws and its run file |
-| `wise_dynamics/basilisk/scenario.py` | `Scenario`: the interface every scenario meets, and its one run |
+| `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
+| `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
 | `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, the module named for the class; `SCENARIOS` in its `__init__.py` maps each name to its class |
 
@@ -25,33 +25,30 @@ Consumers import from `wise_dynamics.basilisk`. A session picks one scenario wit
 A vehicle is a `Vehicle` subclass: its parameters are keywords, each defaulting to the class
 attribute of the same name, read when the vehicle is built, so a subclass that overrides an
 attribute is built with its value. Its class attributes are its nominal values, and its class
-docstring gives each parameter's units and frame. `standard_dispersion` maps a parameter to its
-per-axis 1-sigma, and `draw(rng)` returns that dispersion, in order, as nominal plus normal samples
-from the numpy `Generator`. Every vehicle takes `noise_seed`, which the plugin sets per case
-through its scenario.
+docstring gives each parameter's units and frame. Every vehicle takes `noise_seed`, the seed of its
+sensor noise.
 
 A vehicle lists its Basilisk modules in `models()`, hands out sensor readers by role in
 `readers()`, and declares what it records in `recorded_fields()`: dataset path to
-`(message, field, units)`. `write_run_file(path, datasets, attrs=None)` writes one HDF5 file, each
-dataset float64 with a `units` attribute.
+`(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one
+HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement, its
-recording period `record_s` and `vehicle_type`, the class of the vehicle it builds, with units and
-frames in its class docstring; its constructor takes no arguments. The built vehicle is
-`scenario.vehicle`. `disperse(rng, *, noise_seed)` draws the scenario's `standard_dispersion`, then
-its vehicle class's, from `rng`, each as a vehicle's `draw` does, sets the drawn placement on one
-instance, builds its vehicle again with the drawn vehicle values and `noise_seed` as keywords, and
-records what it applied in `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers
-and other handles on it are taken after dispersing. `initial_state()` returns the placement the
-vehicle starts from, valid before `run`.
+step `step_s` and its recording period `record_s`, with units and frames in its class docstring.
+Its constructor takes no arguments: it builds its vehicle, places it, and holds it as
+`scenario.vehicle` and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's
+own dispersions from `rng`, as its docstring lists them, places the scenario at the drawn values,
+builds its vehicle again with them and `noise_seed`, and records what it applied in
+`scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
+are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
-`run(fsw_module, fsw_fields, *, duration_s)` builds the simulation, runs once and records every
-`record_s`.
-`fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
-`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
-`(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
+`run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
+`vehicles`, `step_s` and `record_s`, and runs once, recording every `record_s`. `fsw_fields` maps a
+dataset path to a flight-software `(message, field, units)`, as `recorded_fields()` does for a
+vehicle, and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then
+the vehicle's fields, then `fsw_fields`.
 
 ## pytest plugin
 
