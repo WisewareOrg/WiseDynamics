@@ -137,7 +137,7 @@ def test_recorded_imu_mean_is_the_configured_bias():
 def test_noise_std_is_per_sample_at_any_step(step_s):
     """`gyro_noise_std_rad_s` and `accel_noise_std_m_s2` are per-sample standard deviations, so
     the recorded spread is the configured value whatever the step."""
-    sigma = 5e-5  # the settled per-sample 1-sigma, stated here independently of the plant
+    sigma = 5e-5  # the specified per-sample 1-sigma, stated here independently of the plant
     config = dataclasses.replace(QUIET, step_s=step_s)
     imu = run_with_stub(ImuSpacecraft(config), duration_s=500.0 * step_s, record_s=step_s)["imu"]
     # Row 0 is the t = 0 sample, written before the IMU's first output.

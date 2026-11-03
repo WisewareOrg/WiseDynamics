@@ -19,7 +19,7 @@ def test_readers_has_role_imu_and_truth_messages_has_roles_truth_and_imu():
     assert set(plant.truth_messages()) == {"truth", "imu"}
 
 
-def test_initial_state_returns_exactly_the_settled_keys():
+def test_initial_state_returns_exactly_its_documented_keys():
     assert set(ImuSpacecraft().initial_state()) == {"sigma0_BN", "r0_N", "v0_N", "omega0_BN_B"}
 
 

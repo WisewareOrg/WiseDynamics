@@ -105,7 +105,8 @@ class Plant[ConfigT: PlantConfig](ABC):
 
     @abstractmethod
     def initial_state(self) -> dict[str, np.ndarray]:
-        """The vehicle's initial condition as the simulation holds it, by settled key."""
+        """The vehicle's initial condition as the simulation holds it, by key. A subclass
+        documents its keys."""
 
     @classmethod
     def provenance(cls) -> dict[str, str]:

@@ -1,9 +1,9 @@
 # WiseDynamics
 
 WiseDynamics is a library of spacecraft plant models for Wiseware's GNC work, with a one-case
-runner, an HDF5 run writer and a pytest plugin for Monte Carlo runs as pytest sessions. Flight software pins a
-tagged release and runs its own scenario tests against these plants. Basilisk is the first
-simulation host ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
+runner, an HDF5 run writer and a pytest plugin for Monte Carlo runs as pytest sessions. Flight
+software pins a tagged release and runs its own scenario tests against these plants. Basilisk is the
+first simulation host ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
 
 ## Using it
 

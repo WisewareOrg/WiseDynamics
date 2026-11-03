@@ -25,7 +25,12 @@ class Recording(Mapping[str, Recorder]):
 
         Args:
             recorders: Message role to its recorder, at least one.
+
+        Raises:
+            ValueError: `recorders` is empty.
         """
+        if not recorders:
+            raise ValueError("a Recording needs at least one recorder")
         self._recorders = dict(recorders)
 
     def __getitem__(self, role: str) -> Recorder:

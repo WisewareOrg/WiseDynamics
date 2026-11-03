@@ -9,7 +9,7 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from tests.support import StubFsw, run_with_stub
-from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, run_case
+from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, Recording, run_case
 
 
 def test_recording_holds_truth_and_flight_software_roles_on_the_record_cadence():
@@ -122,3 +122,8 @@ def test_a_plant_is_freed_after_its_case():
     del plant, fsw
     gc.collect()
     assert released() is None, "the plant is still referenced after its case"
+
+
+def test_a_recording_needs_a_recorder():
+    with pytest.raises(ValueError, match="at least one recorder"):
+        Recording({})

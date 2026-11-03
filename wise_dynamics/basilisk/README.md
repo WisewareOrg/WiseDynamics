@@ -244,8 +244,10 @@ A Monte Carlo run is that test over many cases in one session: `pytest <scenario
 
 ## Stable interface
 
-A release changes these only as a breaking change: the import paths and names in
-[Modules](#modules); the `Plant` members in [Plants](#plants); the roles, initial-state keys and
+A release changes these only as a breaking change: the names in the `__all__` of the two
+packages, `wise_dynamics` and `wise_dynamics.basilisk`, imported from those packages, and
+`RunWriter`, imported from `wise_dynamics.run_writer`, the one module a consumer imports directly;
+the `Plant` members in [Plants](#plants); the roles, initial-state keys and
 dataset names in the `ImuSpacecraft` tables; the `run_case` and `Recording` signatures in
 [Running one case](#running-one-case); the root attributes in [Run files](#run-files); and the
 options, fixtures and case seeding in [pytest plugin](#pytest-plugin).
