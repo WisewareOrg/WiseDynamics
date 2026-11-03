@@ -1,4 +1,5 @@
-"""A stub flight-software module and a helper that runs a plant with it."""
+"""A stub flight-software module, a helper that runs a plant with it, and Earth's mu as the
+tests state it."""
 
 from Basilisk.architecture import messaging, sysModel
 

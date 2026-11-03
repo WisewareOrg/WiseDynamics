@@ -1,5 +1,5 @@
-"""`ImuSpacecraft`: its nominal vehicle, how a configuration reaches Basilisk, and the IMU's
-measured behaviour."""
+"""`ImuSpacecraft`: its nominal vehicle, how its configuration reaches the Basilisk objects it
+builds, its validation, and its reader's lifetime."""
 
 import gc
 import math

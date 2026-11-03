@@ -3,7 +3,7 @@
 Basilisk spacecraft plants, the one-case runner, the run-file writer, and the pytest plugin
 whose session over `--sim-runs` cases is a Monte Carlo run. Basilisk is the first
 simulation host by ADR 0001 rev 1. This file is the reference for the `wise-dynamics`
-distribution; each symbol's docstring carries its full interface.
+distribution; each symbol's docstring carries its arguments, returns and raises.
 
 ## Modules
 
