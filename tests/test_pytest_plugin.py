@@ -185,29 +185,6 @@ def test_attrs_cannot_replace_the_run_files_own(pytester):
     assert not out_dir.exists()
 
 
-def test_a_consumer_supplying_its_own_draws_records_what_its_case_used(scenario_dir):
-    """The scenario and the vehicle are each built from their keywords in the overriding
-    `sim_draws`, and the run file records exactly those draws."""
-    scenario_dir.makeconftest(
-        """
-        import pytest
-
-        @pytest.fixture
-        def sim_draws():
-            return {"sigma0_BN": [0.3, -0.2, 0.1], "gyro_bias_P_rad_s": [1e-3, 2e-3, 3e-3]}
-        """
-    )
-    runs = _run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
-
-    for run in runs:
-        assert _draws_of(run).keys() == {"sigma0_BN", "gyro_bias_P_rad_s"}
-        assert np.array_equal(_draws_of(run)["sigma0_BN"], [0.3, -0.2, 0.1])
-        assert np.array_equal(_draws_of(run)["gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
-        assert np.array_equal(run["sigma_BN"][0], [0.3, -0.2, 0.1])
-        assert np.allclose(run["omega_BN_B"][0], Leo500.omega0_BN_B_rad_s, rtol=0, atol=1e-15)
-        assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
-
-
 def test_the_scenario_option_selects_a_registered_scenario_and_its_vehicle(scenario_dir):
     """A second scenario, registered by the consumer's conftest with a vehicle class of its own,
     is the scenario and vehicle the session builds when `--sim-scenario` names it."""

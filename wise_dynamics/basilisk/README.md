@@ -69,8 +69,7 @@ consumer's `conftest.py` names nothing.
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | `--sim-duration-s` |
-| `sim_draws` | the case's draws, name to value: by default the scenario class's `draw`; override it to supply your own |
-| `sim_scenario` | the case's scenario, dispersed with `sim_draws` and its vehicle's noise seeded from the case; its vehicle is `sim_scenario.vehicle` |
+| `sim_scenario` | the case's scenario, dispersed with its own `draw` from the case's stream and its vehicle's noise seeded from the case; its vehicle is `sim_scenario.vehicle` |
 | `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per draw, and `attrs` beside them |
 
 Case `k` of seed `s` takes its draws and its noise seed from the two streams of

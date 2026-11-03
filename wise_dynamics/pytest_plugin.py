@@ -23,6 +23,7 @@ __all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 _OUT_DIR = pytest.StashKey[Path]()
+_DRAWS = pytest.StashKey[dict[str, np.ndarray]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -134,25 +135,15 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 
 @pytest.fixture
-def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: placement or vehicle dispersion name to the value the case is built with
-    and its run file records. The default is the scenario class's `draw` from the case's first
-    stream; a consumer overrides this fixture to supply its own.
-    """
-    draws_stream, _ = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    scenario_type = _scenario_type(request.config.getoption("--sim-scenario"))
-    return scenario_type.draw(np.random.default_rng(draws_stream))
-
-
-@pytest.fixture
-def sim_scenario(
-    request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> "Scenario":
-    """This case's scenario: `--sim-scenario`, dispersed with `sim_draws` and its vehicle's sensor
-    noise seeded from the case's second stream. Its vehicle is `sim_scenario.vehicle`."""
-    _, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
+def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
+    """This case's scenario: `--sim-scenario`, dispersed with its own `draw` from the case's first
+    stream and its vehicle's sensor noise seeded from the case's second. Its vehicle is
+    `sim_scenario.vehicle`."""
+    draws_stream, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
     scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
-    scenario.disperse(sim_draws, noise_seed=int(noise_stream.generate_state(1)[0]))
+    draws = scenario.draw(np.random.default_rng(draws_stream))
+    scenario.disperse(draws, noise_seed=int(noise_stream.generate_state(1)[0]))
+    request.node.stash[_DRAWS] = draws
     return scenario
 
 
@@ -160,7 +151,6 @@ def sim_scenario(
 def sim_run_file(
     request: pytest.FixtureRequest,
     sim_case_index: int,
-    sim_draws: Mapping[str, Any],
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
     """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
@@ -168,7 +158,7 @@ def sim_run_file(
     Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
     them, it returns the file's path. The file's root attributes are `case`, `seed`,
     `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
-    one `draw_<name>` per entry of `sim_draws`, with `attrs` beside them; `attrs` naming one of
+    one `draw_<name>` per value the scenario drew, with `attrs` beside them; `attrs` naming one of
     those raises `ValueError`.
     """
     own: dict[str, Any] = {
@@ -178,7 +168,7 @@ def sim_run_file(
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
     }
-    for name, value in sim_draws.items():
+    for name, value in request.node.stash[_DRAWS].items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
     path = request.config.stash[_OUT_DIR] / f"run_{sim_case_index:04d}.h5"
 
