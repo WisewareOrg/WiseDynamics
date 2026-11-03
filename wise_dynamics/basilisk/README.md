@@ -44,6 +44,10 @@ one vehicle: `add(vehicle)` places it at the scenario's placement, and a second 
 `initial_state()` returns the placement the vehicle starts from, valid before `add` and `run`.
 
 `run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` builds the simulation and runs once.
+It runs two tasks: the vehicle's models and sensors every `step_s`, and the flight-software module
+and the recorders every `fsw_step_s`, after the dynamics at each instant they share, so the flight
+software reads the sensors' output of that instant. `record_s` is a whole multiple of
+`fsw_step_s`.
 `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
 `recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
 `(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
@@ -76,10 +80,11 @@ Case `k` of seed `s` takes its draws and its noise seed from the two streams of
 is and reruns alone: `pytest <test file> --sim-seed S --sim-runs N "<test file>::test_case[k]"`.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
-`sim_vehicle.readers()` and starts from `sim_scenario.initial_state()`. Its output joins the run
-file through `fsw_fields`. `pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it as a
-Monte Carlo run; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer adds
-itself:
+`sim_vehicle.readers()` and starts from `sim_scenario.initial_state()`. In the default scenario the
+vehicle and its IMU step at 50 Hz (`step_s` = 0.02 s) and the guidance at 1 Hz (`fsw_step_s` = 1 s),
+and every field is recorded each 10 s. Its output joins the run file through `fsw_fields`.
+`pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run; `-n` runs
+workers in parallel and needs `pytest-xdist`, which a consumer adds itself:
 
 ```python
 from Basilisk.fswAlgorithms import inertial3D

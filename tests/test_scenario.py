@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import ImuSpacecraft, Leo500
@@ -40,6 +41,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     [
         ("no vehicle", ValueError, "add a vehicle before running"),
         ("record_s", ValueError, "recording period must be positive"),
+        ("misaligned record_s", ValueError, r"recording period 0\.5 s is not a whole multiple"),
         ("duration_s", ValueError, "duration must be positive"),
         ("t_s", ValueError, r"reuses the run's own dataset paths \['t_s'\]"),
         ("truth/r_N", ValueError, r"reuses the run's own dataset paths \['truth/r_N'\]"),
@@ -57,6 +59,8 @@ def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
     arguments = {"fsw_fields": fsw_fields, "duration_s": 10.0, "record_s": 10.0}
     if refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
+    elif refusal == "misaligned record_s":
+        arguments["record_s"] = 0.5
     elif refusal in ("t_s", "truth/r_N"):
         arguments["fsw_fields"] = {refusal: fsw_fields["guidance/sigma_RN"]}
     elif refusal == "absent field":
@@ -73,3 +77,40 @@ def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
         scenario.add(vehicle)
     if refusal != "already run":
         scenario.run(guidance, fsw_fields=fsw_fields, duration_s=10.0)
+
+
+class _ReadingFsw(sysModel.SysModel):
+    """Flight software that copies the IMU reader's gyro output to its own message each step, and
+    notes when it ran and when that output was written."""
+
+    def __init__(self, reader) -> None:
+        super().__init__()
+        self.ModelTag = "reading_fsw"
+        self.reader = reader
+        self.ran_ns: list[int] = []
+        self.read_ns: list[int] = []
+        self.output_msg = messaging.NavAttMsg()
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        self.ran_ns.append(CurrentSimNanos)
+        self.read_ns.append(self.reader.timeWritten())
+        payload = messaging.NavAttMsgPayload()
+        payload.omega_BN_B = self.reader().AngVelPlatform
+        self.output_msg.write(payload, CurrentSimNanos, self.moduleID)
+
+
+def test_the_flight_software_steps_at_its_rate_on_the_sensor_output_of_that_instant():
+    vehicle = ImuSpacecraft()
+    scenario = Leo500()
+    scenario.add(vehicle)
+    fsw = _ReadingFsw(vehicle.readers()["imu"])
+    datasets = scenario.run(
+        fsw,
+        fsw_fields={"fsw/gyro_P": (fsw.output_msg, "omega_BN_B", "rad/s")},
+        duration_s=10.0,
+        record_s=1.0,
+    )
+    assert fsw.ran_ns == [k * 1_000_000_000 for k in range(11)]
+    assert fsw.read_ns == fsw.ran_ns
+    assert np.array_equal(datasets["fsw/gyro_P"][0], datasets["imu/gyro_P"][0])
+    assert not np.array_equal(datasets["imu/gyro_P"][0][1], datasets["imu/gyro_P"][0][2])

@@ -12,7 +12,10 @@ from wise_dynamics.basilisk.vehicle import Vehicle
 __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
-_TASK = "scenario_task"
+_DYNAMICS_TASK = "dynamics_task"
+_FSW_TASK = "fsw_task"
+_DYNAMICS_PRIORITY = 2
+_FSW_PRIORITY = 1
 
 
 class Scenario(ABC):
@@ -25,17 +28,24 @@ class Scenario(ABC):
     anything is changed, adds each vehicle's models, and has `_place` attach the gravity bodies and
     write the initial state onto the vehicle's `spacecraft`.
 
+    The simulation runs two tasks. The dynamics task, every `step_s`, holds the vehicles' models
+    and sensors. The flight-software task, every `fsw_step_s`, holds the flight-software module and
+    the recorders, and runs after the dynamics task at each instant they share, so the flight
+    software reads the sensors' output of that instant.
+
     Attributes:
         mu_m3_s2: Gravity body name to its gravitational parameter, in m^3/s^2.
         standard_dispersion: Placement attribute to its per-axis 1-sigma, drawn in this order by
             `draw`.
-        step_s: The integration and sensor step, in seconds.
+        step_s: The dynamics task's period, the integration and sensor step, in seconds.
+        fsw_step_s: The flight-software task's period, in seconds, a whole multiple of `step_s`.
         vehicles: The vehicles added, in order.
     """
 
     mu_m3_s2: ClassVar[Mapping[str, float]]
     standard_dispersion: ClassVar[Mapping[str, float]]
     step_s: float
+    fsw_step_s: float
 
     def __init__(self) -> None:
         self.vehicles: list[Vehicle] = []
@@ -95,27 +105,29 @@ class Scenario(ABC):
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
-        Builds the simulation with one process holding one task at `step_s`, adds each vehicle's
-        models and places it, adds `fsw_module` after them, attaches one Basilisk recorder per
-        entry of each vehicle's `recorded_fields()` and of `fsw_fields`, each sampling every
-        `record_s` from t = 0, and runs from t = 0 for `duration_s`. The arguments and the
-        placement are checked before anything is changed.
+        Builds the simulation with one process holding the dynamics task at `step_s` and the
+        flight-software task at `fsw_step_s`. Adds each vehicle's models to the dynamics task and
+        places the vehicle, then adds `fsw_module` to the flight-software task, followed by one
+        Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, each
+        sampling every `record_s` from t = 0. Runs from t = 0 for `duration_s`. The arguments and
+        the placement are checked before anything is changed.
 
         Args:
             fsw_module: Any Basilisk module, for example one reading a vehicle's `readers()`.
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
                 flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
-            record_s: Recording period, in seconds.
+            record_s: Recording period, in seconds, a whole multiple of `fsw_step_s`.
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
             then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples.
 
         Raises:
-            ValueError: No vehicle is added, `step_s`, `record_s` or `duration_s` is not positive,
-                an `fsw_fields` path is `t_s` or a vehicle dataset path, a recorded field is
-                absent from its message, or the placement is invalid.
+            ValueError: No vehicle is added, `step_s`, `fsw_step_s`, `record_s` or `duration_s` is
+                not positive, `fsw_step_s` is not a whole multiple of `step_s` or `record_s` of
+                `fsw_step_s`, an `fsw_fields` path is `t_s` or a vehicle dataset path, a recorded
+                field is absent from its message, or the placement is invalid.
             RuntimeError: The scenario has already run.
         """
         if self._executed:
@@ -124,10 +136,25 @@ class Scenario(ABC):
             raise ValueError("add a vehicle before running the scenario")
         if not self.step_s > 0:
             raise ValueError(f"step must be positive, got {self.step_s} s")
+        if not self.fsw_step_s > 0:
+            raise ValueError(f"flight-software step must be positive, got {self.fsw_step_s} s")
         if not record_s > 0:
             raise ValueError(f"recording period must be positive, got {record_s} s")
         if not duration_s > 0:
             raise ValueError(f"duration must be positive, got {duration_s} s")
+        step_ns = macros.sec2nano(self.step_s)
+        fsw_step_ns = macros.sec2nano(self.fsw_step_s)
+        period_ns = macros.sec2nano(record_s)
+        if fsw_step_ns % step_ns:
+            raise ValueError(
+                f"flight-software step {self.fsw_step_s} s is not a whole multiple of the step "
+                f"{self.step_s} s"
+            )
+        if period_ns % fsw_step_ns:
+            raise ValueError(
+                f"recording period {record_s} s is not a whole multiple of the flight-software "
+                f"step {self.fsw_step_s} s"
+            )
         vehicle_fields = {}
         for vehicle in self.vehicles:
             vehicle_fields.update(vehicle.recorded_fields())
@@ -136,7 +163,6 @@ class Scenario(ABC):
             raise ValueError(f"fsw_fields reuses the run's own dataset paths {reused}")
 
         fields = {**vehicle_fields, **fsw_fields}
-        period_ns = macros.sec2nano(record_s)
         recorders = {path: message.recorder(period_ns) for path, (message, _, _) in fields.items()}
         for path, (_, field, _) in fields.items():
             if not isinstance(getattr(type(recorders[path]), field, None), property):
@@ -145,14 +171,15 @@ class Scenario(ABC):
         self.initial_state()
         self._executed = True
         process = self._simulation.CreateNewProcess(_PROCESS)
-        process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(self.step_s)))
+        process.addTask(self._simulation.CreateNewTask(_DYNAMICS_TASK, step_ns), _DYNAMICS_PRIORITY)
+        process.addTask(self._simulation.CreateNewTask(_FSW_TASK, fsw_step_ns), _FSW_PRIORITY)
         for vehicle in self.vehicles:
             for model in vehicle.models():
-                self._simulation.AddModelToTask(_TASK, model)
+                self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
             self._place(vehicle)
-        self._simulation.AddModelToTask(_TASK, fsw_module)
+        self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
         for recorder in recorders.values():
-            self._simulation.AddModelToTask(_TASK, recorder)
+            self._simulation.AddModelToTask(_FSW_TASK, recorder)
         self._simulation.InitializeSimulation()
         self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
         self._simulation.ExecuteSimulation()

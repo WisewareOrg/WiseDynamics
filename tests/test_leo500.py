@@ -54,9 +54,10 @@ def test_the_placement_reaches_the_basilisk_objects():
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
-    (task,) = scenario._simulation.TaskList
-    assert task.TaskData.TaskPeriod == 500_000_000
-    assert task.TaskModels[:2] == vehicle.models()
+    dynamics, fsw = scenario._simulation.TaskList
+    assert dynamics.TaskData.TaskPeriod == 500_000_000
+    assert dynamics.TaskModels == vehicle.models()
+    assert fsw.TaskData.TaskPeriod == 1_000_000_000
     hub = vehicle.spacecraft.hub
     assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), Placed.sigma0_BN)
     assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), Placed.omega0_BN_B_rad_s)
@@ -72,12 +73,14 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert elements.f == pytest.approx(Placed.true_anomaly_rad, abs=1e-9)
 
 
-def test_the_nominal_step_is_the_task_period():
+def test_the_nominal_steps_are_the_task_periods():
+    assert Leo500.fsw_step_s == 1.0
     scenario = Leo500()
     scenario.add(ImuSpacecraft())
     scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
-    (task,) = scenario._simulation.TaskList
-    assert task.TaskData.TaskPeriod == 20_000_000
+    dynamics, fsw = scenario._simulation.TaskList
+    assert dynamics.TaskData.TaskPeriod == 20_000_000
+    assert fsw.TaskData.TaskPeriod == 1_000_000_000
 
 
 def test_draw_adds_normal_samples_to_the_defaults_in_dispersion_order():
@@ -133,12 +136,22 @@ class Stalled(Leo500):
     step_s = 0.0
 
 
+class StalledFsw(Leo500):
+    fsw_step_s = 0.0
+
+
+class Misaligned(Leo500):
+    fsw_step_s = 0.03
+
+
 @pytest.mark.parametrize(
     ("scenario_type", "message"),
     [
         (Collapsed, "semi-major axis must be positive"),
         (Hyperbolic, r"eccentricity must be in \[0, 1\)"),
         (Stalled, "step must be positive"),
+        (StalledFsw, "flight-software step must be positive"),
+        (Misaligned, r"flight-software step 0\.03 s is not a whole multiple of the step 0\.02 s"),
     ],
 )
 def test_a_refused_placement_leaves_the_vehicle_unplaced(scenario_type, message):
