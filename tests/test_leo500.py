@@ -86,27 +86,22 @@ def test_the_scenario_builds_and_holds_its_vehicle():
     assert scenario.vehicles == [scenario.vehicle]
 
 
-def test_draw_draws_the_placement_then_the_vehicle_in_dispersion_order():
-    draws = Leo500.draw(np.random.default_rng(7))
-    rng = np.random.default_rng(7)
-    owners = {name: Leo500 for name in Leo500.standard_dispersion}
-    owners.update({name: ImuSpacecraft for name in ImuSpacecraft.standard_dispersion})
-    assert list(draws) == list(owners)
-    for name, owner in owners.items():
-        std = owner.standard_dispersion[name]
-        expected = np.asarray(getattr(owner, name)) + rng.normal(0.0, std, size=3)
-        assert np.array_equal(draws[name], expected), name
-
-
-def test_disperse_applies_its_own_draws_and_builds_the_vehicle_from_them():
+def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_from_them():
     scenario = Leo500()
     built = scenario.vehicle
     assert scenario.draws == {}
     scenario.disperse(np.random.default_rng(7), noise_seed=11)
-    draws = Leo500.draw(np.random.default_rng(7))
-    assert scenario.draws.keys() == draws.keys()
-    for name, value in draws.items():
-        assert np.array_equal(scenario.draws[name], value), name
+
+    rng = np.random.default_rng(7)
+    owners = {name: Leo500 for name in Leo500.standard_dispersion}
+    owners.update({name: ImuSpacecraft for name in ImuSpacecraft.standard_dispersion})
+    assert list(scenario.draws) == list(owners)
+    for name, owner in owners.items():
+        std = owner.standard_dispersion[name]
+        expected = np.asarray(getattr(owner, name)) + rng.normal(0.0, std, size=3)
+        assert np.array_equal(scenario.draws[name], expected), name
+
+    draws = scenario.draws
     assert np.array_equal(scenario.initial_state()["sigma0_BN"], draws["sigma0_BN"])
     assert np.array_equal(scenario.initial_state()["omega0_BN_B"], draws["omega0_BN_B_rad_s"])
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
@@ -122,7 +117,7 @@ def test_disperse_after_the_run_is_refused():
     scenario = Leo500()
     scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
-        scenario.disperse(np.random.default_rng(7))
+        scenario.disperse(np.random.default_rng(7), noise_seed=0)
 
 
 class Hyperbolic(Leo500):

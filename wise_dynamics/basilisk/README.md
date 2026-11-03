@@ -3,7 +3,7 @@
 Basilisk vehicles, the scenarios that place them, and the pytest plugin whose session over
 `--sim-runs` cases is a Monte Carlo run. A vehicle is mass properties, sensors and logging, and
 knows nothing about where it flies. A scenario is a prebuilt operating environment and the placement
-of the vehicles added to it, and runs them once with a flight-software module. Basilisk is the
+of the vehicle it builds, and runs them once with a flight-software module. Basilisk is the
 simulation host by ADR 0001 rev 1. Each symbol's docstring carries its arguments, returns and
 raises.
 
@@ -40,12 +40,12 @@ dataset float64 with a `units` attribute.
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement, its
 recording period `record_s` and `vehicle_type`, the class of the vehicle it builds, with units and
 frames in its class docstring; its constructor takes no arguments. The built vehicle is
-`scenario.vehicle`. `draw(rng)` draws the scenario's `standard_dispersion`, then its vehicle
-class's, as a vehicle's `draw` does. `disperse(rng, *, noise_seed=None)` draws them from `rng`,
-sets the drawn placement on one instance, builds its vehicle again with the drawn vehicle values
-and `noise_seed` as keywords, and records what it applied in `scenario.draws`. The new vehicle
-replaces `scenario.vehicle`, so readers and other handles on it are taken after dispersing.
-`initial_state()` returns the placement the vehicle starts from, valid before `run`.
+`scenario.vehicle`. `disperse(rng, *, noise_seed)` draws the scenario's `standard_dispersion`, then
+its vehicle class's, from `rng`, each as a vehicle's `draw` does, sets the drawn placement on one
+instance, builds its vehicle again with the drawn vehicle values and `noise_seed` as keywords, and
+records what it applied in `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers
+and other handles on it are taken after dispersing. `initial_state()` returns the placement the
+vehicle starts from, valid before `run`.
 
 `run(fsw_module, fsw_fields, *, duration_s)` builds the simulation, runs once and records every
 `record_s`.

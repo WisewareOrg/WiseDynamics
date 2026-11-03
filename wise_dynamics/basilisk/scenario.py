@@ -20,17 +20,17 @@ class Scenario(ABC):
     that runs them once.
 
     A subclass defines its environment, its placement, its recording period and its vehicle class
-    as class attributes and takes no constructor arguments. A scenario builds its vehicle and adds
-    it; `disperse` draws the scenario's dispersions, overrides the placement of one instance and
-    builds its vehicle again from the drawn values. `run` builds the simulation: it checks the
-    placement through `initial_state` before anything is changed, adds each vehicle's models, and
-    has `_place` attach the gravity bodies and write the initial state onto the vehicle's
-    `spacecraft`.
+    as class attributes and takes no constructor arguments. A scenario builds its vehicle and holds
+    it in `vehicles`; `disperse` draws the scenario's dispersions, overrides the placement of one
+    instance and builds its vehicle again from the drawn values. `run` builds the simulation: it
+    checks the placement through `initial_state` before anything is changed, adds each vehicle's
+    models, and has `_place` attach the gravity bodies and write the initial state onto the
+    vehicle's `spacecraft`.
 
     Attributes:
         mu_m3_s2: Gravity body name to its gravitational parameter, in m^3/s^2.
         standard_dispersion: Placement attribute to its per-axis 1-sigma, drawn in this order by
-            `draw`.
+            `disperse`.
         step_s: The integration and sensor step, in seconds.
         record_s: The recording period, in seconds.
         vehicle_type: The class of the vehicle the scenario builds.
@@ -51,30 +51,31 @@ class Scenario(ABC):
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
         self.vehicle = self.vehicle_type()
-        self._add(self.vehicle)
+        self.vehicles.append(self.vehicle)
 
     @classmethod
-    def draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    def _draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
         """Overrides drawn from `rng`: the scenario's `standard_dispersion` entries, then its
         vehicle class's, each drawn as `Vehicle.draw` draws."""
         return {**Vehicle.draw.__func__(cls, rng), **cls.vehicle_type.draw(rng)}
 
-    def disperse(self, rng: np.random.Generator, *, noise_seed: int | None = None) -> None:
-        """Draw this scenario's dispersions from `rng` with `draw`, set each drawn placement value
-        on this instance, and build the vehicle again with the drawn vehicle values and
-        `noise_seed` as constructor keywords. The new vehicle replaces `vehicle`, so readers and
-        other handles on it are taken after dispersing. `draws` records what was applied.
+    def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> None:
+        """Draw this scenario's dispersions from `rng`, the placement's then the vehicle class's,
+        set each drawn placement value on this instance, and build the vehicle again with the drawn
+        vehicle values and `noise_seed` as constructor keywords. The new vehicle replaces
+        `vehicle`, so readers and other handles on it are taken after dispersing. `draws` records
+        what was applied.
 
         Args:
             rng: The generator the dispersions are drawn from.
-            noise_seed: The new vehicle's sensor-noise seed; `None` keeps its class default.
+            noise_seed: The new vehicle's sensor-noise seed.
 
         Raises:
             RuntimeError: The scenario has already run.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
-        draws = self.draw(rng)
+        draws = self._draw(rng)
         placement = set(self.standard_dispersion)
         vehicle_draws = {name: value for name, value in draws.items() if name not in placement}
         vehicle = self.vehicle_type(**vehicle_draws, noise_seed=noise_seed)
@@ -83,10 +84,6 @@ class Scenario(ABC):
         self.vehicles[self.vehicles.index(self.vehicle)] = vehicle
         self.vehicle = vehicle
         self.draws = draws
-
-    def _add(self, vehicle: Vehicle) -> None:
-        """Place `vehicle` at the scenario's placement; `run` adds it to the simulation."""
-        self.vehicles.append(vehicle)
 
     @abstractmethod
     def initial_state(self) -> dict[str, np.ndarray]:
