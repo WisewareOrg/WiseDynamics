@@ -2,6 +2,7 @@
 
 import inspect
 
+import numpy as np
 import pytest
 
 import wise_dynamics
@@ -38,6 +39,14 @@ def test_the_gravity_model_takes_mu_from_the_class():
     plant = OtherMuSpacecraft()
     (earth,) = plant.spacecraft.gravField.gravBodies
     assert earth.mu == OtherMuSpacecraft.mu
+
+
+def test_the_initial_orbit_is_converted_with_the_class_mu():
+    """The initial position and velocity come from the configured elements at the class `mu`."""
+    state = OtherMuSpacecraft().initial_state()
+    r_N, v_N = OtherMuSpacecraft.nominal().orbit.to_inertial(OtherMuSpacecraft.mu)
+    assert np.array_equal(state["r0_N"], r_N)
+    assert np.array_equal(state["v0_N"], v_N)
 
 
 def test_recorded_fields_name_the_run_file_datasets_with_their_units():

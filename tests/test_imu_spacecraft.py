@@ -73,6 +73,9 @@ def test_configuration_reaches_the_basilisk_objects():
     assert np.array_equal(np.array(imu.PMatrixGyro), 7e-5 * np.eye(3))
     assert np.array_equal(np.array(imu.PMatrixAccel), 9e-5 * np.eye(3))
     assert np.array_equal(np.array(imu.dcm_PB), np.eye(3))
+    assert np.array_equal(np.array(imu.sensorPos_B).flatten(), np.zeros(3))
+    (earth,) = plant.spacecraft.gravField.gravBodies
+    assert earth.isCentralBody
     assert imu.RNGSeed == 11
 
     state = plant.initial_state()
