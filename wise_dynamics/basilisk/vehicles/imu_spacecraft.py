@@ -16,19 +16,19 @@ from Basilisk.simulation import spacecraft as bsk_spacecraft
 from Basilisk.utilities import orbitalMotion, simHelpers, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
-from wise_dynamics.basilisk.plant import Plant
+from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__ = ["ImuSpacecraft"]
 
 type Vector3 = tuple[float, float, float]
 
 
-class ImuSpacecraft(Plant):
+class ImuSpacecraft(Vehicle):
     """A tumbling rigid spacecraft in low Earth orbit with one IMU.
 
     Each keyword defaults to the class attribute of the same name, the nominal vehicle, so a
-    consumer reads a default without building a plant; a plant keeps each keyword it is built with
-    as an instance attribute of that name.
+    consumer reads a default without building a vehicle; a vehicle keeps each keyword it is built
+    with as an instance attribute of that name.
 
     Args:
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
@@ -41,9 +41,9 @@ class ImuSpacecraft(Plant):
         inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2, as three
             rows.
         sigma0_BN: Initial attitude, the MRP of the body frame relative to inertial.
-        omega0_BN_B: Initial body rate relative to inertial, in body axes, in rad/s.
-        gyro_bias_P: Constant gyro bias in the IMU platform frame, in rad/s.
-        accel_bias_P: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+        omega0_BN_B_rad_s: Initial body rate relative to inertial, in body axes, in rad/s.
+        gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
         gyro_noise_std_rad_s: Per-sample 1-sigma white noise on each gyro axis, in rad/s.
         accel_noise_std_m_s2: Per-sample 1-sigma white noise on each accelerometer axis, in
             m/s^2.
@@ -65,9 +65,9 @@ class ImuSpacecraft(Plant):
     standard_dispersion: ClassVar[MappingProxyType[str, float]] = MappingProxyType(
         {
             "sigma0_BN": 0.01,
-            "omega0_BN_B": 0.2 * D2R,
-            "gyro_bias_P": 1e-4,
-            "accel_bias_P": 1e-4,
+            "omega0_BN_B_rad_s": 0.2 * D2R,
+            "gyro_bias_P_rad_s": 1e-4,
+            "accel_bias_P_m_s2": 1e-4,
         }
     )
 
@@ -84,9 +84,9 @@ class ImuSpacecraft(Plant):
         (0.0, 0.0, 600.0),
     )
     sigma0_BN: Vector3 = (0.1, 0.2, -0.3)
-    omega0_BN_B: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
-    gyro_bias_P: Vector3 = (1e-4, -2e-4, 5e-5)
-    accel_bias_P: Vector3 = (1e-4, -5e-5, 2e-4)
+    omega0_BN_B_rad_s: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
+    gyro_bias_P_rad_s: Vector3 = (1e-4, -2e-4, 5e-5)
+    accel_bias_P_m_s2: Vector3 = (1e-4, -5e-5, 2e-4)
     gyro_noise_std_rad_s: float = 5e-5
     accel_noise_std_m_s2: float = 5e-5
     step_s: float = 1.0
@@ -104,24 +104,14 @@ class ImuSpacecraft(Plant):
         mass_kg: float = mass_kg,
         inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = inertia_B_kg_m2,
         sigma0_BN: Vector3 = sigma0_BN,
-        omega0_BN_B: Vector3 = omega0_BN_B,
-        gyro_bias_P: Vector3 = gyro_bias_P,
-        accel_bias_P: Vector3 = accel_bias_P,
+        omega0_BN_B_rad_s: Vector3 = omega0_BN_B_rad_s,
+        gyro_bias_P_rad_s: Vector3 = gyro_bias_P_rad_s,
+        accel_bias_P_m_s2: Vector3 = accel_bias_P_m_s2,
         gyro_noise_std_rad_s: float = gyro_noise_std_rad_s,
         accel_noise_std_m_s2: float = accel_noise_std_m_s2,
         step_s: float = step_s,
         noise_seed: int = noise_seed,
     ) -> None:
-        r_N, v_N = _orbit_to_inertial(
-            self.mu,
-            semi_major_axis_m,
-            eccentricity,
-            inclination_rad,
-            raan_rad,
-            arg_periapsis_rad,
-            true_anomaly_rad,
-        )
-        super().__init__(step_s=step_s)
         self.semi_major_axis_m = semi_major_axis_m
         self.eccentricity = eccentricity
         self.inclination_rad = inclination_rad
@@ -131,23 +121,33 @@ class ImuSpacecraft(Plant):
         self.mass_kg = mass_kg
         self.inertia_B_kg_m2 = inertia_B_kg_m2
         self.sigma0_BN = sigma0_BN
-        self.omega0_BN_B = omega0_BN_B
-        self.gyro_bias_P = gyro_bias_P
-        self.accel_bias_P = accel_bias_P
+        self.omega0_BN_B_rad_s = omega0_BN_B_rad_s
+        self.gyro_bias_P_rad_s = gyro_bias_P_rad_s
+        self.accel_bias_P_m_s2 = accel_bias_P_m_s2
         self.gyro_noise_std_rad_s = gyro_noise_std_rad_s
         self.accel_noise_std_m_s2 = accel_noise_std_m_s2
         self.noise_seed = noise_seed
+        r_N, v_N = _orbit_to_inertial(
+            self.mu,
+            self.semi_major_axis_m,
+            self.eccentricity,
+            self.inclination_rad,
+            self.raan_rad,
+            self.arg_periapsis_rad,
+            self.true_anomaly_rad,
+        )
+        super().__init__(step_s=step_s)
 
         self.spacecraft = bsk_spacecraft.Spacecraft()
         self.spacecraft.ModelTag = "spacecraft"
         hub = self.spacecraft.hub
-        hub.mHub = mass_kg
+        hub.mHub = self.mass_kg
         hub.r_BcB_B = _column((0.0, 0.0, 0.0))
         hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(
-            [element for row in inertia_B_kg_m2 for element in row]
+            [element for row in self.inertia_B_kg_m2 for element in row]
         )
-        hub.sigma_BNInit = _column(sigma0_BN)
-        hub.omega_BN_BInit = _column(omega0_BN_B)
+        hub.sigma_BNInit = _column(self.sigma0_BN)
+        hub.omega_BN_BInit = _column(self.omega0_BN_B_rad_s)
         self.add_model(self.spacecraft)
 
         self._gravity = simIncludeGravBody.gravBodyFactory()
@@ -162,11 +162,11 @@ class ImuSpacecraft(Plant):
         self.imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
         self.imu.sensorPos_B = _column((0.0, 0.0, 0.0))
         self.imu.dcm_PB = np.eye(3).tolist()
-        self.imu.senRotBias = _column(gyro_bias_P)
-        self.imu.senTransBias = _column(accel_bias_P)
-        self.imu.PMatrixGyro = (gyro_noise_std_rad_s * np.eye(3)).tolist()
-        self.imu.PMatrixAccel = (accel_noise_std_m_s2 * np.eye(3)).tolist()
-        self.imu.RNGSeed = int(noise_seed)
+        self.imu.senRotBias = _column(self.gyro_bias_P_rad_s)
+        self.imu.senTransBias = _column(self.accel_bias_P_m_s2)
+        self.imu.PMatrixGyro = (self.gyro_noise_std_rad_s * np.eye(3)).tolist()
+        self.imu.PMatrixAccel = (self.accel_noise_std_m_s2 * np.eye(3)).tolist()
+        self.imu.RNGSeed = int(self.noise_seed)
         self.add_model(self.imu)
 
     def _readers(self) -> dict[str, Any]:

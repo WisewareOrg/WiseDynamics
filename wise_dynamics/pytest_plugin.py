@@ -1,4 +1,4 @@
-"""The WiseDynamics pytest plugin: a pytest session runs one plant over `--sim-runs` Monte Carlo
+"""The WiseDynamics pytest plugin: a pytest session runs one vehicle over `--sim-runs` Monte Carlo
 cases.
 
 Installing `wise-dynamics` registers this module through its `pytest11` entry point.
@@ -7,7 +7,7 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 
 import secrets
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from wise_dynamics.run_file import write_run
+from wise_dynamics.run_file import RunFile
 
 if TYPE_CHECKING:
-    from wise_dynamics.basilisk.plant import Plant
+    from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__: list[str] = []
 
@@ -32,7 +32,7 @@ class SessionOptions:
     """A pytest session's `--sim-*` options, parsed and checked once by the plugin.
 
     Attributes:
-        plant: `--sim-spacecraft`, a name in `wise_dynamics.basilisk.PLANTS`.
+        vehicle: `--sim-vehicle`, a name in `wise_dynamics.basilisk.VEHICLES`.
         seed: `--sim-seed`, non-negative.
         runs: `--sim-runs`, at least 1.
         duration_s: `--sim-duration-s`, positive.
@@ -42,7 +42,7 @@ class SessionOptions:
         ValueError: `seed`, `runs` or `duration_s` is out of range.
     """
 
-    plant: str
+    vehicle: str
     seed: int
     runs: int
     duration_s: float
@@ -62,7 +62,7 @@ _OPTIONS = pytest.StashKey[SessionOptions]()
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the `--sim-*` options."""
-    group = parser.getgroup("wise-dynamics", "WiseDynamics plant cases")
+    group = parser.getgroup("wise-dynamics", "WiseDynamics vehicle cases")
     group.addoption(
         "--sim-runs", type=int, default=8, help="number of cases in the session (default: 8)"
     )
@@ -80,9 +80,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="simulated duration of each case, in seconds (default: 5700)",
     )
     group.addoption(
-        "--sim-spacecraft",
+        "--sim-vehicle",
         default="imu_spacecraft",
-        help="name of the plant in wise_dynamics.basilisk.PLANTS (default: imu_spacecraft)",
+        help="name of the vehicle in wise_dynamics.basilisk.VEHICLES (default: imu_spacecraft)",
     )
 
 
@@ -111,7 +111,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     try:
         options = SessionOptions(
-            plant=config.getoption("--sim-spacecraft"),
+            vehicle=config.getoption("--sim-vehicle"),
             seed=config.getoption("--sim-seed"),
             runs=config.getoption("--sim-runs"),
             duration_s=config.getoption("--sim-duration-s"),
@@ -132,15 +132,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over the case numbers.
 
     Raises:
-        pytest.UsageError: `--sim-spacecraft` names no plant in `PLANTS`.
+        pytest.UsageError: `--sim-vehicle` names no vehicle in `VEHICLES`.
     """
     if "sim_case_index" not in metafunc.fixturenames:
         return
     options = metafunc.config.stash[_OPTIONS]
     try:
-        _plant_type(options.plant)
+        _vehicle_type(options.vehicle)
     except ValueError as error:
-        raise pytest.UsageError(f"wise-dynamics: --sim-spacecraft: {error}") from None
+        raise pytest.UsageError(f"wise-dynamics: --sim-vehicle: {error}") from None
     metafunc.parametrize("sim_case_index", range(options.runs), indirect=True)
 
 
@@ -169,58 +169,53 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: plant keyword to the value its plant is built with and its run file
+    """This case's draws: vehicle keyword to the value its vehicle is built with and its run file
     records. The default draws each `standard_dispersion` entry, in order, as the keyword's
     default plus independent normal samples of that 1-sigma from the case's first stream; a
     scenario overrides this fixture to supply its own.
     """
     options = request.config.stash[_OPTIONS]
-    plant_type = _plant_type(options.plant)
+    vehicle_type = _vehicle_type(options.vehicle)
     draws_stream, _ = _streams(options.seed, sim_case_index)
     rng = np.random.default_rng(draws_stream)
     draws = {}
-    for name, std in plant_type.standard_dispersion.items():
-        nominal = np.asarray(getattr(plant_type, name), dtype=float)
+    for name, std in vehicle_type.standard_dispersion.items():
+        nominal = np.asarray(getattr(vehicle_type, name), dtype=float)
         draws[name] = nominal + rng.normal(0.0, std, size=nominal.shape)
     return draws
 
 
 @pytest.fixture
-def sim_plant(
+def sim_vehicle(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> "Plant":
-    """This case's plant, built with `sim_draws` as keywords and its sensor noise seeded from the
+) -> "Vehicle":
+    """This case's vehicle, built with `sim_draws` as keywords and its sensor noise seeded from the
     case's second stream."""
     options = request.config.stash[_OPTIONS]
-    plant_type = _plant_type(options.plant)
-    return plant_type(**sim_draws, noise_seed=_noise_seed(options.seed, sim_case_index))
+    vehicle_type = _vehicle_type(options.vehicle)
+    return vehicle_type(**sim_draws, noise_seed=_noise_seed(options.seed, sim_case_index))
 
 
 @pytest.fixture
-def sim_run_writer(
+def sim_run_file(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> Callable[..., Path]:
-    """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`: `writer(datasets,
-    extra_attrs=None) -> Path`, with `datasets` as `run_case` returns them.
+) -> RunFile:
+    """This case's `RunFile`, `<out_dir>/run_<NNNN>.h5`.
 
-    The root attributes are `case`, `seed`, `created_utc` (ISO 8601 UTC), `versions_bsk`,
-    `versions_wise_dynamics`, one `draw_<keyword>` per entry of `sim_draws`, and `extra_attrs`,
-    which raises `ValueError` when it names one of the others.
+    Its own root attributes are `case`, `seed`, `created_utc` (the case's start, ISO 8601 UTC),
+    `versions_bsk`, `versions_wise_dynamics` and one `draw_<keyword>` per entry of `sim_draws`.
     """
     options = request.config.stash[_OPTIONS]
-
-    def write(
-        datasets: Mapping[str, tuple[Any, str]], extra_attrs: Mapping[str, Any] | None = None
-    ) -> Path:
-        attrs = _root_attrs(options, sim_case_index, sim_draws)
-        extra_attrs = extra_attrs or {}
-        reserved = sorted(set(attrs) & set(extra_attrs))
-        if reserved:
-            raise ValueError(f"extra_attrs may not set the reserved root attrs {reserved}")
-        path = options.out_dir / f"run_{sim_case_index:04d}.h5"
-        return write_run(path, datasets, {**attrs, **extra_attrs})
-
-    return write
+    attrs: dict[str, Any] = {
+        "case": sim_case_index,
+        "seed": options.seed,
+        "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "versions_wise_dynamics": version("wise-dynamics"),
+        "versions_bsk": version("bsk"),
+    }
+    for name, value in sim_draws.items():
+        attrs[f"draw_{name}"] = np.asarray(value, dtype=float)
+    return RunFile(options.out_dir / f"run_{sim_case_index:04d}.h5", attrs)
 
 
 def _run_files(count: int) -> str:
@@ -228,15 +223,15 @@ def _run_files(count: int) -> str:
     return f"{count} run file" if count == 1 else f"{count} run files"
 
 
-def _plant_type(name: str) -> "type[Plant]":
-    """The plant class `name` registers in `PLANTS`, imported with Basilisk on first use."""
-    from wise_dynamics.basilisk.plants import PLANTS
+def _vehicle_type(name: str) -> "type[Vehicle]":
+    """The vehicle class `name` registers in `VEHICLES`, imported with Basilisk on first use."""
+    from wise_dynamics.basilisk.vehicles import VEHICLES
 
     try:
-        return PLANTS[name]
+        return VEHICLES[name]
     except KeyError:
         raise ValueError(
-            f"unknown plant {name!r}; known plants: {', '.join(sorted(PLANTS))}"
+            f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}"
         ) from None
 
 
@@ -249,17 +244,3 @@ def _noise_seed(seed: int, index: int) -> int:
     """Case `index`'s sensor-noise seed."""
     _, noise_stream = _streams(seed, index)
     return int(noise_stream.generate_state(1)[0])
-
-
-def _root_attrs(options: SessionOptions, index: int, draws: Mapping[str, Any]) -> dict[str, Any]:
-    """The root attributes of case `index`'s run file."""
-    attrs: dict[str, Any] = {
-        "case": index,
-        "seed": options.seed,
-        "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "versions_wise_dynamics": version("wise-dynamics"),
-        "versions_bsk": version("bsk"),
-    }
-    for name, value in draws.items():
-        attrs[f"draw_{name}"] = np.asarray(value, dtype=float)
-    return attrs

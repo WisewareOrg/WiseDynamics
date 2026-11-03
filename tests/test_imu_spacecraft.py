@@ -25,9 +25,9 @@ DISPERSED = {
     "mass_kg": 500.0,
     "inertia_B_kg_m2": ((150.0, -1.0, 0.0), (-1.0, 200.0, 0.0), (0.0, 0.0, 250.0)),
     "sigma0_BN": (0.05, -0.1, 0.2),
-    "omega0_BN_B": (0.01, -0.02, 0.03),
-    "gyro_bias_P": (3e-4, -1e-4, 2e-4),
-    "accel_bias_P": (-2e-4, 4e-4, 1e-4),
+    "omega0_BN_B_rad_s": (0.01, -0.02, 0.03),
+    "gyro_bias_P_rad_s": (3e-4, -1e-4, 2e-4),
+    "accel_bias_P_m_s2": (-2e-4, 4e-4, 1e-4),
     "gyro_noise_std_rad_s": 7e-5,
     "accel_noise_std_m_s2": 9e-5,
     "step_s": 0.5,
@@ -36,7 +36,7 @@ DISPERSED = {
 
 
 def test_nominal_vehicle_is_the_specified_one():
-    """Read from the class, as a consumer reads it without building a plant."""
+    """Read from the class, as a consumer reads it without building a vehicle."""
     assert ImuSpacecraft.mu == 3.986004360e14
     assert ImuSpacecraft.semi_major_axis_m == 6871.0e3
     assert ImuSpacecraft.eccentricity == 0.0001
@@ -51,23 +51,23 @@ def test_nominal_vehicle_is_the_specified_one():
         (0.0, 0.0, 600.0),
     )
     assert ImuSpacecraft.sigma0_BN == (0.1, 0.2, -0.3)
-    assert ImuSpacecraft.omega0_BN_B == (D2R, D2R, D2R)
-    assert ImuSpacecraft.gyro_bias_P == (1e-4, -2e-4, 5e-5)
-    assert ImuSpacecraft.accel_bias_P == (1e-4, -5e-5, 2e-4)
+    assert ImuSpacecraft.omega0_BN_B_rad_s == (D2R, D2R, D2R)
+    assert ImuSpacecraft.gyro_bias_P_rad_s == (1e-4, -2e-4, 5e-5)
+    assert ImuSpacecraft.accel_bias_P_m_s2 == (1e-4, -5e-5, 2e-4)
     assert ImuSpacecraft.gyro_noise_std_rad_s == 5e-5
     assert ImuSpacecraft.accel_noise_std_m_s2 == 5e-5
     assert ImuSpacecraft.step_s == 1.0
     assert ImuSpacecraft.noise_seed == 0
     assert dict(ImuSpacecraft.standard_dispersion) == {
         "sigma0_BN": 0.01,
-        "omega0_BN_B": 0.2 * D2R,
-        "gyro_bias_P": 1e-4,
-        "accel_bias_P": 1e-4,
+        "omega0_BN_B_rad_s": 0.2 * D2R,
+        "gyro_bias_P_rad_s": 1e-4,
+        "accel_bias_P_m_s2": 1e-4,
     }
 
 
 def test_each_keyword_defaults_to_its_class_attribute():
-    """So a plant built with no keywords is the vehicle a consumer reads from the class."""
+    """So a vehicle built with no keywords is the vehicle a consumer reads from the class."""
     parameters = inspect.signature(ImuSpacecraft).parameters
     assert len(parameters) == 16
     for name, parameter in parameters.items():
@@ -75,25 +75,25 @@ def test_each_keyword_defaults_to_its_class_attribute():
 
 
 def test_keywords_reach_the_basilisk_objects():
-    plant = ImuSpacecraft(**DISPERSED, noise_seed=11)
-    hub = plant.spacecraft.hub
+    vehicle = ImuSpacecraft(**DISPERSED, noise_seed=11)
+    hub = vehicle.spacecraft.hub
     assert hub.mHub == 500.0
     assert np.array_equal(np.array(hub.IHubPntBc_B), np.array(DISPERSED["inertia_B_kg_m2"]))
 
-    imu = plant.imu
-    assert np.array_equal(np.array(imu.senRotBias).flatten(), DISPERSED["gyro_bias_P"])
-    assert np.array_equal(np.array(imu.senTransBias).flatten(), DISPERSED["accel_bias_P"])
+    imu = vehicle.imu
+    assert np.array_equal(np.array(imu.senRotBias).flatten(), DISPERSED["gyro_bias_P_rad_s"])
+    assert np.array_equal(np.array(imu.senTransBias).flatten(), DISPERSED["accel_bias_P_m_s2"])
     assert np.array_equal(np.array(imu.PMatrixGyro), 7e-5 * np.eye(3))
     assert np.array_equal(np.array(imu.PMatrixAccel), 9e-5 * np.eye(3))
     assert np.array_equal(np.array(imu.dcm_PB), np.eye(3))
     assert np.array_equal(np.array(imu.sensorPos_B).flatten(), np.zeros(3))
-    (earth,) = plant.spacecraft.gravField.gravBodies
+    (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
     assert earth.mu == ImuSpacecraft.mu
     assert imu.RNGSeed == 11
 
-    state = plant.initial_state()
-    elements = orbitalMotion.rv2elem(plant.mu, state["r0_N"], state["v0_N"])
+    state = vehicle.initial_state()
+    elements = orbitalMotion.rv2elem(vehicle.mu, state["r0_N"], state["v0_N"])
     assert elements.a == pytest.approx(DISPERSED["semi_major_axis_m"], rel=1e-12)
     assert elements.e == pytest.approx(DISPERSED["eccentricity"], rel=1e-9)
     assert elements.i == pytest.approx(DISPERSED["inclination_rad"], abs=1e-12)
@@ -103,12 +103,12 @@ def test_keywords_reach_the_basilisk_objects():
 
 
 def test_initial_state_is_the_keywords_and_the_truth_at_t0():
-    plant = ImuSpacecraft(**DISPERSED)
-    state = plant.initial_state()
+    vehicle = ImuSpacecraft(**DISPERSED)
+    state = vehicle.initial_state()
     assert np.array_equal(state["sigma0_BN"], DISPERSED["sigma0_BN"])
-    assert np.array_equal(state["omega0_BN_B"], DISPERSED["omega0_BN_B"])
+    assert np.array_equal(state["omega0_BN_B"], DISPERSED["omega0_BN_B_rad_s"])
 
-    truth = run_with_guidance(plant, duration_s=10.0)
+    truth = run_with_guidance(vehicle, duration_s=10.0)
     for dataset, key, tolerance in (
         ("truth/sigma_BN", "sigma0_BN", 1e-15),
         ("truth/omega_BN_B", "omega0_BN_B", 1e-15),
@@ -119,10 +119,10 @@ def test_initial_state_is_the_keywords_and_the_truth_at_t0():
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():
-    plant = ImuSpacecraft()
-    reader = plant.readers()["imu"]
+    vehicle = ImuSpacecraft()
+    reader = vehicle.readers()["imu"]
     assert reader.isLinked()
-    gyro, _ = run_with_guidance(plant, duration_s=20.0)["imu/gyro_P"]
+    gyro, _ = run_with_guidance(vehicle, duration_s=20.0)["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 
 
@@ -151,24 +151,24 @@ def test_orbit_elements_outside_a_closed_orbit_are_refused(elements, message):
         ImuSpacecraft(**elements)
 
 
-def test_a_plant_with_a_non_positive_step_is_refused():
+def test_a_vehicle_with_a_non_positive_step_is_refused():
     with pytest.raises(ValueError, match="step must be positive"):
         ImuSpacecraft(step_s=0.0)
 
 
-def test_a_reader_reads_the_live_value_after_its_plant_is_released():
-    """A reader holds its plant, so reading it after the consumer releases its own reference to
-    the plant gives the plant's output, not freed memory."""
-    plant = ImuSpacecraft()
-    released = weakref.ref(plant)
-    reader = plant.readers()["imu"]
-    run_with_guidance(plant, duration_s=20.0)
+def test_a_reader_reads_the_live_value_after_its_vehicle_is_released():
+    """A reader holds its vehicle, so reading it after the consumer releases its own reference to
+    the vehicle gives the vehicle's output, not freed memory."""
+    vehicle = ImuSpacecraft()
+    released = weakref.ref(vehicle)
+    reader = vehicle.readers()["imu"]
+    run_with_guidance(vehicle, duration_s=20.0)
     gyro = list(reader().AngVelPlatform)
-    del plant
+    del vehicle
     gc.collect()
     others = [ImuSpacecraft() for _ in range(10)]
 
     assert others
-    assert released() is not None, "the reader released its plant"
+    assert released() is not None, "the reader released its vehicle"
     assert any(component != 0.0 for component in gyro)
     assert list(reader().AngVelPlatform) == gyro

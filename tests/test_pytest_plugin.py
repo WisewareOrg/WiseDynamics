@@ -20,19 +20,19 @@ from Basilisk.fswAlgorithms import inertial3D
 from wise_dynamics.basilisk import run_case
 
 
-def test_case(sim_duration_s, sim_plant, sim_run_writer):
+def test_case(sim_duration_s, sim_vehicle, sim_run_file):
     datasets = run_case(
-        sim_plant,
+        sim_vehicle,
         inertial3D.inertial3D(),
-        fields=sim_plant.recorded_fields(),
+        fields=sim_vehicle.recorded_fields(),
         duration_s=sim_duration_s,
         record_s=1.0,
     )
-    sim_run_writer(
+    sim_run_file.write(
         datasets,
-        extra_attrs={
-            "probe_noise_seed": sim_plant.imu.RNGSeed,
-            "probe_gyro_bias_P": np.array(sim_plant.imu.senRotBias, dtype=float).flatten(),
+        {
+            "probe_noise_seed": sim_vehicle.imu.RNGSeed,
+            "probe_gyro_bias_P_rad_s": np.array(sim_vehicle.imu.senRotBias, dtype=float).flatten(),
         },
     )
 """
@@ -44,9 +44,9 @@ SHORT = ("--sim-duration-s", "3")
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
     "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
-    "omega0_BN_B": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
-    "gyro_bias_P": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
-    "accel_bias_P": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
+    "omega0_BN_B_rad_s": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
+    "gyro_bias_P_rad_s": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
+    "accel_bias_P_m_s2": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
 }
 
 
@@ -123,7 +123,7 @@ def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
         assert np.array_equal(value, draws_of(large)[name])
 
 
-def test_each_case_records_the_standard_draws_its_plant_used(scenario_dir):
+def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
     runs = run_session(scenario_dir, "out", "--sim-runs", "3", passed=3)
 
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2]
@@ -133,9 +133,9 @@ def test_each_case_records_the_standard_draws_its_plant_used(scenario_dir):
         assert draws.keys() == expected.keys()
         for name, value in expected.items():
             assert np.array_equal(draws[name], value), (index, name)
-        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], draws["gyro_bias_P"])
+        assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], draws["gyro_bias_P_rad_s"])
         assert np.array_equal(run["sigma_BN"][0], draws["sigma0_BN"])
-        assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B"], rtol=0, atol=1e-15)
+        assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B_rad_s"], rtol=0, atol=1e-15)
     for name in draws_of(runs[0]):
         assert not np.allclose(draws_of(runs[0])[name], draws_of(runs[1])[name])
 
@@ -151,7 +151,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
-    probes = {"probe_noise_seed", "probe_gyro_bias_P"}
+    probes = {"probe_noise_seed", "probe_gyro_bias_P_rad_s"}
     draws = {f"draw_{name}" for name in ImuSpacecraft.standard_dispersion}
     assert (
         set(attrs)
@@ -167,25 +167,8 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     )
 
 
-def test_extra_attrs_cannot_replace_a_root_attr(pytester):
-    pytester.makepyfile(
-        """
-        import numpy as np
-        import pytest
-
-
-        def test_case(sim_run_writer):
-            with pytest.raises(ValueError, match=r"reserved root attrs \\['seed'\\]"):
-                sim_run_writer({"t_s": (np.zeros(1), "s")}, extra_attrs={"seed": 1})
-        """
-    )
-    pytester.runpytest_subprocess(
-        "--sim-runs", "1", "--sim-out", str(pytester.path / "out")
-    ).assert_outcomes(passed=1)
-
-
-def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario_dir):
-    """The plant is built from the overriding `sim_draws`, and the run file records exactly those
+def test_a_scenario_supplying_its_own_draws_records_what_its_vehicle_used(scenario_dir):
+    """The vehicle is built from the overriding `sim_draws`, and the run file records exactly those
     draws."""
     scenario_dir.makeconftest(
         """
@@ -193,15 +176,15 @@ def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario
 
         @pytest.fixture
         def sim_draws():
-            return {"gyro_bias_P": [1e-3, 2e-3, 3e-3]}
+            return {"gyro_bias_P_rad_s": [1e-3, 2e-3, 3e-3]}
         """
     )
     runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     for run in runs:
-        assert draws_of(run).keys() == {"gyro_bias_P"}
-        assert np.array_equal(draws_of(run)["gyro_bias_P"], [1e-3, 2e-3, 3e-3])
-        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], [1e-3, 2e-3, 3e-3])
+        assert draws_of(run).keys() == {"gyro_bias_P_rad_s"}
+        assert np.array_equal(draws_of(run)["gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
+        assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
 
 
 def test_a_session_reproduces_from_its_seed(scenario_dir):
@@ -297,14 +280,14 @@ def test_out_of_range_options_are_usage_errors(pytester, option, value, message)
     result.stderr.fnmatch_lines([f"ERROR: wise-dynamics: {message}"])
 
 
-def test_an_unknown_spacecraft_fails_collection_naming_it_and_the_known_ones(pytester):
+def test_an_unknown_vehicle_fails_collection_naming_it_and_the_known_ones(pytester):
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess("--sim-spacecraft", "bogus")
+    result = pytester.runpytest_subprocess("--sim-vehicle", "bogus")
     assert result.ret == pytest.ExitCode.INTERRUPTED
     result.stdout.fnmatch_lines(
         [
-            "*UsageError: wise-dynamics: --sim-spacecraft: unknown plant 'bogus'; "
-            "known plants: imu_spacecraft"
+            "*UsageError: wise-dynamics: --sim-vehicle: unknown vehicle 'bogus'; "
+            "known vehicles: imu_spacecraft"
         ]
     )
 

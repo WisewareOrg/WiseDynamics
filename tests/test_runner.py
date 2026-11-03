@@ -13,9 +13,9 @@ from wise_dynamics.basilisk import ImuSpacecraft, run_case
 
 
 def test_a_case_records_its_fields_on_the_record_cadence():
-    plant = ImuSpacecraft()
-    fields = plant.recorded_fields()
-    datasets = run_with_guidance(plant, duration_s=50.0, record_s=10.0)
+    vehicle = ImuSpacecraft()
+    fields = vehicle.recorded_fields()
+    datasets = run_with_guidance(vehicle, duration_s=50.0, record_s=10.0)
     t_s, units = datasets["t_s"]
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
@@ -30,41 +30,40 @@ def test_a_case_records_its_fields_on_the_record_cadence():
     ("refusal", "error", "message"),
     [
         ("no fields", ValueError, "at least one field to record"),
+        ("absent field", ValueError, "'bad': its message has no field 'r_BN_N'"),
         ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("already run", RuntimeError, "already run"),
     ],
 )
-def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
-    plant = ImuSpacecraft()
-    guidance = inertial3D.inertial3D()
-    arguments = {"fields": plant.recorded_fields(), "duration_s": 10.0, "record_s": 10.0}
+def test_a_refused_call_leaves_the_vehicle_unchanged(refusal, error, message):
+    """A refused call adds nothing to the vehicle, and a vehicle that has not run still runs."""
+    vehicle = ImuSpacecraft()
+    arguments = {"fields": vehicle.recorded_fields(), "duration_s": 10.0, "record_s": 10.0}
     if refusal == "no fields":
         arguments["fields"] = {}
+    elif refusal == "absent field":
+        arguments["fields"] = {
+            **arguments["fields"],
+            "bad": (vehicle.imu.sensorOutMsg, "r_BN_N", "m"),
+        }
     elif refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
     else:
-        plant.execute(1.0)
-    models_before = len(plant._simulation.TaskList[0].TaskModels)
+        vehicle.execute(1.0)
+    models_before = len(vehicle._simulation.TaskList[0].TaskModels)
 
     with pytest.raises(error, match=message):
-        run_case(plant, guidance, **arguments)
-    assert len(plant._simulation.TaskList[0].TaskModels) == models_before
-
-
-def test_a_field_absent_from_its_message_is_named():
-    plant = ImuSpacecraft()
-    with pytest.raises(ValueError, match="r_BN_N"):
+        run_case(vehicle, inertial3D.inertial3D(), **arguments)
+    assert len(vehicle._simulation.TaskList[0].TaskModels) == models_before
+    if refusal != "already run":
         run_case(
-            plant,
-            inertial3D.inertial3D(),
-            fields={"bad": (plant.imu.sensorOutMsg, "r_BN_N", "m")},
-            duration_s=10.0,
+            vehicle, inertial3D.inertial3D(), fields=vehicle.recorded_fields(), duration_s=10.0
         )
 
 
 class ReadingFsw(sysModel.SysModel):
-    """A flight-software module holding the plant's IMU reader, as a hosted algorithm does."""
+    """A flight-software module holding the vehicle's IMU reader, as a hosted algorithm does."""
 
     def __init__(self, reader) -> None:
         super().__init__()
@@ -78,13 +77,13 @@ class ReadingFsw(sysModel.SysModel):
         self.output_msg.write(payload, CurrentSimNanos, self.moduleID)
 
 
-def test_a_plant_is_freed_after_its_case():
-    """A case whose flight software holds the plant's reader leaves nothing referencing the
-    plant once the case's own references go, so a session's plants do not accumulate."""
-    plant = ImuSpacecraft()
-    released = weakref.ref(plant)
-    fsw = ReadingFsw(plant.readers()["imu"])
-    run_case(plant, fsw, fields=plant.recorded_fields(), duration_s=20.0)
-    del plant, fsw
+def test_a_vehicle_is_freed_after_its_case():
+    """A case whose flight software holds the vehicle's reader leaves nothing referencing the
+    vehicle once the case's own references go, so a session's vehicles do not accumulate."""
+    vehicle = ImuSpacecraft()
+    released = weakref.ref(vehicle)
+    fsw = ReadingFsw(vehicle.readers()["imu"])
+    run_case(vehicle, fsw, fields=vehicle.recorded_fields(), duration_s=20.0)
+    del vehicle, fsw
     gc.collect()
-    assert released() is None, "the plant is still referenced after its case"
+    assert released() is None, "the vehicle is still referenced after its case"
