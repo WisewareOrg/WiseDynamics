@@ -3,7 +3,7 @@
 Basilisk spacecraft plants, the one-case runner, the run-file writer, and the pytest plugin
 whose session over `--sim-runs` cases is a Monte Carlo run. Basilisk is the first
 simulation host by ADR 0001 rev 1. This file is the reference for the `wise-dynamics`
-distribution; each symbol's docstring carries its full contract.
+distribution; each symbol's docstring carries its full interface.
 
 ## Modules
 
@@ -12,14 +12,14 @@ Each module holds one class, or the functions of one concern, and is named for w
 | module | holds |
 |---|---|
 | `wise_dynamics/dataclass_config.py` | `DataclassConfig`: the shape of any dataclass instance |
-| `wise_dynamics/dispersion.py` | `Dispersion` and its inverse `apply_draws`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/dispersion.py` | `Dispersion`, which draws per-case values for a configuration's 3-vector fields, and `apply_draws`, which applies them |
 | `wise_dynamics/dataset.py` | `Dataset`: one array with its units |
 | `wise_dynamics/run_file.py` | `write_run`: one HDF5 run file |
 | `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
 | `wise_dynamics/session_options.py` | `SessionOptions`: a pytest session's parsed `--sim-*` options, internal to the plugin |
 | `wise_dynamics/run_writer.py` | `RunWriter`: the type of the `sim_run_writer` fixture's value |
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's hooks and `sim_*` fixtures |
-| `wise_dynamics/basilisk/plant.py` | `Plant`: the contract every plant meets |
+| `wise_dynamics/basilisk/plant.py` | `Plant`: the interface every plant meets |
 | `wise_dynamics/basilisk/plant_config.py` | `PlantConfig`: the shape of a plant's configuration |
 | `wise_dynamics/basilisk/recorded_field.py` | `RecordedField`: one recorded message field with its units |
 | `wise_dynamics/basilisk/recording.py` | `Recording`: one case's recorders and the datasets they hold |
@@ -105,10 +105,12 @@ Messages and their recorded fields:
 | `imu` | | | `AccelPlatform` | `imu/accel_P` | m/s^2 |
 
 `initial_state()` returns `sigma0_BN` (MRP), `r0_N` (m), `v0_N` (m/s) and `omega0_BN_B` (rad/s).
-The IMU is mounted with identity `dcm_PB`, so its platform frame is the body frame. The
-accelerometer reports non-gravitational specific force, which in free fall is its bias plus
-noise. Both instruments read zero at t = 0, since Basilisk writes the IMU's first output after
-the first step.
+The plant configures Basilisk's `imuSensor` at the hub's centre of mass with an identity `dcm_PB`,
+so its platform frame is the body frame, with the configured biases as `senRotBias` and
+`senTransBias`, the configured per-sample standard deviations on the diagonals of `PMatrixGyro`
+and `PMatrixAccel`, and the case's noise seed as `RNGSeed`; it records the sensor's
+`AngVelPlatform` and `AccelPlatform`. Basilisk's `imuSensor` documentation describes the sensor
+model those settings drive.
 
 ## Running one case
 

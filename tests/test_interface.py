@@ -2,12 +2,16 @@
 
 import inspect
 
+import pytest
+
+import wise_dynamics
+import wise_dynamics.basilisk
 from tests.other_mu_spacecraft import OtherMuSpacecraft
 from tests.support import EARTH_MU_M3_S2
 from wise_dynamics.basilisk import PLANTS, ImuSpacecraft, Plant
 
 
-def test_imu_spacecraft_is_the_registered_plant_and_implements_the_contract():
+def test_imu_spacecraft_is_the_registered_plant_and_implements_the_interface():
     assert PLANTS["imu_spacecraft"] is ImuSpacecraft
     assert issubclass(ImuSpacecraft, Plant)
     assert not inspect.isabstract(ImuSpacecraft)
@@ -45,3 +49,40 @@ def test_recorded_fields_name_the_run_file_datasets_with_their_units():
         "imu/gyro_P": "rad/s",
         "imu/accel_P": "m/s^2",
     }
+
+
+@pytest.mark.parametrize(
+    ("package", "names"),
+    [
+        (
+            wise_dynamics,
+            {"DataclassConfig", "Dataset", "Dispersion", "distribution_version", "write_run"},
+        ),
+        (
+            wise_dynamics.basilisk,
+            {
+                "PLANTS",
+                "ImuSpacecraft",
+                "ImuSpacecraftConfig",
+                "OrbitElements",
+                "Plant",
+                "PlantConfig",
+                "RecordedField",
+                "Recording",
+                "RigidHub",
+                "run_case",
+            },
+        ),
+    ],
+    ids=["wise_dynamics", "wise_dynamics.basilisk"],
+)
+def test_each_package_exports_exactly_its_public_names(package, names):
+    assert set(package.__all__) == names
+    for name in names:
+        assert getattr(package, name) is not None, name
+
+
+def test_run_writer_is_importable_from_its_module():
+    from wise_dynamics.run_writer import RunWriter
+
+    assert RunWriter.__name__ == "RunWriter"

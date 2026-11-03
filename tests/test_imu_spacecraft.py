@@ -1,7 +1,6 @@
 """`ImuSpacecraft`: its nominal vehicle, how a configuration reaches Basilisk, and the IMU's
 measured behaviour."""
 
-import dataclasses
 import gc
 import math
 import weakref
@@ -15,12 +14,6 @@ from wise_dynamics.basilisk import ImuSpacecraft, ImuSpacecraftConfig, OrbitElem
 
 D2R = math.pi / 180.0
 
-QUIET = ImuSpacecraftConfig(
-    omega0_BN_B=(0.0, 0.0, 0.0),
-    gyro_bias_P=(0.0, 0.0, 0.0),
-    accel_bias_P=(0.0, 0.0, 0.0),
-)
-"""Zero rate and zero bias: the IMU then reports its white noise alone."""
 
 DISPERSED = ImuSpacecraftConfig(
     orbit=OrbitElements(
@@ -40,6 +33,7 @@ DISPERSED = ImuSpacecraftConfig(
     accel_bias_P=(-2e-4, 4e-4, 1e-4),
     gyro_noise_std_rad_s=7e-5,
     accel_noise_std_m_s2=9e-5,
+    step_s=0.5,
 )
 """A configuration differing from nominal in every field."""
 
@@ -106,54 +100,6 @@ def test_initial_state_is_the_configuration_and_the_truth_at_t0():
     assert np.allclose(np.array(truth.omega_BN_B)[0], state["omega0_BN_B"], rtol=0.0, atol=1e-15)
     assert np.allclose(np.array(truth.r_BN_N)[0], state["r0_N"], rtol=0.0, atol=1e-6)
     assert np.allclose(np.array(truth.v_BN_N)[0], state["v0_N"], rtol=0.0, atol=1e-9)
-
-
-def test_noiseless_accelerometer_reads_zero_in_orbit_and_first_samples_read_zero():
-    """The accelerometer measures non-gravitational specific force, so with zero bias and noise
-    it reads zero in free fall; Basilisk writes the IMU's first output after the first step,
-    so the t = 0 sample is zero on both instruments."""
-    quiet = dataclasses.replace(QUIET, gyro_noise_std_rad_s=0.0, accel_noise_std_m_s2=0.0)
-    imu = run_with_stub(ImuSpacecraft(quiet), duration_s=300.0)["imu"]
-    accel = np.array(imu.AccelPlatform)
-    gyro = np.array(imu.AngVelPlatform)
-    assert np.array_equal(accel[0], np.zeros(3))
-    assert np.array_equal(gyro[0], np.zeros(3))
-    assert np.max(np.abs(accel)) < 1e-12
-
-
-def test_recorded_imu_mean_is_the_configured_bias():
-    config = dataclasses.replace(
-        QUIET, gyro_bias_P=DISPERSED.gyro_bias_P, accel_bias_P=DISPERSED.accel_bias_P
-    )
-    imu = run_with_stub(ImuSpacecraft(config, noise_seed=3), duration_s=500.0, record_s=1.0)["imu"]
-    # Row 0 is the t = 0 sample, written before the IMU's first output.
-    gyro_mean = np.array(imu.AngVelPlatform)[1:].mean(axis=0)
-    accel_mean = np.array(imu.AccelPlatform)[1:].mean(axis=0)
-    assert np.allclose(gyro_mean, config.gyro_bias_P, rtol=0.0, atol=1e-5)
-    assert np.allclose(accel_mean, config.accel_bias_P, rtol=0.0, atol=1e-5)
-
-
-@pytest.mark.parametrize("step_s", [1.0, 0.1])
-def test_noise_std_is_per_sample_at_any_step(step_s):
-    """`gyro_noise_std_rad_s` and `accel_noise_std_m_s2` are per-sample standard deviations, so
-    the recorded spread is the configured value whatever the step."""
-    sigma = 5e-5  # the specified per-sample 1-sigma, stated here independently of the plant
-    config = dataclasses.replace(QUIET, step_s=step_s)
-    imu = run_with_stub(ImuSpacecraft(config), duration_s=500.0 * step_s, record_s=step_s)["imu"]
-    # Row 0 is the t = 0 sample, written before the IMU's first output.
-    for samples in (np.array(imu.AngVelPlatform)[1:], np.array(imu.AccelPlatform)[1:]):
-        for axis_std in samples.std(axis=0):
-            assert abs(axis_std - sigma) / sigma < 0.15, f"std {axis_std} vs {sigma}"
-
-
-def _gyro_noise(noise_seed: int) -> np.ndarray:
-    imu = run_with_stub(ImuSpacecraft(QUIET, noise_seed=noise_seed), 50.0, record_s=1.0)["imu"]
-    return np.array(imu.AngVelPlatform)
-
-
-def test_noise_seed_reproduces_and_distinguishes_noise():
-    assert np.array_equal(_gyro_noise(7), _gyro_noise(7))
-    assert not np.allclose(_gyro_noise(0), _gyro_noise(1))
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():

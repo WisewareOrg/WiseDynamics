@@ -1,9 +1,10 @@
 # WiseDynamics
 
 WiseDynamics is a library of spacecraft plant models for Wiseware's GNC work, with a one-case
-runner, an HDF5 run writer and a pytest plugin for Monte Carlo runs as pytest sessions. Flight
-software pins a tagged release and runs its own scenario tests against these plants. Basilisk is the
-first simulation host ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
+runner, an HDF5 run writer and a pytest plugin that runs each Monte Carlo case as a pytest test.
+Flight software pins a tagged release and runs its own scenario tests against these plants.
+Basilisk is the first simulation host
+([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
 
 ## Using it
 
@@ -33,10 +34,9 @@ WiseDynamics depends on no flight software; flight software depends on WiseDynam
 ## Layout
 
 - `wise_dynamics/` — the installed package: dispersion, run files, the pytest plugin.
-- `wise_dynamics/basilisk/` — the Basilisk host: the plant contract, the plants, the runner.
+- `wise_dynamics/basilisk/` — the Basilisk host: the plant interface, the plants, the runner.
   A further simulation host is a sibling subpackage.
-- `tests/` — the regression suite that gates a Basilisk upgrade, including the golden reference
-  `tests/golden/`.
+- `tests/` — the test suite.
 - `docs/decisions/` — this repository's ADRs.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers how a change is made and checked.

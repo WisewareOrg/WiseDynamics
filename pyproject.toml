@@ -1,7 +1,7 @@
 [project]
 name = "wise-dynamics"
 version = "0.1.0"
-description = "Basilisk spacecraft plant models, a one-case runner, an HDF5 run writer and a pytest plugin for Monte Carlo runs as pytest sessions."
+description = "Basilisk spacecraft plant models, a one-case runner, an HDF5 run writer and a pytest plugin that runs each Monte Carlo case as a pytest test."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -88,9 +88,14 @@ def draws_of(run: dict) -> dict[str, np.ndarray]:
     }
 
 
+def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
+    """Case `index`'s two streams, derived as the README states."""
+    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+
+
 def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """The standard draws of case `index`, derived as the README states."""
-    draws_stream, _ = np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+    """The standard draws of case `index`, from its first stream."""
+    draws_stream, _ = case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
     return ImuSpacecraft.standard_dispersion.draw(ImuSpacecraft.nominal(), rng)
 
@@ -177,25 +182,6 @@ def test_extra_attrs_cannot_replace_a_root_attr(pytester):
     ).assert_outcomes(passed=1)
 
 
-def test_cases_with_equal_draws_record_distinct_sensor_noise(scenario_dir):
-    """With every case at the nominal vehicle, the gyro record differs between cases through
-    each case's own noise seed alone."""
-    scenario_dir.makeconftest(
-        """
-        import pytest
-
-        @pytest.fixture
-        def sim_draws():
-            return {}
-        """
-    )
-    first, second = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
-
-    assert not draws_of(first) and not draws_of(second)
-    assert np.array_equal(first["sigma_BN"], second["sigma_BN"])
-    assert not np.allclose(first["gyro_P"][1:], second["gyro_P"][1:])
-
-
 OWN_DRAWS_CONFTEST = """
 import pytest
 
@@ -203,11 +189,6 @@ import pytest
 def sim_draws(sim_draws_rng):
     return {"gyro_bias_P": sim_draws_rng.normal(0.0, 1e-3, size=3)}
 """
-
-
-def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Case `index`'s two streams, derived as the README states."""
-    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
 def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario_dir):

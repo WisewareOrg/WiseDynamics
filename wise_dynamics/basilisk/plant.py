@@ -1,4 +1,4 @@
-"""The contract every Basilisk plant meets, and the simulation each plant owns."""
+"""The interface every Basilisk plant meets, and the simulation each plant owns."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping

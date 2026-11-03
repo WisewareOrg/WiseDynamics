@@ -26,6 +26,4 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 - `ruff` — `uv run ruff check .` and `uv run ruff format --check .`.
 - `pytest` — `uv run pytest`, the full suite.
 
-The same commands run locally after `uv sync`. A change that moves the golden reference
-regenerates it with `uv run python -m tests.test_golden_trajectory` and says why in its pull
-request.
+The same commands run locally after `uv sync`.
