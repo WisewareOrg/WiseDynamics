@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from Basilisk.architecture import sysModel
+from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import Leo500
@@ -48,20 +48,37 @@ def test_a_scenario_runs_once():
 
 
 class _Stepping(sysModel.SysModel):
-    """A flight-software module that notes each time it is called."""
+    """A flight-software module that notes when it is called and when the IMU output it reads was
+    written, and writes its call time plus 100 s to its own message."""
 
     period_s = 1.0
 
-    def __init__(self) -> None:
+    def __init__(self, reader) -> None:
         super().__init__()
         self.ModelTag = "stepping"
+        self.reader = reader
         self.called_ns: list[int] = []
+        self.read_ns: list[int] = []
+        self.output_msg = messaging.NavAttMsg()
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
         self.called_ns.append(CurrentSimNanos)
+        self.read_ns.append(self.reader.timeWritten())
+        payload = messaging.NavAttMsgPayload()
+        payload.timeTag = CurrentSimNanos / 1e9 + 100.0
+        self.output_msg.write(payload, CurrentSimNanos, self.moduleID)
 
 
-def test_the_flight_software_steps_at_its_own_period():
-    fsw = _Stepping()
-    Leo500().run(fsw, {}, duration_s=2.0)
-    assert fsw.called_ns == [0, 1_000_000_000, 2_000_000_000]
+def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_instant():
+    """Called at whole seconds only, reading the IMU output of that instant; each recorded value is
+    the one it wrote at that row's own time, t = 0 included."""
+    scenario = Leo500()
+    fsw = _Stepping(scenario.vehicle.readers()["imu"])
+    datasets = scenario.run(
+        fsw, {"fsw/time_tag": (fsw.output_msg, "timeTag", "s")}, duration_s=20.0
+    )
+    assert fsw.called_ns == [k * 1_000_000_000 for k in range(21)]
+    assert fsw.read_ns == fsw.called_ns
+    t_s, _ = datasets["t_s"]
+    assert t_s.tolist() == [0.0, 10.0, 20.0]
+    assert np.array_equal(datasets["fsw/time_tag"][0], t_s + 100.0)

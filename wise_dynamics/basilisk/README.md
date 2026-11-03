@@ -47,10 +47,11 @@ and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's 
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
-`vehicles`, `step_s` and `record_s`, and runs once. The vehicles and the recorders run every
-`step_s`, recording every `record_s`. The flight-software module runs in its own task at its own
-`period_s`, an attribute it declares in seconds, after the vehicles at each instant they share, so
-it reads that instant's sensor output. `fsw_fields` maps a
+`vehicles`, `step_s` and `record_s`, and runs once. The vehicles run every `step_s`. The
+flight-software module runs in its own task at its own `period_s`, an attribute it declares in
+seconds, after the vehicles at each instant they share, so it reads that instant's sensor output.
+The recorders run every `record_s`, after both, so truth and flight output are recorded from the
+same instant. `fsw_fields` maps a
 dataset path to a flight-software `(message, field, units)`, as `recorded_fields()` does for a
 vehicle, and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then
 the vehicle's fields, then `fsw_fields`.

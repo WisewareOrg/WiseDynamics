@@ -11,8 +11,10 @@ __all__ = ["Scenario"]
 _PROCESS = "scenario_process"
 _DYNAMICS_TASK = "dynamics_task"
 _FSW_TASK = "fsw_task"
+_RECORD_TASK = "record_task"
 _DYNAMICS_PRIORITY = 2
 _FSW_PRIORITY = 1
+_RECORD_PRIORITY = 0
 
 
 class Scenario:
@@ -40,12 +42,13 @@ class Scenario:
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
-        Builds the simulation with one process holding two tasks. The dynamics task, every
-        `step_s`, holds each vehicle's models and one Basilisk recorder per entry of each
-        vehicle's `recorded_fields()` and of `fsw_fields`, each sampling every `record_s` from
-        t = 0. The flight-software task, every `fsw_module.period_s`, holds `fsw_module` and runs
-        after the dynamics task at each instant they share, so the module reads the sensors'
-        output of that instant. Runs from t = 0 for `duration_s`.
+        Builds the simulation with one process holding three tasks, which run in this order at
+        each instant they share. The dynamics task, every `step_s`, holds each vehicle's models.
+        The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
+        the sensors' output of that instant. The record task, every `record_s` from t = 0, holds
+        one Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`,
+        so truth and flight output are recorded from the same instant. Runs from t = 0 for
+        `duration_s`.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -81,12 +84,13 @@ class Scenario:
             self._simulation.CreateNewTask(_FSW_TASK, macros.sec2nano(fsw_module.period_s)),
             _FSW_PRIORITY,
         )
+        process.addTask(self._simulation.CreateNewTask(_RECORD_TASK, period_ns), _RECORD_PRIORITY)
         for vehicle in self.vehicles:
             for model in vehicle.models():
                 self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
-        for recorder in recorders.values():
-            self._simulation.AddModelToTask(_DYNAMICS_TASK, recorder)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
+        for recorder in recorders.values():
+            self._simulation.AddModelToTask(_RECORD_TASK, recorder)
         self._simulation.InitializeSimulation()
         self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
         self._simulation.ExecuteSimulation()
