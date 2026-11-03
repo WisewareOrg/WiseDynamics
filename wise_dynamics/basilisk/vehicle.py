@@ -17,9 +17,8 @@ class Vehicle(ABC):
 
     A subclass takes its parameters as keywords defaulting to class attributes of the same name,
     builds its Basilisk objects, and lists them in `models()`; a `Scenario` adds them to its task
-    and places `spacecraft`. The messages in `recorded_fields()` and the Basilisk objects a
-    subclass exposes are valid while the vehicle is referenced: a message holding its vehicle would
-    form a loop through Basilisk's C++ objects that the garbage collector leaves in place.
+    and places `spacecraft`. Every vehicle takes `noise_seed: int`, the seed of its sensor noise,
+    which the pytest plugin sets for each case.
 
     Attributes:
         standard_dispersion: Keyword to its per-axis 1-sigma, drawn in this order by `draw`.
@@ -43,17 +42,10 @@ class Vehicle(ABC):
     def models(self) -> list[Any]:
         """The vehicle's Basilisk modules, in the order a scenario adds them to its task."""
 
+    @abstractmethod
     def readers(self) -> dict[str, Any]:
         """The vehicle's sensor outputs by role, each a Basilisk message reader subscribed to its
-        sensor, for a flight-software module to read."""
-        handed_out = self._readers()
-        for reader in handed_out.values():
-            reader._vehicle = self
-        return handed_out
-
-    @abstractmethod
-    def _readers(self) -> dict[str, Any]:
-        """The sensor readers `readers()` returns, built afresh on each call."""
+        sensor, for a flight-software module to read, built afresh on each call."""
 
     @abstractmethod
     def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:

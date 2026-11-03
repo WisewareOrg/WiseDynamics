@@ -41,30 +41,36 @@ body frame.
 `ImuSpacecraft.draw(rng)` returns the standard dispersion's keywords, in table order, as nominal
 plus normal samples from the numpy `Generator`. `readers()` holds role `imu`, an
 `IMUSensorMsgReader`. `recorded_fields()` maps each dataset to its `(message, field, units)`:
-`truth/sigma_BN` (MRP), `truth/omega_BN_B` (rad/s), `truth/r_N` (m), `truth/v_N` (m/s),
-`imu/gyro_P` (rad/s) and `imu/accel_P` (m/s^2). `write_run_file(path, datasets, attrs=None)`
-writes one HDF5 file, each dataset float64 with a `units` attribute.
+`truth/sigma_BN` (MRP), `truth/omega_BN_B` (rad/s), `truth/r_N` (m, in N), `truth/v_N` (m/s, in
+N), `imu/gyro_P` (rad/s) and `imu/accel_P` (m/s^2). `truth/r_N` and `truth/v_N` are the
+body-frame origin's state, which is the centre of mass's state because the hub's centre of mass
+sits at that origin. `write_run_file(path, datasets, attrs=None)` writes one HDF5 file, each
+dataset float64 with a `units` attribute.
 
 ## Scenario `leo500`: `Leo500(vehicle, **keywords)`
 
-Basilisk's point-mass Earth, `Leo500.mu` = `{"earth": 3.986004360e14}` m^3/s^2, with the vehicle
-tumbling on a classical-element orbit.
+Basilisk's point-mass Earth, `Leo500.mu_m3_s2` = `{"earth": 3.986004360e14}`, with the vehicle
+tumbling on a classical-element orbit. The inertial frame N is Earth-centred and non-rotating,
+with no epoch, since point-mass gravity has nothing that depends on time.
 
-| keyword | units, frame | nominal |
-|---|---|---|
-| `semi_major_axis_m` | m | 6871e3 |
-| `eccentricity` | - | 0.0001 |
-| `inclination_rad` | rad | 45 deg |
-| `raan_rad` | rad | 48.2 deg |
-| `arg_periapsis_rad` | rad | 347.8 deg |
-| `true_anomaly_rad` | rad, at t = 0 | 85.3 deg |
-| `sigma0_BN` | MRP, body relative to inertial | (0.1, 0.2, -0.3) |
-| `omega0_BN_B_rad_s` | rad/s, body relative to inertial, body axes | 1 deg/s per axis |
-| `step_s` | s, integration and sensor step | 1.0 |
+| keyword | units, frame | nominal | standard dispersion, 1-sigma per axis |
+|---|---|---|---|
+| `semi_major_axis_m` | m | 6871e3 | |
+| `eccentricity` | - | 0.0001 | |
+| `inclination_rad` | rad | 45 deg | |
+| `raan_rad` | rad | 48.2 deg | |
+| `arg_periapsis_rad` | rad | 347.8 deg | |
+| `true_anomaly_rad` | rad, at t = 0 | 85.3 deg | |
+| `sigma0_BN` | MRP, body relative to N | (0.1, 0.2, -0.3) | 0.01 |
+| `omega0_BN_B_rad_s` | rad/s, body relative to N, body axes | 1 deg/s per axis | 0.2 deg/s |
+| `step_s` | s, integration and sensor step | 1.0 | |
 
-`initial_state()` returns `sigma0_BN` (MRP), `r0_N` (m), `v0_N` (m/s) and `omega0_BN_B` (rad/s).
-`run(fsw_module, *, duration_s, record_s=10.0)` runs once and returns the vehicle's datasets,
-dataset path to `(array, units)` with `t_s` (s) first.
+`Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does. `initial_state()`
+returns `sigma0_BN` (MRP), `r0_N` (m, in N), `v0_N` (m/s, in N) and `omega0_BN_B` (rad/s).
+`run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` runs once. `fsw_fields` maps a dataset
+path to a flight-software `(message, field, units)`, as `recorded_fields()` does for the vehicle,
+and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the
+vehicle's fields, then `fsw_fields`.
 
 ## pytest plugin
 
@@ -84,20 +90,20 @@ consumer's `conftest.py` names nothing.
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | `--sim-duration-s` |
-| `sim_draws` | the case's draws, by default the vehicle's `draw`; override it to supply your own |
-| `sim_vehicle` | the case's vehicle, built with `sim_draws` as keywords and its noise seeded from the case |
-| `sim_scenario` | the case's scenario, built with `sim_vehicle` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through the vehicle, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<keyword>` per draw, and `attrs` beside them |
+| `sim_draws` | the case's draws, keyword to value: by default the scenario's `draw`, then the vehicle's; override it to supply your own |
+| `sim_vehicle` | the case's vehicle, built with the `sim_draws` keywords its scenario does not take and its noise seeded from the case |
+| `sim_scenario` | the case's scenario, built with `sim_vehicle` and the `sim_draws` keywords it takes |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through the vehicle and returns its path, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<keyword>` per draw, and `attrs` beside them |
 
 Case `k` of seed `s` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(s, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`
 is and reruns alone: `pytest <test file> --sim-seed S --sim-runs N "<test file>::test_case[k]"`.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
-`sim_vehicle.readers()` and starts from `sim_scenario.initial_state()`; `pytest <test file> -n 8
---sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run. `run` records only the vehicle's
-fields; flight software that keeps its own outputs adds them to `datasets` as further
-`path: (array, units)` entries before `sim_run_file` writes the file:
+`sim_vehicle.readers()` and starts from `sim_scenario.initial_state()`. Its output joins the run
+file through `fsw_fields`. `pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it as a
+Monte Carlo run; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer adds
+itself:
 
 ```python
 from Basilisk.fswAlgorithms import inertial3D
@@ -106,6 +112,9 @@ from Basilisk.fswAlgorithms import inertial3D
 def test_case(sim_scenario, sim_duration_s, sim_run_file):
     guidance = inertial3D.inertial3D()
     guidance.ModelTag = "guidance"
-    datasets = sim_scenario.run(guidance, duration_s=sim_duration_s, record_s=10.0)
+    fsw_fields = {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
+    datasets = sim_scenario.run(
+        guidance, fsw_fields=fsw_fields, duration_s=sim_duration_s, record_s=10.0
+    )
     sim_run_file(datasets, {"versions_guidance": "1.0"})
 ```

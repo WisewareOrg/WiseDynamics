@@ -28,7 +28,7 @@ PLACEMENT = {
 
 def test_nominal_scenario_is_the_specified_one():
     """Read from the class, as a consumer reads it without building a scenario."""
-    assert Leo500.mu == {"earth": 3.986004360e14}
+    assert Leo500.mu_m3_s2 == {"earth": 3.986004360e14}
     assert Leo500.semi_major_axis_m == 6871.0e3
     assert Leo500.eccentricity == 0.0001
     assert Leo500.inclination_rad == 45.0 * D2R
@@ -38,6 +38,7 @@ def test_nominal_scenario_is_the_specified_one():
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
     assert Leo500.step_s == 1.0
+    assert Leo500.standard_dispersion == {"sigma0_BN": 0.01, "omega0_BN_B_rad_s": 0.2 * D2R}
 
 
 def test_each_keyword_defaults_to_its_class_attribute():
@@ -54,20 +55,29 @@ def test_keywords_reach_the_basilisk_objects():
     scenario = Leo500(vehicle, **PLACEMENT)
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
-    assert earth.mu == Leo500.mu["earth"]
+    assert earth.mu == Leo500.mu_m3_s2["earth"]
     assert scenario._simulation.TaskList[0].TaskData.TaskPeriod == 500_000_000
     assert scenario._simulation.TaskList[0].TaskModels == vehicle.models()
 
     state = scenario.initial_state()
     assert np.array_equal(state["sigma0_BN"], PLACEMENT["sigma0_BN"])
     assert np.array_equal(state["omega0_BN_B"], PLACEMENT["omega0_BN_B_rad_s"])
-    elements = orbitalMotion.rv2elem(Leo500.mu["earth"], state["r0_N"], state["v0_N"])
+    elements = orbitalMotion.rv2elem(Leo500.mu_m3_s2["earth"], state["r0_N"], state["v0_N"])
     assert elements.a == pytest.approx(PLACEMENT["semi_major_axis_m"], rel=1e-12)
     assert elements.e == pytest.approx(PLACEMENT["eccentricity"], rel=1e-9)
     assert elements.i == pytest.approx(PLACEMENT["inclination_rad"], abs=1e-12)
     assert elements.Omega == pytest.approx(PLACEMENT["raan_rad"], abs=1e-12)
     assert elements.omega == pytest.approx(PLACEMENT["arg_periapsis_rad"], abs=1e-9)
     assert elements.f == pytest.approx(PLACEMENT["true_anomaly_rad"], abs=1e-9)
+
+
+def test_draw_adds_normal_samples_to_the_defaults_in_dispersion_order():
+    draws = Leo500.draw(np.random.default_rng(7))
+    rng = np.random.default_rng(7)
+    assert list(draws) == list(Leo500.standard_dispersion)
+    for name, std in Leo500.standard_dispersion.items():
+        expected = np.asarray(getattr(Leo500, name)) + rng.normal(0.0, std, size=3)
+        assert np.array_equal(draws[name], expected), name
 
 
 @pytest.mark.parametrize(

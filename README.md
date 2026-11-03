@@ -19,7 +19,8 @@ wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0
 ```
 
 Installing it registers the pytest plugin. A Monte Carlo run is the consumer's scenario test,
-parametrized over `--sim-runs` cases in one pytest session:
+parametrized over `--sim-runs` cases in one pytest session; `-n` runs workers in parallel and needs
+`pytest-xdist`, which the consumer adds itself:
 
 ```sh
 pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR
@@ -33,7 +34,7 @@ WiseDynamics depends on no flight software; flight software depends on WiseDynam
 
 ## Layout
 
-- `wise_dynamics/` — the installed package: the pytest plugin.
+- `wise_dynamics/` — the installed package: the pytest plugin, and the host subpackages below.
 - `wise_dynamics/basilisk/` — the Basilisk host: the vehicle and scenario interfaces, the vehicles,
   the scenarios. A further simulation host is a sibling subpackage.
 - `tests/` — the test suite.

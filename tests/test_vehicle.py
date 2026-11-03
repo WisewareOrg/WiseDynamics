@@ -37,7 +37,7 @@ def test_a_run_file_is_written_once(tmp_path):
 
 def test_a_dataset_without_units_is_refused(tmp_path):
     path = tmp_path / "run_0000.h5"
-    with pytest.raises(ValueError, match="t_s"):
+    with pytest.raises(ValueError, match="dataset 't_s' has an empty units string"):
         ImuSpacecraft().write_run_file(path, {"t_s": (np.zeros(1), "")})
     assert not path.exists()
 

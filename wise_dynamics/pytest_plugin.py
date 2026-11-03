@@ -5,6 +5,7 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 `wise_dynamics/basilisk/README.md` documents its options and fixtures.
 """
 
+import inspect
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
@@ -109,9 +110,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "sim_case_index" not in metafunc.fixturenames:
         return
     config = metafunc.config
-    for option, kind in (("--sim-vehicle", "vehicle"), ("--sim-scenario", "scenario")):
+    for option, lookup in (("--sim-vehicle", _vehicle_type), ("--sim-scenario", _scenario_type)):
         try:
-            _registered(kind, config.getoption(option))
+            lookup(config.getoption(option))
         except ValueError as error:
             raise pytest.UsageError(f"wise-dynamics: {option}: {error}") from None
     metafunc.parametrize("sim_case_index", range(config.getoption("--sim-runs")), indirect=True)
@@ -142,30 +143,40 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: vehicle keyword to the value its vehicle is built with and its run file
-    records. The default is the vehicle class's `draw` from the case's first stream; a consumer
-    overrides this fixture to supply its own.
+    """This case's draws: scenario or vehicle keyword to the value the case is built with and its
+    run file records. The default is the scenario class's `draw`, then the vehicle class's, from
+    the case's first stream; a consumer overrides this fixture to supply its own.
     """
     draws_stream, _ = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    vehicle_type = _registered("vehicle", request.config.getoption("--sim-vehicle"))
-    return vehicle_type.draw(np.random.default_rng(draws_stream))
+    rng = np.random.default_rng(draws_stream)
+    scenario_draws = _scenario_type(request.config.getoption("--sim-scenario")).draw(rng)
+    vehicle_draws = _vehicle_type(request.config.getoption("--sim-vehicle")).draw(rng)
+    return {**scenario_draws, **vehicle_draws}
 
 
 @pytest.fixture
 def sim_vehicle(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> "Vehicle":
-    """This case's vehicle, built with `sim_draws` as keywords and its sensor noise seeded from the
-    case's second stream."""
+    """This case's vehicle, built with the entries of `sim_draws` its scenario does not take as
+    keywords, and its sensor noise seeded from the case's second stream."""
     _, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    vehicle_type = _registered("vehicle", request.config.getoption("--sim-vehicle"))
-    return vehicle_type(**sim_draws, noise_seed=int(noise_stream.generate_state(1)[0]))
+    placement = _keywords(_scenario_type(request.config.getoption("--sim-scenario")))
+    keywords = {name: value for name, value in sim_draws.items() if name not in placement}
+    vehicle_type = _vehicle_type(request.config.getoption("--sim-vehicle"))
+    return vehicle_type(**keywords, noise_seed=int(noise_stream.generate_state(1)[0]))
 
 
 @pytest.fixture
-def sim_scenario(request: pytest.FixtureRequest, sim_vehicle: "Vehicle") -> "Scenario":
-    """This case's scenario, `--sim-scenario` built with `sim_vehicle`."""
-    return _registered("scenario", request.config.getoption("--sim-scenario"))(sim_vehicle)
+def sim_scenario(
+    request: pytest.FixtureRequest, sim_draws: Mapping[str, Any], sim_vehicle: "Vehicle"
+) -> "Scenario":
+    """This case's scenario, `--sim-scenario` built with `sim_vehicle` and the entries of
+    `sim_draws` it takes as keywords."""
+    scenario_type = _scenario_type(request.config.getoption("--sim-scenario"))
+    placement = _keywords(scenario_type)
+    keywords = {name: value for name, value in sim_draws.items() if name in placement}
+    return scenario_type(sim_vehicle, **keywords)
 
 
 @pytest.fixture
@@ -174,13 +185,14 @@ def sim_run_file(
     sim_case_index: int,
     sim_draws: Mapping[str, Any],
     sim_vehicle: "Vehicle",
-) -> Callable[..., None]:
+) -> Callable[..., Path]:
     """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_vehicle`.
 
     Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
-    them. The file's root attributes are `case`, `seed`, `created_utc` (the case's start, ISO 8601
-    UTC), `versions_bsk`, `versions_wise_dynamics` and one `draw_<keyword>` per entry of
-    `sim_draws`, with `attrs` beside them; `attrs` naming one of those raises `ValueError`.
+    them, it returns the file's path. The file's root attributes are `case`, `seed`,
+    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
+    one `draw_<keyword>` per entry of `sim_draws`, with `attrs` beside them; `attrs` naming one of
+    those raises `ValueError`.
     """
     own: dict[str, Any] = {
         "case": sim_case_index,
@@ -193,12 +205,15 @@ def sim_run_file(
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
     path = request.config.stash[_OUT_DIR] / f"run_{sim_case_index:04d}.h5"
 
-    def write(datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None):
+    def write(
+        datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None
+    ) -> Path:
         extras = dict(attrs or {})
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
         sim_vehicle.write_run_file(path, datasets, {**own, **extras})
+        return path
 
     return write
 
@@ -208,24 +223,41 @@ def _run_files(count: int) -> str:
     return f"{count} run file" if count == 1 else f"{count} run files"
 
 
-def _registered(kind: str, name: str) -> Any:
-    """The `kind` ("vehicle" or "scenario") class `name` registers, imported with Basilisk on
-    first use.
+def _vehicle_type(name: str) -> "type[Vehicle]":
+    """The vehicle class `name` registers in `VEHICLES`, imported with Basilisk on first use.
 
     Raises:
         ValueError: `name` is not registered.
     """
-    if kind == "vehicle":
-        from wise_dynamics.basilisk.vehicles import VEHICLES as registry
-    else:
-        from wise_dynamics.basilisk.scenarios import SCENARIOS as registry
+    from wise_dynamics.basilisk.vehicles import VEHICLES
 
     try:
-        return registry[name]
+        return VEHICLES[name]
     except KeyError:
         raise ValueError(
-            f"unknown {kind} {name!r}; known {kind}s: {', '.join(sorted(registry))}"
+            f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}"
         ) from None
+
+
+def _scenario_type(name: str) -> "type[Scenario]":
+    """The scenario class `name` registers in `SCENARIOS`, imported with Basilisk on first use.
+
+    Raises:
+        ValueError: `name` is not registered.
+    """
+    from wise_dynamics.basilisk.scenarios import SCENARIOS
+
+    try:
+        return SCENARIOS[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
+        ) from None
+
+
+def _keywords(scenario_type: "type[Scenario]") -> set[str]:
+    """The placement and environment keywords `scenario_type` takes, beside its vehicle."""
+    return set(inspect.signature(scenario_type).parameters) - {"vehicle"}
 
 
 def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:

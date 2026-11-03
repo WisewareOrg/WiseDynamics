@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk import ImuSpacecraft, Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
 
@@ -18,24 +18,31 @@ import numpy as np
 from Basilisk.fswAlgorithms import inertial3D
 
 
-def test_case(sim_duration_s, sim_vehicle, sim_scenario, sim_run_file):
-    datasets = sim_scenario.run(inertial3D.inertial3D(), duration_s=sim_duration_s, record_s=1.0)
-    sim_run_file(
+def test_case(sim_case_index, sim_duration_s, sim_vehicle, sim_scenario, sim_run_file):
+    datasets = sim_scenario.run(
+        inertial3D.inertial3D(), fsw_fields={}, duration_s=sim_duration_s, record_s=1.0
+    )
+    path = sim_run_file(
         datasets,
         {
             "probe_noise_seed": sim_vehicle.imu.RNGSeed,
             "probe_gyro_bias_P_rad_s": np.array(sim_vehicle.imu.senRotBias, dtype=float).flatten(),
         },
     )
+    assert path.name == f"run_{sim_case_index:04d}.h5"
+    assert path.is_file()
 """
 
 SHORT = ("--sim-duration-s", "3")
 
-# Case 5 of seed 0: recorded runs reproduce only while these hold.
+# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every set of runs recorded since
+# reproduces only while these hold.
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
-    "gyro_bias_P_rad_s": [0.00012746041754424463, -0.0002307563893406592, -0.0001738392604390849],
-    "accel_bias_P_m_s2": [-5.092680402389478e-05, -2.975833648506536e-05, 0.0001279994016986668],
+    "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
+    "omega0_BN_B_rad_s": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
+    "gyro_bias_P_rad_s": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
+    "accel_bias_P_m_s2": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
 }
 
 
@@ -61,6 +68,8 @@ def _run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: in
                     "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
                     "t_s": run_file["t_s"][:],
                     "gyro_P": run_file["imu/gyro_P"][:],
+                    "sigma_BN": run_file["truth/sigma_BN"][:],
+                    "omega_BN_B": run_file["truth/omega_BN_B"][:],
                 }
             )
     return runs
@@ -84,8 +93,9 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     draws_stream, _ = _case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
     return {
-        name: np.asarray(getattr(ImuSpacecraft, name)) + rng.normal(0.0, std, size=3)
-        for name, std in ImuSpacecraft.standard_dispersion.items()
+        name: np.asarray(getattr(owner, name)) + rng.normal(0.0, std, size=3)
+        for owner in (Leo500, ImuSpacecraft)
+        for name, std in owner.standard_dispersion.items()
     }
 
 
@@ -121,6 +131,8 @@ def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
         for name, value in expected.items():
             assert np.array_equal(draws[name], value), (index, name)
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], draws["gyro_bias_P_rad_s"])
+        assert np.array_equal(run["sigma_BN"][0], draws["sigma0_BN"])
+        assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B_rad_s"], rtol=0, atol=1e-15)
     for name in _draws_of(runs[0]):
         assert not np.allclose(_draws_of(runs[0])[name], _draws_of(runs[1])[name])
 
@@ -137,7 +149,9 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
     probes = {"probe_noise_seed", "probe_gyro_bias_P_rad_s"}
-    draws = {f"draw_{name}" for name in ImuSpacecraft.standard_dispersion}
+    draws = {
+        f"draw_{name}" for owner in (Leo500, ImuSpacecraft) for name in owner.standard_dispersion
+    }
     assert (
         set(attrs)
         == {
@@ -170,24 +184,65 @@ def test_attrs_cannot_replace_the_run_files_own(pytester):
     assert not out_dir.exists()
 
 
-def test_a_consumer_supplying_its_own_draws_records_what_its_vehicle_used(scenario_dir):
-    """The vehicle is built from the overriding `sim_draws`, and the run file records exactly those
-    draws."""
+def test_a_consumer_supplying_its_own_draws_records_what_its_case_used(scenario_dir):
+    """The scenario and the vehicle are each built from their keywords in the overriding
+    `sim_draws`, and the run file records exactly those draws."""
     scenario_dir.makeconftest(
         """
         import pytest
 
         @pytest.fixture
         def sim_draws():
-            return {"gyro_bias_P_rad_s": [1e-3, 2e-3, 3e-3]}
+            return {"sigma0_BN": [0.3, -0.2, 0.1], "gyro_bias_P_rad_s": [1e-3, 2e-3, 3e-3]}
         """
     )
     runs = _run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     for run in runs:
-        assert _draws_of(run).keys() == {"gyro_bias_P_rad_s"}
+        assert _draws_of(run).keys() == {"sigma0_BN", "gyro_bias_P_rad_s"}
+        assert np.array_equal(_draws_of(run)["sigma0_BN"], [0.3, -0.2, 0.1])
         assert np.array_equal(_draws_of(run)["gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
+        assert np.array_equal(run["sigma_BN"][0], [0.3, -0.2, 0.1])
+        assert np.allclose(run["omega_BN_B"][0], Leo500.omega0_BN_B_rad_s, rtol=0, atol=1e-15)
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
+
+
+def test_the_scenario_and_vehicle_options_select_registered_classes(scenario_dir):
+    """A second scenario and vehicle, registered by the consumer's conftest, are the ones the
+    session builds when the options name them."""
+    scenario_dir.makeconftest(
+        """
+        from wise_dynamics.basilisk import SCENARIOS, VEHICLES, ImuSpacecraft, Leo500
+
+        class Flipped(Leo500):
+            standard_dispersion = {}
+
+            def __init__(self, vehicle, **keywords):
+                super().__init__(vehicle, sigma0_BN=(-0.1, -0.2, 0.3), **keywords)
+
+        class Biased(ImuSpacecraft):
+            standard_dispersion = {}
+
+            def __init__(self, **keywords):
+                super().__init__(gyro_bias_P_rad_s=(1.0, 2.0, 3.0), **keywords)
+
+        SCENARIOS["flipped"] = Flipped
+        VEHICLES["biased"] = Biased
+        """
+    )
+    (run,) = _run_session(
+        scenario_dir,
+        "out",
+        "--sim-runs",
+        "1",
+        "--sim-scenario",
+        "flipped",
+        "--sim-vehicle",
+        "biased",
+        passed=1,
+    )
+    assert np.array_equal(run["sigma_BN"][0], [-0.1, -0.2, 0.3])
+    assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1.0, 2.0, 3.0])
 
 
 def test_a_session_reproduces_from_its_seed(scenario_dir):
@@ -198,8 +253,9 @@ def test_a_session_reproduces_from_its_seed(scenario_dir):
     for case_first, case_again, case_other in zip(first, again, other, strict=True):
         assert case_first["attrs"]["probe_noise_seed"] == case_again["attrs"]["probe_noise_seed"]
         assert case_first["attrs"]["probe_noise_seed"] != case_other["attrs"]["probe_noise_seed"]
-        assert np.array_equal(case_first["gyro_P"], case_again["gyro_P"])
-        assert not np.array_equal(case_first["gyro_P"], case_other["gyro_P"])
+        for name in ("gyro_P", "sigma_BN"):
+            assert np.array_equal(case_first[name], case_again[name]), name
+            assert not np.array_equal(case_first[name], case_other[name]), name
         for name, value in _draws_of(case_first).items():
             assert np.array_equal(value, _draws_of(case_again)[name]), name
             assert not np.array_equal(value, _draws_of(case_other)[name]), name
@@ -334,5 +390,5 @@ def test_the_readme_scenario_runs_as_a_session(pytester):
     for path in files:
         with h5py.File(path, "r") as run_file:
             assert run_file["t_s"][:].tolist() == [0.0, 10.0, 20.0]
-            assert run_file["truth/sigma_BN"].attrs["units"] == "MRP"
+            assert run_file["guidance/sigma_RN"].attrs["units"] == "MRP"
             assert run_file.attrs["versions_guidance"] == "1.0"
