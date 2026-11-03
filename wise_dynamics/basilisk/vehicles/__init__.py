@@ -4,12 +4,9 @@ A vehicle joins as a module here, `<vehicle>.py` holding its `Vehicle` subclass,
 `VEHICLES`.
 """
 
-from collections.abc import Mapping
-from types import MappingProxyType
-
 from wise_dynamics.basilisk.vehicle import Vehicle
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["VEHICLES"]
 
-VEHICLES: Mapping[str, type[Vehicle]] = MappingProxyType({"imu_spacecraft": ImuSpacecraft})
+VEHICLES: dict[str, type[Vehicle]] = {"imu_spacecraft": ImuSpacecraft}

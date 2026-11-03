@@ -17,18 +17,10 @@ SCENARIO_TEST = """
 import numpy as np
 from Basilisk.fswAlgorithms import inertial3D
 
-from wise_dynamics.basilisk import run_case
 
-
-def test_case(sim_duration_s, sim_vehicle, sim_run_file):
-    datasets = run_case(
-        sim_vehicle,
-        inertial3D.inertial3D(),
-        fields=sim_vehicle.recorded_fields(),
-        duration_s=sim_duration_s,
-        record_s=1.0,
-    )
-    sim_run_file.write(
+def test_case(sim_duration_s, sim_vehicle, sim_scenario, sim_run_file):
+    datasets = sim_scenario.run(inertial3D.inertial3D(), duration_s=sim_duration_s, record_s=1.0)
+    sim_run_file(
         datasets,
         {
             "probe_noise_seed": sim_vehicle.imu.RNGSeed,
@@ -39,14 +31,11 @@ def test_case(sim_duration_s, sim_vehicle, sim_run_file):
 
 SHORT = ("--sim-duration-s", "3")
 
-# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every set of runs recorded since
-# reproduces only while these hold.
+# Case 5 of seed 0: recorded runs reproduce only while these hold.
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
-    "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
-    "omega0_BN_B_rad_s": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
-    "gyro_bias_P_rad_s": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
-    "accel_bias_P_m_s2": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
+    "gyro_bias_P_rad_s": [0.00012746041754424463, -0.0002307563893406592, -0.0001738392604390849],
+    "accel_bias_P_m_s2": [-5.092680402389478e-05, -2.975833648506536e-05, 0.0001279994016986668],
 }
 
 
@@ -57,7 +46,7 @@ def scenario_dir(pytester: pytest.Pytester) -> pytest.Pytester:
     return pytester
 
 
-def run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
+def _run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
     """Run the scenario's session into `out` and return each run file's attributes and datasets."""
     out_dir = scenario_dir.path / out
     scenario_dir.runpytest_subprocess("--sim-out", str(out_dir), *SHORT, *args).assert_outcomes(
@@ -72,14 +61,12 @@ def run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: int
                     "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
                     "t_s": run_file["t_s"][:],
                     "gyro_P": run_file["imu/gyro_P"][:],
-                    "sigma_BN": run_file["truth/sigma_BN"][:],
-                    "omega_BN_B": run_file["truth/omega_BN_B"][:],
                 }
             )
     return runs
 
 
-def draws_of(run: dict) -> dict[str, np.ndarray]:
+def _draws_of(run: dict) -> dict[str, np.ndarray]:
     return {
         key.removeprefix("draw_"): np.asarray(value)
         for key, value in run["attrs"].items()
@@ -87,14 +74,14 @@ def draws_of(run: dict) -> dict[str, np.ndarray]:
     }
 
 
-def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
+def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
     """Case `index`'s two streams, derived as the README states."""
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
-def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
+def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     """The standard draws of case `index`, derived as the README states."""
-    draws_stream, _ = case_streams(seed, index)
+    draws_stream, _ = _case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
     return {
         name: np.asarray(getattr(ImuSpacecraft, name)) + rng.normal(0.0, std, size=3)
@@ -103,45 +90,43 @@ def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
 
 
 def test_case_seeding_matches_recorded_runs(scenario_dir):
-    (run,) = run_session(
+    (run,) = _run_session(
         scenario_dir, "out", "--sim-runs", "852", "test_scenario.py::test_case[5]", passed=1
     )
     assert run["name"] == "run_0005.h5"
     assert run["attrs"]["probe_noise_seed"] == CASE_5_NOISE_SEED
-    assert {name: value.tolist() for name, value in draws_of(run).items()} == CASE_5_DRAWS
+    assert {name: value.tolist() for name, value in _draws_of(run).items()} == CASE_5_DRAWS
 
 
 def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
-    (small,) = run_session(
+    (small,) = _run_session(
         scenario_dir, "small", "--sim-runs", "8", "test_scenario.py::test_case[5]", passed=1
     )
-    (large,) = run_session(
+    (large,) = _run_session(
         scenario_dir, "large", "--sim-runs", "852", "test_scenario.py::test_case[5]", passed=1
     )
     assert small["attrs"]["probe_noise_seed"] == large["attrs"]["probe_noise_seed"]
-    for name, value in draws_of(small).items():
-        assert np.array_equal(value, draws_of(large)[name])
+    for name, value in _draws_of(small).items():
+        assert np.array_equal(value, _draws_of(large)[name])
 
 
 def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
-    runs = run_session(scenario_dir, "out", "--sim-runs", "3", passed=3)
+    runs = _run_session(scenario_dir, "out", "--sim-runs", "3", passed=3)
 
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2]
     for index, run in enumerate(runs):
-        draws = draws_of(run)
-        expected = standard_draws(0, index)
+        draws = _draws_of(run)
+        expected = _standard_draws(0, index)
         assert draws.keys() == expected.keys()
         for name, value in expected.items():
             assert np.array_equal(draws[name], value), (index, name)
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], draws["gyro_bias_P_rad_s"])
-        assert np.array_equal(run["sigma_BN"][0], draws["sigma0_BN"])
-        assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B_rad_s"], rtol=0, atol=1e-15)
-    for name in draws_of(runs[0]):
-        assert not np.allclose(draws_of(runs[0])[name], draws_of(runs[1])[name])
+    for name in _draws_of(runs[0]):
+        assert not np.allclose(_draws_of(runs[0])[name], _draws_of(runs[1])[name])
 
 
 def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
-    runs = run_session(scenario_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
+    runs = _run_session(scenario_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
 
     run = runs[1]
     attrs = run["attrs"]
@@ -167,7 +152,25 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     )
 
 
-def test_a_scenario_supplying_its_own_draws_records_what_its_vehicle_used(scenario_dir):
+def test_attrs_cannot_replace_the_run_files_own(pytester):
+    pytester.makepyfile(
+        """
+        import numpy as np
+        import pytest
+
+        def test_case(sim_run_file):
+            with pytest.raises(ValueError, match=r"own attrs \\['seed'\\]"):
+                sim_run_file({"t_s": (np.zeros(1), "s")}, {"seed": 1})
+        """
+    )
+    out_dir = pytester.path / "out"
+    pytester.runpytest_subprocess("--sim-runs", "1", "--sim-out", str(out_dir)).assert_outcomes(
+        passed=1
+    )
+    assert not out_dir.exists()
+
+
+def test_a_consumer_supplying_its_own_draws_records_what_its_vehicle_used(scenario_dir):
     """The vehicle is built from the overriding `sim_draws`, and the run file records exactly those
     draws."""
     scenario_dir.makeconftest(
@@ -179,28 +182,27 @@ def test_a_scenario_supplying_its_own_draws_records_what_its_vehicle_used(scenar
             return {"gyro_bias_P_rad_s": [1e-3, 2e-3, 3e-3]}
         """
     )
-    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
+    runs = _run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     for run in runs:
-        assert draws_of(run).keys() == {"gyro_bias_P_rad_s"}
-        assert np.array_equal(draws_of(run)["gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
+        assert _draws_of(run).keys() == {"gyro_bias_P_rad_s"}
+        assert np.array_equal(_draws_of(run)["gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
 
 
 def test_a_session_reproduces_from_its_seed(scenario_dir):
     def session(seed: str, out: str) -> list[dict]:
-        return run_session(scenario_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
+        return _run_session(scenario_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
 
     first, again, other = session("3", "a"), session("3", "b"), session("4", "c")
     for case_first, case_again, case_other in zip(first, again, other, strict=True):
         assert case_first["attrs"]["probe_noise_seed"] == case_again["attrs"]["probe_noise_seed"]
         assert case_first["attrs"]["probe_noise_seed"] != case_other["attrs"]["probe_noise_seed"]
-        for name in ("gyro_P", "sigma_BN"):
-            assert np.array_equal(case_first[name], case_again[name]), name
-            assert not np.array_equal(case_first[name], case_other[name]), name
-        for name, value in draws_of(case_first).items():
-            assert np.array_equal(value, draws_of(case_again)[name]), name
-            assert not np.array_equal(value, draws_of(case_other)[name]), name
+        assert np.array_equal(case_first["gyro_P"], case_again["gyro_P"])
+        assert not np.array_equal(case_first["gyro_P"], case_other["gyro_P"])
+        for name, value in _draws_of(case_first).items():
+            assert np.array_equal(value, _draws_of(case_again)[name]), name
+            assert not np.array_equal(value, _draws_of(case_other)[name]), name
 
 
 def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
@@ -242,12 +244,12 @@ def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_
 
 
 def test_each_case_runs_for_sim_duration_s(scenario_dir):
-    (run,) = run_session(scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
+    (run,) = _run_session(scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
     assert run["t_s"][-1] == 4.0
 
 
 def test_a_session_runs_without_xdist(scenario_dir):
-    runs = run_session(scenario_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
+    runs = _run_session(scenario_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
     assert len(runs) == 1
 
 
@@ -280,15 +282,18 @@ def test_out_of_range_options_are_usage_errors(pytester, option, value, message)
     result.stderr.fnmatch_lines([f"ERROR: wise-dynamics: {message}"])
 
 
-def test_an_unknown_vehicle_fails_collection_naming_it_and_the_known_ones(pytester):
+@pytest.mark.parametrize(
+    ("option", "kind", "known"),
+    [("--sim-vehicle", "vehicle", "imu_spacecraft"), ("--sim-scenario", "scenario", "leo500")],
+)
+def test_an_unknown_name_fails_collection_naming_it_and_the_known_ones(
+    pytester, option, kind, known
+):
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess("--sim-vehicle", "bogus")
+    result = pytester.runpytest_subprocess(option, "bogus")
     assert result.ret == pytest.ExitCode.INTERRUPTED
     result.stdout.fnmatch_lines(
-        [
-            "*UsageError: wise-dynamics: --sim-vehicle: unknown vehicle 'bogus'; "
-            "known vehicles: imu_spacecraft"
-        ]
+        [f"*UsageError: wise-dynamics: {option}: unknown {kind} 'bogus'; known {kind}s: {known}"]
     )
 
 
@@ -329,5 +334,5 @@ def test_the_readme_scenario_runs_as_a_session(pytester):
     for path in files:
         with h5py.File(path, "r") as run_file:
             assert run_file["t_s"][:].tolist() == [0.0, 10.0, 20.0]
-            assert run_file["guidance/sigma_RN"].attrs["units"] == "MRP"
+            assert run_file["truth/sigma_BN"].attrs["units"] == "MRP"
             assert run_file.attrs["versions_guidance"] == "1.0"

@@ -1,54 +1,47 @@
-"""The interface every Basilisk vehicle meets, and the simulation each vehicle owns."""
+"""The interface every Basilisk vehicle meets, and the run file each vehicle writes."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from os import PathLike
+from pathlib import Path
 from typing import Any, ClassVar
 
+import h5py
 import numpy as np
-from Basilisk.utilities import SimulationBaseClass, macros
 
 __all__ = ["Vehicle"]
 
-_TASK = "vehicle_task"
-
 
 class Vehicle(ABC):
-    """A spacecraft on its own Basilisk simulation, process and task.
-
-    The base holds what every vehicle shares and the plugin and runner rely on: the simulation,
-    process and task, the run-once rule, readers that keep their vehicle alive, and the declared
-    `mu`, standard dispersion, initial state and recorded fields.
+    """A spacecraft's mass properties, sensors and logging, independent of where it flies.
 
     A subclass takes its parameters as keywords defaulting to class attributes of the same name,
-    calls `super().__init__(step_s=...)` and adds its models with `add_model`. The messages in
-    `recorded_fields()` and the Basilisk objects a subclass exposes are valid while the vehicle is
-    referenced: a message holding its vehicle would form a loop through Basilisk's C++ objects
-    that the garbage collector leaves in place.
+    builds its Basilisk objects, and lists them in `models()`; a `Scenario` adds them to its task
+    and places `spacecraft`. The messages in `recorded_fields()` and the Basilisk objects a
+    subclass exposes are valid while the vehicle is referenced: a message holding its vehicle would
+    form a loop through Basilisk's C++ objects that the garbage collector leaves in place.
 
     Attributes:
-        mu: The central body's gravitational parameter in the vehicle's gravity model, in m^3/s^2.
-        standard_dispersion: Keyword to its per-axis 1-sigma, drawn in this order.
+        standard_dispersion: Keyword to its per-axis 1-sigma, drawn in this order by `draw`.
+        spacecraft: The Basilisk `Spacecraft` hub a scenario places and attaches gravity to.
     """
 
-    mu: ClassVar[float]
     standard_dispersion: ClassVar[Mapping[str, float]]
+    spacecraft: Any
 
-    def __init__(self, *, step_s: float) -> None:
-        """Create the vehicle's simulation, with one process holding one task.
+    @classmethod
+    def draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
+        """Keyword overrides drawn from `rng`: each `standard_dispersion` entry, in order, as the
+        keyword's class default plus independent normal samples of that 1-sigma."""
+        draws = {}
+        for name, std in cls.standard_dispersion.items():
+            nominal = np.asarray(getattr(cls, name), dtype=float)
+            draws[name] = nominal + rng.normal(0.0, std, size=nominal.shape)
+        return draws
 
-        Args:
-            step_s: The task's period, in seconds: the dynamics and sensor step.
-
-        Raises:
-            ValueError: `step_s` is not positive.
-        """
-        if not step_s > 0:
-            raise ValueError(f"step must be positive, got {step_s} s")
-        self.step_s = step_s
-        self._simulation = SimulationBaseClass.SimBaseClass()
-        process = self._simulation.CreateNewProcess("vehicle_process")
-        process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(step_s)))
-        self._executed = False
+    @abstractmethod
+    def models(self) -> list[Any]:
+        """The vehicle's Basilisk modules, in the order a scenario adds them to its task."""
 
     def readers(self) -> dict[str, Any]:
         """The vehicle's sensor outputs by role, each a Basilisk message reader subscribed to its
@@ -66,35 +59,41 @@ class Vehicle(ABC):
     def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
         """Run-file dataset path to the `(message, field, units)` it records from this vehicle."""
 
-    @abstractmethod
-    def initial_state(self) -> dict[str, np.ndarray]:
-        """The vehicle's initial condition as the simulation holds it, by key. A subclass
-        documents its keys."""
+    def write_run_file(
+        self,
+        path: str | PathLike[str],
+        datasets: Mapping[str, tuple[Any, str]],
+        attrs: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Write one HDF5 run file. A write that fails part-way removes the file it created and
+        re-raises.
 
-    def add_model(self, model: Any) -> None:
-        """Add a Basilisk module or recorder to the vehicle's task, after the models already there.
+        Args:
+            path: The file to create. Its parent directories are created.
+            datasets: Dataset name to `(array, units)`, as `Scenario.run` returns them. A name may
+                contain `/` to place the dataset in a group, for example `"truth/r_N"`. Each array
+                is written as float64 with a string attribute `units`.
+            attrs: Root attributes, name to value.
 
         Raises:
-            RuntimeError: The vehicle has already run.
+            FileExistsError: `path` already exists.
+            ValueError: A dataset has an empty units string.
+            TypeError: An attribute or dataset value is of a type HDF5 cannot store.
         """
-        self._check_unexecuted()
-        self._simulation.AddModelToTask(_TASK, model)
+        for name, (_, units) in datasets.items():
+            if not units:
+                raise ValueError(f"dataset {name!r} has an empty units string")
 
-    def execute(self, duration_s: float) -> None:
-        """Initialize the simulation and run it from t = 0 for `duration_s` seconds.
-
-        Raises:
-            ValueError: `duration_s` is not positive.
-            RuntimeError: The vehicle has already run.
-        """
-        self._check_unexecuted()
-        if not duration_s > 0:
-            raise ValueError(f"duration must be positive, got {duration_s} s")
-        self._executed = True
-        self._simulation.InitializeSimulation()
-        self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
-        self._simulation.ExecuteSimulation()
-
-    def _check_unexecuted(self) -> None:
-        if self._executed:
-            raise RuntimeError("this vehicle has already run; build a new vehicle for another run")
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run_file = h5py.File(path, "w-")
+        try:
+            with run_file:
+                for name, value in (attrs or {}).items():
+                    run_file.attrs[name] = value
+                for name, (data, units) in datasets.items():
+                    dataset = run_file.create_dataset(name, data=np.asarray(data, dtype=np.float64))
+                    dataset.attrs["units"] = units
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
