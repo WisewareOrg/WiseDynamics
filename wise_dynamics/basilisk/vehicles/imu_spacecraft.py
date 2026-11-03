@@ -1,8 +1,7 @@
 """A rigid spacecraft carrying one body-mounted IMU.
 
 The vehicle is a rigid hub carrying an IMU at its centre of mass with identity mounting, constant
-biases and white noise. `wise_dynamics/basilisk/README.md` tabulates its parameters with their
-units and frames.
+biases and white noise.
 """
 
 from typing import Any
