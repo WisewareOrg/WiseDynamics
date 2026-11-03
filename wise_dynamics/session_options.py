@@ -1,9 +1,13 @@
-"""A pytest session's parsed `--sim-*` options."""
+"""A pytest session's parsed `--sim-*` options, internal to `wise_dynamics.pytest_plugin`.
+
+The plugin builds one `SessionOptions` per session and its fixtures read it; consumers reach its
+values through the `--sim-*` options and the `sim_*` fixtures.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["SessionOptions"]
+__all__: list[str] = []
 
 
 @dataclass(frozen=True)

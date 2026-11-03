@@ -5,9 +5,9 @@ from typing import Any
 
 from Basilisk.utilities import macros
 
+from wise_dynamics.basilisk.bsk_types import Message, SysModel
 from wise_dynamics.basilisk.plant import Plant
 from wise_dynamics.basilisk.recording import Recording
-from wise_dynamics.basilisk.swig import Message, SysModel
 
 __all__ = ["run_case"]
 

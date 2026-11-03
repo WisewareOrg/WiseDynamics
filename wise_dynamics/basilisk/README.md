@@ -16,7 +16,7 @@ Each module holds one class, or the functions of one concern, and is named for w
 | `wise_dynamics/dataset.py` | `Dataset`: one array with its units |
 | `wise_dynamics/run_file.py` | `write_run`: one HDF5 run file |
 | `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
-| `wise_dynamics/session_options.py` | `SessionOptions`: a pytest session's parsed `--sim-*` options |
+| `wise_dynamics/session_options.py` | `SessionOptions`: a pytest session's parsed `--sim-*` options, internal to the plugin |
 | `wise_dynamics/run_writer.py` | `RunWriter`: the type of the `sim_run_writer` fixture's value |
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's hooks and `sim_*` fixtures |
 | `wise_dynamics/basilisk/plant.py` | `Plant`: the contract every plant meets |
@@ -27,9 +27,10 @@ Each module holds one class, or the functions of one concern, and is named for w
 | `wise_dynamics/basilisk/orbit_elements.py` | `OrbitElements`: an initial orbit as classical elements |
 | `wise_dynamics/basilisk/rigid_hub.py` | `RigidHub`: a hub's mass and inertia |
 | `wise_dynamics/basilisk/vectors.py` | `Vector3`, `Matrix3` and `column()`: configuration vectors and Basilisk's column form |
-| `wise_dynamics/basilisk/swig.py` | type aliases for Basilisk's SWIG classes |
-| `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one package per plant |
-| `wise_dynamics/basilisk/plants/imu_spacecraft/` | `config.py`: `ImuSpacecraftConfig`; `plant.py`: `ImuSpacecraft` |
+| `wise_dynamics/basilisk/bsk_types.py` | type aliases for Basilisk's message, reader, recorder and module objects |
+| `wise_dynamics/basilisk/plants/__init__.py` | `PLANTS`: the registry of plants by name |
+| `wise_dynamics/basilisk/plants/imu_spacecraft.py` | `ImuSpacecraft`: the IMU spacecraft plant |
+| `wise_dynamics/basilisk/plants/imu_spacecraft_config.py` | `ImuSpacecraftConfig`: everything that defines one `ImuSpacecraft` |
 
 Consumers import from the two packages, `wise_dynamics` and `wise_dynamics.basilisk`; each
 declares its public names in `__all__`, and those import paths stay the same whichever module a

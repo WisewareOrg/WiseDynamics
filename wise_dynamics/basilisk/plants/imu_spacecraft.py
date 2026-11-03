@@ -1,4 +1,10 @@
-"""The IMU spacecraft plant: its Basilisk hub, gravity and IMU."""
+"""A rigid spacecraft in low Earth orbit carrying one body-mounted IMU.
+
+The vehicle is a rigid hub under point-mass Earth gravity, started on a classical-element orbit
+with an initial attitude and body rate, and carries an IMU at its centre of mass with identity
+mounting, constant biases and white noise. `wise_dynamics/basilisk/README.md` tabulates its
+parameters with their units and frames.
+"""
 
 from collections.abc import Mapping
 from types import MappingProxyType
@@ -11,10 +17,10 @@ from Basilisk.simulation import spacecraft as bsk_spacecraft
 from Basilisk.utilities import simHelpers, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
+from wise_dynamics.basilisk.bsk_types import Message, MessageReader
 from wise_dynamics.basilisk.plant import Plant
-from wise_dynamics.basilisk.plants.imu_spacecraft.config import ImuSpacecraftConfig
+from wise_dynamics.basilisk.plants.imu_spacecraft_config import ImuSpacecraftConfig
 from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.basilisk.swig import Message, MessageReader
 from wise_dynamics.basilisk.vectors import column
 from wise_dynamics.dispersion import Dispersion
 

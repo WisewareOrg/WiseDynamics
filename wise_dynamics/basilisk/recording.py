@@ -4,8 +4,8 @@ from collections.abc import Iterator, Mapping
 
 import numpy as np
 
+from wise_dynamics.basilisk.bsk_types import Recorder
 from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.basilisk.swig import Recorder
 from wise_dynamics.dataset import Dataset
 
 __all__ = ["Recording"]

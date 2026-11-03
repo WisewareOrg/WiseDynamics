@@ -1,4 +1,4 @@
-"""Type aliases for Basilisk's SWIG-generated classes, which carry no Python type information."""
+"""Type aliases for the Basilisk message, reader, recorder and module objects, typed as `Any`."""
 
 from typing import Any
 

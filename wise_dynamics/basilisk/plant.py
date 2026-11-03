@@ -7,9 +7,9 @@ from typing import ClassVar
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk.bsk_types import Message, MessageReader, SysModel
 from wise_dynamics.basilisk.plant_config import PlantConfig
 from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.basilisk.swig import Message, MessageReader, SysModel
 from wise_dynamics.dispersion import Dispersion
 from wise_dynamics.provenance import distribution_version
 
