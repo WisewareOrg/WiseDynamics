@@ -49,7 +49,7 @@ class Leo500(Scenario):
     true_anomaly_rad: float = 85.3 * D2R
     sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
-    step_s: float = 1.0
+    step_s: float = 0.02
 
     def initial_state(self) -> dict[str, np.ndarray]:
         """The initial condition the placement gives the vehicle, each a float array of shape

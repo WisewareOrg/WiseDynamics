@@ -65,7 +65,7 @@ no arguments; these class attributes define the scenario:
 | `true_anomaly_rad` | rad, at t = 0 | 85.3 deg | |
 | `sigma0_BN` | MRP, body relative to N | (0.1, 0.2, -0.3) | 0.01 |
 | `omega0_BN_B_rad_s` | rad/s, body relative to N, body axes | 1 deg/s per axis | 0.2 deg/s |
-| `step_s` | s, integration and sensor step | 1.0 | |
+| `step_s` | s, integration and sensor step | 0.02 (50 Hz) | |
 
 `Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does, and
 `disperse(draws)` sets those values on one instance; any other attribute is refused.
