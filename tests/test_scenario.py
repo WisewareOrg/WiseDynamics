@@ -48,7 +48,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     ],
 )
 def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
-    """A refused run builds nothing, and a scenario that has not run still runs."""
+    """A refused run builds nothing and leaves a scenario that has not run able to run."""
     vehicle = ImuSpacecraft()
     scenario = Leo500()
     if refusal != "no vehicle":

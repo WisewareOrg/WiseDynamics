@@ -271,7 +271,7 @@ def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
 
 def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_dir):
     """Each worker changes directory before the plugin configures it, and `--sim-out` is
-    relative; the run files still land in the one directory the controller resolved."""
+    relative; the run files land in the one directory the controller resolved."""
     scenario_dir.makeconftest(
         """
         import os

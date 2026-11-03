@@ -4,9 +4,9 @@ WiseDynamics is a thin wrapper over Basilisk
 ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)). It provides reusable
 vehicles and prebuilt scenarios, each scenario an operating environment with the placement of its
 vehicles. A pytest plugin exposes them to a consumer's tests: for each case it builds a vehicle and
-a scenario from the session seed, and the case writes one HDF5 run file. The first vehicle is
-`imu_spacecraft`, a rigid spacecraft with one IMU. The first scenario is `leo500`, a 500 km,
-45 degree orbit about a point-mass Earth. WiseDynamics holds no flight software and does no
+a scenario from the session seed, and the case writes one HDF5 run file. The vehicles are
+`imu_spacecraft`, a rigid spacecraft with one IMU. The scenarios are `leo500`, a 500 km, 45 degree
+orbit about a point-mass Earth. WiseDynamics holds no flight software and does no
 analysis of the run files.
 
 ## Using it

@@ -69,8 +69,8 @@ no arguments; these class attributes define the scenario:
 
 `Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does, and
 `disperse(draws)` sets those values on one instance; any other attribute is refused.
-`add(vehicle)` places a vehicle at the scenario's placement; a second vehicle is refused until it
-can be given a placement of its own. `initial_state()` returns the vehicle's `sigma0_BN` (MRP),
+A scenario takes one vehicle: `add(vehicle)` places it at the scenario's placement, and a second
+`add` is refused. `initial_state()` returns the vehicle's `sigma0_BN` (MRP),
 `r0_N` (m, in N), `v0_N` (m/s, in N) and `omega0_BN_B` (rad/s), valid before the run.
 `run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` builds the simulation and runs once.
 `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as

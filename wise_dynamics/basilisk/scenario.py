@@ -63,15 +63,12 @@ class Scenario(ABC):
 
         Raises:
             RuntimeError: The scenario has already run.
-            ValueError: A vehicle is already added; a second one needs a placement of its own.
+            ValueError: A vehicle is already added; a scenario takes one.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         if self.vehicles:
-            raise ValueError(
-                f"{type(self).__name__} already holds a vehicle; a second one needs a placement "
-                "of its own"
-            )
+            raise ValueError(f"{type(self).__name__} takes one vehicle and already holds it")
         self.vehicles.append(vehicle)
 
     @abstractmethod

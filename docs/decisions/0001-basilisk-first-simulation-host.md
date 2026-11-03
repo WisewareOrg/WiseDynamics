@@ -1,4 +1,4 @@
-# 0001 — Simulate spacecraft dynamics with Basilisk as the first simulation host
+# 0001 — Simulate spacecraft dynamics with Basilisk as the simulation host
 
 **Status:** accepted
 **Decided:** 2026-10-31 (issue #1 evaluation on the development host)
@@ -10,7 +10,7 @@
 
 ## Context
 
-The constraints a first simulation host has to meet:
+The constraints a simulation host has to meet:
 
 - Spacecraft rigid-body dynamics with the attitude hardware a vehicle actually carries (reaction
   wheels, thrusters, star tracker, sun sensors, IMU, magnetometer), supplied by the tool rather
@@ -26,7 +26,7 @@ The constraints a first simulation host has to meet:
 
 ## Decision
 
-Basilisk (AVS Lab, University of Colorado Boulder; PyPI package `bsk`, 2.12.x line) is the first
+Basilisk (AVS Lab, University of Colorado Boulder; PyPI package `bsk`, 2.12.x line) is the
 simulation host, installed from its prebuilt wheels (`bsk[all]`) and never built from source.
 
 What the evaluation established: the wheels install and import on the development host without a
@@ -40,16 +40,16 @@ configuration tried; and the integration step, not the model set, is what sets t
 
 - **Trick with JEOD and the Common Model Library (NASA JSC).** Strongest Monte Carlo and
   campaign infrastructure of any candidate, master-slave dispatch across machines, checkpointing,
-  and an environment library (JEOD) with no open equal. Rejected for now because the plant has to
+  and an environment library (JEOD) with no open equal. Rejected because the plant has to
   be written: models are C++ and Python is the input language only, and the Common Model Library
-  (released 2026-05, version 0.3.0 at the time of writing) carries RCS jets, rocket motors, aero,
+  (version 0.3.0, released 2026-05) carries RCS jets, rocket motors, aero,
   atmosphere and mass models but no reaction wheel, star tracker, IMU or sun sensor. This is the
   candidate most likely to become a second plant; see Consequences.
 - **42 (NASA GSFC).** Attitude hardware models shipped, builds in seconds, pairs natively with cFS.
   Rejected: no Python interface, and Monte Carlo is a pair of driver scripts rather than a
   controller.
 - **JSBSim.** Tabular six-degree-of-freedom atmospheric flight model with Python bindings.
-  Rejected as a first plant: no orbital dynamics, no spacecraft actuator or sensor models, no
+  Rejected as a simulation host: no orbital dynamics, no spacecraft actuator or sensor models, no
   Monte Carlo infrastructure. Remains the lightest route to a lifting-body entry plant if that
   work starts.
 - **Orekit and other astrodynamics libraries (Tudat, nyx, poliastro).** Mission-analysis and
@@ -70,4 +70,4 @@ configuration tried; and the integration step, not the model set, is what sets t
 - Revisit trigger: when the Common Model Library ships reaction wheel and star tracker models, or
   when guided-entry work for a lifting body begins, re-evaluate Trick with JEOD and CML as a
   second plant. That decision is a new ADR; this one is then revved only if Basilisk stops being
-  the first host.
+  the simulation host.

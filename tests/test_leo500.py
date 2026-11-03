@@ -106,11 +106,11 @@ def test_a_vehicle_added_after_the_run_is_refused():
 
 def test_a_second_vehicle_is_refused():
     scenario = Leo500()
-    first = ImuSpacecraft()
-    scenario.add(first)
-    with pytest.raises(ValueError, match="a second one needs a placement of its own"):
+    held = ImuSpacecraft()
+    scenario.add(held)
+    with pytest.raises(ValueError, match="Leo500 takes one vehicle and already holds it"):
         scenario.add(ImuSpacecraft())
-    assert scenario.vehicles == [first]
+    assert scenario.vehicles == [held]
 
 
 class Hyperbolic(Leo500):
