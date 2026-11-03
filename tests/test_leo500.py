@@ -14,6 +14,12 @@ from wise_dynamics.basilisk import ImuSpacecraft, Leo500
 D2R = math.pi / 180.0
 
 
+class _Guidance(inertial3D.inertial3D):
+    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz."""
+
+    period_s = 1.0
+
+
 class Placed(Leo500):
     """A scenario differing from `Leo500` in every placement attribute."""
 
@@ -48,14 +54,14 @@ def test_the_placement_reaches_the_basilisk_objects():
     scenario = Placed()
     vehicle = scenario.vehicle
     state = scenario.initial_state()
-    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
+    scenario.run(_Guidance(), {}, duration_s=1.0)
 
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
-    (task,) = scenario._simulation.TaskList
-    assert task.TaskData.TaskPeriod == 500_000_000
-    assert task.TaskModels[:2] == vehicle.models()
+    dynamics, _ = scenario._simulation.TaskList
+    assert dynamics.TaskData.TaskPeriod == 500_000_000
+    assert dynamics.TaskModels[:2] == vehicle.models()
     hub = vehicle.spacecraft.hub
     assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), Placed.sigma0_BN)
     assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), Placed.omega0_BN_B_rad_s)
@@ -73,9 +79,10 @@ def test_the_placement_reaches_the_basilisk_objects():
 
 def test_the_nominal_step_is_the_task_period():
     scenario = Leo500()
-    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
-    (task,) = scenario._simulation.TaskList
-    assert task.TaskData.TaskPeriod == 20_000_000
+    scenario.run(_Guidance(), {}, duration_s=1.0)
+    dynamics, fsw = scenario._simulation.TaskList
+    assert dynamics.TaskData.TaskPeriod == 20_000_000
+    assert fsw.TaskData.TaskPeriod == 1_000_000_000
 
 
 def test_the_scenario_builds_and_holds_its_vehicle():

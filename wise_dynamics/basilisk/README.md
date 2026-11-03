@@ -47,7 +47,10 @@ and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's 
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
-`vehicles`, `step_s` and `record_s`, and runs once, recording every `record_s`. `fsw_fields` maps a
+`vehicles`, `step_s` and `record_s`, and runs once. The vehicles and the recorders run every
+`step_s`, recording every `record_s`. The flight-software module runs in its own task at its own
+`period_s`, an attribute it declares in seconds, after the vehicles at each instant they share, so
+it reads that instant's sensor output. `fsw_fields` maps a
 dataset path to a flight-software `(message, field, units)`, as `recorded_fields()` does for a
 vehicle, and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then
 the vehicle's fields, then `fsw_fields`.
@@ -76,7 +79,8 @@ Case `k` takes its draws and its noise seed from the two streams of
 is and reruns alone: `pytest <test file> --sim-runs N "<test file>::test_case[k]"`.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
-`sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. Its output joins
+`sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
+`period_s` = 1.0, so it steps at 1 Hz while the default scenario steps at 50 Hz. Its output joins
 the run file through `fsw_fields`. `pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it
 as a Monte Carlo run; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer
 adds itself:
@@ -85,8 +89,12 @@ adds itself:
 from Basilisk.fswAlgorithms import inertial3D
 
 
+class Guidance(inertial3D.inertial3D):
+    period_s = 1.0
+
+
 def test_case(sim_scenario, sim_duration_s, sim_run_file):
-    guidance = inertial3D.inertial3D()
+    guidance = Guidance()
     guidance.ModelTag = "guidance"
     fsw_fields = {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
     datasets = sim_scenario.run(guidance, fsw_fields, duration_s=sim_duration_s)

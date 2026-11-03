@@ -9,7 +9,10 @@ from Basilisk.utilities import SimulationBaseClass, macros
 __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
-_TASK = "scenario_task"
+_DYNAMICS_TASK = "dynamics_task"
+_FSW_TASK = "fsw_task"
+_DYNAMICS_PRIORITY = 2
+_FSW_PRIORITY = 1
 
 
 class Scenario:
@@ -37,13 +40,16 @@ class Scenario:
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
-        Builds the simulation with one process holding one task at `step_s`, adds each vehicle's
-        models, adds `fsw_module` after them, attaches one Basilisk recorder per entry of each
+        Builds the simulation with one process holding two tasks. The dynamics task, every
+        `step_s`, holds each vehicle's models and one Basilisk recorder per entry of each
         vehicle's `recorded_fields()` and of `fsw_fields`, each sampling every `record_s` from
-        t = 0, and runs from t = 0 for `duration_s`.
+        t = 0. The flight-software task, every `fsw_module.period_s`, holds `fsw_module` and runs
+        after the dynamics task at each instant they share, so the module reads the sensors'
+        output of that instant. Runs from t = 0 for `duration_s`.
 
         Args:
-            fsw_module: Any Basilisk module, for example one reading a vehicle's `readers()`.
+            fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
+                example one reading a vehicle's `readers()`.
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
                 flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
@@ -67,13 +73,20 @@ class Scenario:
         recorders = {path: message.recorder(period_ns) for path, (message, _, _) in fields.items()}
 
         process = self._simulation.CreateNewProcess(_PROCESS)
-        process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(self.step_s)))
+        process.addTask(
+            self._simulation.CreateNewTask(_DYNAMICS_TASK, macros.sec2nano(self.step_s)),
+            _DYNAMICS_PRIORITY,
+        )
+        process.addTask(
+            self._simulation.CreateNewTask(_FSW_TASK, macros.sec2nano(fsw_module.period_s)),
+            _FSW_PRIORITY,
+        )
         for vehicle in self.vehicles:
             for model in vehicle.models():
-                self._simulation.AddModelToTask(_TASK, model)
-        self._simulation.AddModelToTask(_TASK, fsw_module)
+                self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
         for recorder in recorders.values():
-            self._simulation.AddModelToTask(_TASK, recorder)
+            self._simulation.AddModelToTask(_DYNAMICS_TASK, recorder)
+        self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
         self._simulation.InitializeSimulation()
         self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
         self._simulation.ExecuteSimulation()

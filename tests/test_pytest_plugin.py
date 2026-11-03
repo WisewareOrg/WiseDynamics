@@ -18,8 +18,12 @@ import numpy as np
 from Basilisk.fswAlgorithms import inertial3D
 
 
+class Guidance(inertial3D.inertial3D):
+    period_s = 1.0
+
+
 def test_case(sim_case_index, sim_duration_s, sim_scenario, sim_run_file):
-    datasets = sim_scenario.run(inertial3D.inertial3D(), {}, duration_s=sim_duration_s)
+    datasets = sim_scenario.run(Guidance(), {}, duration_s=sim_duration_s)
     path = sim_run_file(
         datasets,
         {

@@ -8,6 +8,13 @@ from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import ImuSpacecraft, Leo500
 
+
+class _Guidance(inertial3D.inertial3D):
+    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz."""
+
+    period_s = 1.0
+
+
 DISPERSED = {
     "mass_kg": 500.0,
     "inertia_B_kg_m2": ((150.0, -1.0, 0.0), (-1.0, 200.0, 0.0), (0.0, 0.0, 250.0)),
@@ -92,7 +99,7 @@ def test_imu_reader_is_subscribed_to_the_imu_output():
     scenario = Leo500()
     reader = scenario.vehicle.readers()["imu"]
     assert reader.isLinked()
-    datasets = scenario.run(inertial3D.inertial3D(), {}, duration_s=20.0)
+    datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
     gyro, _ = datasets["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 
