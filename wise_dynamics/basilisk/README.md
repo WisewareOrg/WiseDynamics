@@ -11,23 +11,16 @@ Each module holds one class, or the functions of one concern, and is named for w
 
 | module | holds |
 |---|---|
-| `wise_dynamics/dataclass_config.py` | `DataclassConfig`: the shape of any dataclass instance |
 | `wise_dynamics/dispersion.py` | `Dispersion`, which draws per-case values for a configuration's 3-vector fields, and `apply_draws`, which applies them |
-| `wise_dynamics/dataset.py` | `Dataset`: one array with its units |
 | `wise_dynamics/run_file.py` | `write_run`: one HDF5 run file |
-| `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
 | `wise_dynamics/session_options.py` | `SessionOptions`: a pytest session's parsed `--sim-*` options, internal to the plugin |
-| `wise_dynamics/run_writer.py` | `RunWriter`: the type of the `sim_run_writer` fixture's value |
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's hooks and `sim_*` fixtures |
 | `wise_dynamics/basilisk/plant.py` | `Plant`: the interface every plant meets |
-| `wise_dynamics/basilisk/plant_config.py` | `PlantConfig`: the shape of a plant's configuration |
 | `wise_dynamics/basilisk/recorded_field.py` | `RecordedField`: one recorded message field with its units |
 | `wise_dynamics/basilisk/recording.py` | `Recording`: one case's recorders and the datasets they hold |
 | `wise_dynamics/basilisk/runner.py` | `run_case`: runs one case |
 | `wise_dynamics/basilisk/orbit_elements.py` | `OrbitElements`: an initial orbit as classical elements |
 | `wise_dynamics/basilisk/rigid_hub.py` | `RigidHub`: a hub's mass and inertia |
-| `wise_dynamics/basilisk/vectors.py` | `Vector3`, `Matrix3` and `column()`: configuration vectors and Basilisk's column form |
-| `wise_dynamics/basilisk/bsk_types.py` | type aliases for Basilisk's message, reader, recorder and module objects |
 | `wise_dynamics/basilisk/plants/__init__.py` | `PLANTS`: the registry of plants by name |
 | `wise_dynamics/basilisk/plants/imu_spacecraft.py` | `ImuSpacecraft`: the IMU spacecraft plant |
 | `wise_dynamics/basilisk/plants/imu_spacecraft_config.py` | `ImuSpacecraftConfig`: everything that defines one `ImuSpacecraft` |
@@ -116,10 +109,10 @@ model those settings drive.
 
 `run_case(plant, fsw_module, *, fsw_outputs, duration_s, record_s=10.0)` adds one Basilisk
 module to the plant, records the plant's truth messages and the module's `fsw_outputs` every
-`record_s` from t = 0, runs, and returns a `Recording`. Indexing a `Recording` by role gives the
-Basilisk recorder; `datasets(fields)` gives the unit-tagged datasets of a run file, with `t_s`
-first. A flight-software module reads `plant.readers()` and starts from
-`plant.initial_state()`; Basilisk's stock `inertial3D` guidance module stands in for one here:
+`record_s` from t = 0, runs, and returns a `Recording`, whose `datasets(fields)` gives the run
+file's `(array, units)` datasets, with `t_s` first. A flight-software module reads
+`plant.readers()` and starts from `plant.initial_state()`; Basilisk's stock `inertial3D` guidance
+module stands in for one here:
 
 ```python
 >>> import tempfile
@@ -138,9 +131,9 @@ first. A flight-software module reads `plant.readers()` and starts from
 ...     "guidance/sigma_RN": RecordedField("guidance", "sigma_RN", "MRP"),
 ... }
 >>> datasets = recording.datasets(fields)
->>> datasets["t_s"].data.tolist()
+>>> datasets["t_s"][0].tolist()
 [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
->>> datasets["truth/r_N"].data.shape
+>>> datasets["truth/r_N"][0].shape
 (7, 3)
 >>> scratch = tempfile.TemporaryDirectory()
 >>> write_run(Path(scratch.name) / "run.h5", datasets, {"case": 0}).name
@@ -163,9 +156,8 @@ and leaves no file when a write fails. The plugin's `sim_run_writer` writes a ca
 | `case` | the case number |
 | `seed` | the session seed |
 | `created_utc` | ISO 8601 UTC time of writing, to the second |
-| `producer` | `wise_dynamics.basilisk` |
 | `versions_bsk` | the installed Basilisk version |
-| `versions_wise_dynamics` | the installed version, with `+<commit>` for an install from a git source |
+| `versions_wise_dynamics` | the installed WiseDynamics version |
 | `draw_<field>` | each draw, a float array |
 
 `extra_attrs` adds further root attributes, such as the flight software's version as
@@ -196,7 +188,6 @@ directory from them.
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the per-case fixtures below, runs once per case |
 | `sim_duration_s` | each case's simulated duration in seconds, `--sim-duration-s` |
-| `sim_draws_rng` | a fresh numpy `Generator` on the case's draws stream |
 | `sim_draws` | the case's draws; override it to supply a scenario's own |
 | `sim_plant` | the case's plant: the nominal configuration with `sim_draws` applied, its sensor noise seeded from the case's stream |
 | `sim_run_writer` | `writer(datasets, extra_attrs=None) -> Path`, writing the case's run file with `sim_draws` recorded |
@@ -210,18 +201,8 @@ recorded case reruns alone from its file's `seed` and `case` attributes:
 pytest <scenario> --sim-seed S --sim-runs N "<scenario>::test_case[k]"
 ```
 
-A scenario supplying its own draws overrides `sim_draws` and draws them from `sim_draws_rng`,
-the stream the standard draws come from; whichever draws a case has are both what its plant is
-built with and what its run file records:
-
-```python
-import pytest
-
-
-@pytest.fixture
-def sim_draws(sim_draws_rng):
-    return {"gyro_bias_P": sim_draws_rng.normal(0.0, 1e-3, size=3)}
-```
+A scenario supplying its own draws overrides `sim_draws`; whichever draws a case has are both
+what its plant is built with and what its run file records.
 
 A consumer's scenario test:
 
@@ -246,11 +227,10 @@ A Monte Carlo run is that test over many cases in one session: `pytest <scenario
 
 ## Stable interface
 
-A release changes these only as a breaking change: the names in the `__all__` of the two
-packages, `wise_dynamics` and `wise_dynamics.basilisk`, imported from those packages, and
-`RunWriter`, imported from `wise_dynamics.run_writer`, the one module a consumer imports directly;
-the `Plant` members in [Plants](#plants); the roles, initial-state keys and
-dataset names in the `ImuSpacecraft` tables; the `run_case` and `Recording` signatures in
-[Running one case](#running-one-case); the root attributes in [Run files](#run-files); and the
-options, fixtures and case seeding in [pytest plugin](#pytest-plugin).
-`tests/test_interface.py` and `tests/test_pytest_plugin.py` hold them.
+A release changes these only as a breaking change: the names in the `__all__` of the two packages,
+`wise_dynamics` and `wise_dynamics.basilisk`, imported from those packages; the `Plant` members in
+[Plants](#plants); the roles, initial-state keys and dataset names in the `ImuSpacecraft` tables;
+the `run_case` and `Recording` signatures in [Running one case](#running-one-case); the root
+attributes in [Run files](#run-files); and the options, fixtures and case seeding in
+[pytest plugin](#pytest-plugin). `tests/test_interface.py` and `tests/test_pytest_plugin.py` hold
+them.

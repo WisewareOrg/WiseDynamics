@@ -8,7 +8,7 @@ parameters with their units and frames.
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 from Basilisk.architecture import messaging
@@ -17,17 +17,15 @@ from Basilisk.simulation import spacecraft as bsk_spacecraft
 from Basilisk.utilities import simHelpers, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
-from wise_dynamics.basilisk.bsk_types import Message, MessageReader
 from wise_dynamics.basilisk.plant import Plant
 from wise_dynamics.basilisk.plants.imu_spacecraft_config import ImuSpacecraftConfig
 from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.basilisk.vectors import column
 from wise_dynamics.dispersion import Dispersion
 
 __all__ = ["ImuSpacecraft"]
 
 
-class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
+class ImuSpacecraft(Plant):
     """A tumbling rigid spacecraft in low Earth orbit with one IMU.
 
     Args:
@@ -78,13 +76,13 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         """The nominal vehicle, `ImuSpacecraftConfig()`."""
         return ImuSpacecraftConfig()
 
-    def _readers(self) -> dict[str, MessageReader]:
+    def _readers(self) -> dict[str, Any]:
         """Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output."""
         imu_reader = messaging.IMUSensorMsgReader()
         imu_reader.subscribeTo(self.imu.sensorOutMsg)
         return {"imu": imu_reader}
 
-    def truth_messages(self) -> dict[str, Message]:
+    def truth_messages(self) -> dict[str, Any]:
         """Role `truth`, the hub's `SCStatesMsg`, and role `imu`, the IMU's `IMUSensorMsg`."""
         return {"truth": self.spacecraft.scStateOutMsg, "imu": self.imu.sensorOutMsg}
 
@@ -108,12 +106,12 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         hub_object = bsk_spacecraft.Spacecraft()
         hub_object.ModelTag = "spacecraft"
         hub_object.hub.mHub = config.hub.mass_kg
-        hub_object.hub.r_BcB_B = column((0.0, 0.0, 0.0))
+        hub_object.hub.r_BcB_B = _column((0.0, 0.0, 0.0))
         hub_object.hub.IHubPntBc_B = simHelpers.np2EigenMatrix3d(
             [element for row in config.hub.inertia_B_kg_m2 for element in row]
         )
-        hub_object.hub.sigma_BNInit = column(config.sigma0_BN)
-        hub_object.hub.omega_BN_BInit = column(config.omega0_BN_B)
+        hub_object.hub.sigma_BNInit = _column(config.sigma0_BN)
+        hub_object.hub.omega_BN_BInit = _column(config.omega0_BN_B)
         self.add_model(hub_object)
         return hub_object
 
@@ -128,12 +126,17 @@ class ImuSpacecraft(Plant[ImuSpacecraftConfig]):
         imu = imuSensor.ImuSensor()
         imu.ModelTag = "imu"
         imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
-        imu.sensorPos_B = column((0.0, 0.0, 0.0))
+        imu.sensorPos_B = _column((0.0, 0.0, 0.0))
         imu.dcm_PB = np.eye(3).tolist()
-        imu.senRotBias = column(config.gyro_bias_P)
-        imu.senTransBias = column(config.accel_bias_P)
+        imu.senRotBias = _column(config.gyro_bias_P)
+        imu.senTransBias = _column(config.accel_bias_P)
         imu.PMatrixGyro = (config.gyro_noise_std_rad_s * np.eye(3)).tolist()
         imu.PMatrixAccel = (config.accel_noise_std_m_s2 * np.eye(3)).tolist()
         imu.RNGSeed = int(noise_seed)
         self.add_model(imu)
         return imu
+
+
+def _column(vector: tuple[float, float, float]) -> list[list[float]]:
+    """A 3-vector in Basilisk's column form, `[[x], [y], [z]]`."""
+    return [[float(component)] for component in vector]

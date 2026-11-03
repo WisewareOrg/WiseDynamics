@@ -5,7 +5,6 @@ from typing import Any
 
 from Basilisk.utilities import macros
 
-from wise_dynamics.basilisk.bsk_types import Message, SysModel
 from wise_dynamics.basilisk.plant import Plant
 from wise_dynamics.basilisk.recording import Recording
 
@@ -13,10 +12,10 @@ __all__ = ["run_case"]
 
 
 def run_case(
-    plant: Plant[Any],
-    fsw_module: SysModel,
+    plant: Plant,
+    fsw_module: Any,
     *,
-    fsw_outputs: Mapping[str, Message],
+    fsw_outputs: Mapping[str, Any],
     duration_s: float,
     record_s: float = 10.0,
 ) -> Recording:

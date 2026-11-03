@@ -2,8 +2,6 @@
 
 from dataclasses import dataclass
 
-from wise_dynamics.basilisk.vectors import Matrix3
-
 __all__ = ["RigidHub"]
 
 
@@ -18,4 +16,8 @@ class RigidHub:
     """
 
     mass_kg: float = 750.0
-    inertia_B_kg_m2: Matrix3 = ((900.0, 0.0, 0.0), (0.0, 800.0, 0.0), (0.0, 0.0, 600.0))
+    inertia_B_kg_m2: tuple[tuple[float, float, float], ...] = (
+        (900.0, 0.0, 0.0),
+        (0.0, 800.0, 0.0),
+        (0.0, 0.0, 600.0),
+    )

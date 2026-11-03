@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics import Dataset, write_run
+from wise_dynamics import write_run
 
 
 def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
@@ -12,7 +12,7 @@ def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
     written = write_run(
         path,
         {
-            "t_s": Dataset(np.arange(3), "s"),
+            "t_s": (np.arange(3), "s"),
             "truth/r_N": (np.ones((3, 3)) * 7e6, "m"),
         },
         {"case": 0, "draw_sigma0_BN": np.array([0.1, 0.2, -0.3])},
@@ -31,19 +31,19 @@ def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
 
 def test_a_run_file_is_written_once(tmp_path):
     path = tmp_path / "run_0000.h5"
-    write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {})
+    write_run(path, {"t_s": (np.zeros(1), "s")}, {})
     with pytest.raises(FileExistsError):
-        write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {})
+        write_run(path, {"t_s": (np.zeros(1), "s")}, {})
 
 
 def test_a_dataset_without_units_is_refused(tmp_path):
     with pytest.raises(ValueError, match="t_s"):
-        write_run(tmp_path / "run_0000.h5", {"t_s": Dataset(np.zeros(1), "")}, {})
+        write_run(tmp_path / "run_0000.h5", {"t_s": (np.zeros(1), "")}, {})
 
 
 def test_a_failed_write_leaves_no_file(tmp_path):
     path = tmp_path / "run_0000.h5"
     with pytest.raises(TypeError):
-        write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {"bad": None})
+        write_run(path, {"t_s": (np.zeros(1), "s")}, {"bad": None})
     assert not path.exists()
-    write_run(path, {"t_s": Dataset(np.zeros(1), "s")}, {})
+    write_run(path, {"t_s": (np.zeros(1), "s")}, {})

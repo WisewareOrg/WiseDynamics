@@ -157,10 +157,9 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert run["name"] == "run_0001.h5"
     assert attrs["case"] == 1
     assert attrs["seed"] == 42
-    assert attrs["producer"] == "wise_dynamics.basilisk"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
     assert attrs["versions_bsk"] == version("bsk")
-    assert attrs["versions_wise_dynamics"].startswith(version("wise-dynamics"))
+    assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
     assert "probe_noise_seed" in attrs
 
 
@@ -170,52 +169,15 @@ def test_extra_attrs_cannot_replace_a_root_attr(pytester):
         import numpy as np
         import pytest
 
-        from wise_dynamics import Dataset
 
         def test_case(sim_run_writer):
             with pytest.raises(ValueError, match=r"reserved root attrs \\['seed'\\]"):
-                sim_run_writer({"t_s": Dataset(np.zeros(1), "s")}, extra_attrs={"seed": 1})
+                sim_run_writer({"t_s": (np.zeros(1), "s")}, extra_attrs={"seed": 1})
         """
     )
     pytester.runpytest_subprocess(
         "--sim-runs", "1", "--sim-out", str(pytester.path / "out")
     ).assert_outcomes(passed=1)
-
-
-OWN_DRAWS_CONFTEST = """
-import pytest
-
-@pytest.fixture
-def sim_draws(sim_draws_rng):
-    return {"gyro_bias_P": sim_draws_rng.normal(0.0, 1e-3, size=3)}
-"""
-
-
-def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario_dir):
-    """The plant is built from the scenario's draws with the case's own noise seed, and the
-    run file records exactly those draws."""
-    scenario_dir.makeconftest(OWN_DRAWS_CONFTEST)
-    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
-
-    for index, run in enumerate(runs):
-        draws_stream, noise_stream = case_streams(0, index)
-        expected = np.random.default_rng(draws_stream).normal(0.0, 1e-3, size=3)
-        assert draws_of(run).keys() == {"gyro_bias_P"}
-        assert np.array_equal(draws_of(run)["gyro_bias_P"], expected)
-        assert np.array_equal(run["attrs"]["probe_gyro_bias_P"], expected)
-        assert run["attrs"]["probe_noise_seed"] == int(noise_stream.generate_state(1)[0])
-
-
-def test_scenario_draws_differ_between_neighbouring_cases_of_neighbouring_seeds(scenario_dir):
-    """Case 1 of seed 0 and case 0 of seed 1, the pair a seed-plus-index scheme collides."""
-    scenario_dir.makeconftest(OWN_DRAWS_CONFTEST)
-    _, case_1_of_seed_0 = run_session(scenario_dir, "seed0", "--sim-runs", "2", passed=2)
-    case_0_of_seed_1, _ = run_session(
-        scenario_dir, "seed1", "--sim-runs", "2", "--sim-seed", "1", passed=2
-    )
-    assert not np.allclose(
-        draws_of(case_1_of_seed_0)["gyro_bias_P"], draws_of(case_0_of_seed_1)["gyro_bias_P"]
-    )
 
 
 def test_a_session_reproduces_from_its_seed(scenario_dir):

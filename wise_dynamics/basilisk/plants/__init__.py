@@ -6,11 +6,10 @@ A plant joins as two modules here, `<plant>.py` holding its `Plant` subclass and
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
 
 from wise_dynamics.basilisk.plant import Plant
 from wise_dynamics.basilisk.plants.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["PLANTS"]
 
-PLANTS: Mapping[str, type[Plant[Any]]] = MappingProxyType({"imu_spacecraft": ImuSpacecraft})
+PLANTS: Mapping[str, type[Plant]] = MappingProxyType({"imu_spacecraft": ImuSpacecraft})

@@ -8,14 +8,12 @@ from typing import Any
 import h5py
 import numpy as np
 
-from wise_dynamics.dataset import Dataset
-
 __all__ = ["write_run"]
 
 
 def write_run(
     path: str | PathLike[str],
-    datasets: Mapping[str, Dataset],
+    datasets: Mapping[str, tuple[Any, str]],
     attrs: Mapping[str, Any],
 ) -> Path:
     """Write one run file, creating its parent directories as needed.
@@ -24,9 +22,9 @@ def write_run(
 
     Args:
         path: The file to create. Its parent directories are created when absent.
-        datasets: Dataset name to `Dataset`. A name may contain `/` to place the dataset in a
-            group, for example `"truth/r_N"`. Each is written as float64 with a string attribute
-            `units`. A plain `(array, units)` tuple is accepted in place of a `Dataset`.
+        datasets: Dataset name to `(array, units)`. A name may contain `/` to place the dataset in
+            a group, for example `"truth/r_N"`. Each array is written as float64 with a string
+            attribute `units`.
         attrs: Root attribute name to value, written as given.
 
     Returns:

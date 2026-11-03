@@ -8,15 +8,12 @@ import pytest
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
-from tests.silent_spacecraft import SilentSpacecraft
 from tests.support import StubFsw, run_with_stub
 from wise_dynamics.basilisk import ImuSpacecraft, RecordedField, Recording, run_case
 
 
 def test_recording_holds_truth_and_flight_software_roles_on_the_record_cadence():
     recording = run_with_stub(ImuSpacecraft(), duration_s=50.0, record_s=10.0)
-    assert set(recording) == {"truth", "imu", "stub"}
-
     datasets = recording.datasets(
         {
             **ImuSpacecraft.recorded_fields,
@@ -28,9 +25,9 @@ def test_recording_holds_truth_and_flight_software_roles_on_the_record_cadence()
     assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
     assert list(datasets) == ["t_s", *ImuSpacecraft.recorded_fields, "est/sigma_BN"]
     for name, field in ImuSpacecraft.recorded_fields.items():
-        assert datasets[name].data.shape == (6, 3)
-        assert datasets[name].units == field.units
-    assert np.allclose(datasets["est/sigma_BN"].data[-1], StubFsw.FIXED_SIGMA_BN)
+        assert datasets[name][0].shape == (6, 3)
+        assert datasets[name][1] == field.units
+    assert np.allclose(datasets["est/sigma_BN"][0][-1], StubFsw.FIXED_SIGMA_BN)
 
 
 def test_run_case_runs_a_stock_basilisk_module():
@@ -41,7 +38,7 @@ def test_run_case_runs_a_stock_basilisk_module():
         ImuSpacecraft(), module, fsw_outputs={"att_ref": module.attRefOutMsg}, duration_s=20.0
     )
     sigma_RN = recording.datasets({"ref": RecordedField("att_ref", "sigma_RN", "MRP")})["ref"]
-    assert np.allclose(sigma_RN.data[-1], [0.1, 0.0, 0.0])
+    assert np.allclose(sigma_RN[0][-1], [0.1, 0.0, 0.0])
 
 
 @pytest.mark.parametrize(
@@ -54,23 +51,24 @@ def test_run_case_runs_a_stock_basilisk_module():
         ("nothing to record", ValueError, "at least one message to record"),
     ],
 )
-def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
-    plant = SilentSpacecraft() if refusal == "nothing to record" else ImuSpacecraft()
+def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message, monkeypatch):
+    plant = ImuSpacecraft()
     stub = StubFsw()
     arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, "record_s": 10.0}
     if refusal == "truth role":
         arguments["fsw_outputs"] = {"truth": stub.output_msg}
     elif refusal == "nothing to record":
+        monkeypatch.setattr(plant, "truth_messages", dict)
         arguments["fsw_outputs"] = {}
     elif refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
     else:
         plant.execute(1.0)
-    models_before = len(plant.simulation.TaskList[0].TaskModels)
+    models_before = len(plant._simulation.TaskList[0].TaskModels)
 
     with pytest.raises(error, match=message):
         run_case(plant, stub, **arguments)
-    assert len(plant.simulation.TaskList[0].TaskModels) == models_before
+    assert len(plant._simulation.TaskList[0].TaskModels) == models_before
 
 
 def test_a_field_absent_from_its_recorder_is_named():
@@ -98,7 +96,7 @@ def test_a_recording_outlives_its_plant():
     after = recording.datasets(fields)
     assert others
     for name, dataset in before.items():
-        assert np.array_equal(after[name].data, dataset.data), name
+        assert np.array_equal(after[name][0], dataset[0]), name
 
 
 class ReadingFsw(sysModel.SysModel):

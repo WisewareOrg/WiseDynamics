@@ -98,19 +98,22 @@ def test_initial_state_is_the_configuration_and_the_truth_at_t0():
     assert np.array_equal(state["r0_N"], r_N)
     assert np.array_equal(state["v0_N"], v_N)
 
-    truth = run_with_stub(plant, duration_s=10.0)["truth"]
-    assert np.allclose(np.array(truth.sigma_BN)[0], state["sigma0_BN"], rtol=0.0, atol=1e-15)
-    assert np.allclose(np.array(truth.omega_BN_B)[0], state["omega0_BN_B"], rtol=0.0, atol=1e-15)
-    assert np.allclose(np.array(truth.r_BN_N)[0], state["r0_N"], rtol=0.0, atol=1e-6)
-    assert np.allclose(np.array(truth.v_BN_N)[0], state["v0_N"], rtol=0.0, atol=1e-9)
+    truth = run_with_stub(plant, duration_s=10.0).datasets(plant.recorded_fields)
+    for dataset, key, tolerance in (
+        ("truth/sigma_BN", "sigma0_BN", 1e-15),
+        ("truth/omega_BN_B", "omega0_BN_B", 1e-15),
+        ("truth/r_N", "r0_N", 1e-6),
+        ("truth/v_N", "v0_N", 1e-9),
+    ):
+        assert np.allclose(truth[dataset][0][0], state[key], rtol=0.0, atol=tolerance), key
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():
     plant = ImuSpacecraft()
     reader = plant.readers()["imu"]
     assert reader.isLinked()
-    imu = run_with_stub(plant, duration_s=20.0)["imu"]
-    assert np.array_equal(reader().AngVelPlatform, np.array(imu.AngVelPlatform)[-1])
+    gyro, _ = run_with_stub(plant, duration_s=20.0).datasets(plant.recorded_fields)["imu/gyro_P"]
+    assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 
 
 def test_a_plant_runs_once():

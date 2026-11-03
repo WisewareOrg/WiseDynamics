@@ -7,19 +7,17 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 
 import secrets
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
-from wise_dynamics.dataset import Dataset
 from wise_dynamics.dispersion import apply_draws
-from wise_dynamics.provenance import distribution_version
 from wise_dynamics.run_file import write_run
-from wise_dynamics.run_writer import RunWriter
 from wise_dynamics.session_options import SessionOptions
 
 if TYPE_CHECKING:
@@ -28,8 +26,6 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
-
-
 _OPTIONS = pytest.StashKey[SessionOptions]()
 
 
@@ -142,30 +138,24 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 
 @pytest.fixture
-def sim_draws_rng(request: pytest.FixtureRequest, sim_case_index: int) -> np.random.Generator:
-    """A fresh generator on this case's draws stream, the stream the standard draws come from,
-    for a scenario that draws its own dispersion in `sim_draws`."""
-    return _draws_rng(request.config.stash[_OPTIONS].seed, sim_case_index)
-
-
-@pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
     """This case's draws: configuration field name to the value its plant is built with and its
     run file records.
 
     The default is the plant's standard dispersion, drawn from the case's own stream. A scenario
-    supplies its own draws by overriding this fixture, drawing them from `sim_draws_rng`.
+    supplies its own draws by overriding this fixture.
     """
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
-    rng = _draws_rng(options.seed, sim_case_index)
+    draws_stream, _ = _streams(options.seed, sim_case_index)
+    rng = np.random.default_rng(draws_stream)
     return plant_type.standard_dispersion.draw(plant_type.nominal(), rng)
 
 
 @pytest.fixture
 def sim_plant(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> "Plant[Any]":
+) -> "Plant":
     """This case's plant: the nominal configuration with `sim_draws` applied, its sensor noise
     seeded from the case's own stream."""
     options = request.config.stash[_OPTIONS]
@@ -177,17 +167,18 @@ def sim_plant(
 @pytest.fixture
 def sim_run_writer(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> RunWriter:
+) -> Callable[..., Path]:
     """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`: `writer(datasets,
-    extra_attrs=None) -> Path`.
+    extra_attrs=None) -> Path`, with `datasets` mapping a name to `(array, units)`.
 
-    The file carries the root attributes `case`, `seed`, `created_utc`, `producer`,
-    `versions_bsk`, `versions_wise_dynamics` and one `draw_<field>` per entry of `sim_draws`.
+    The file carries the root attributes `case`, `seed`, `created_utc`, `versions_wise_dynamics`,
+    `versions_bsk` and one `draw_<field>` per entry of `sim_draws`. An `extra_attrs` entry naming
+    one of these raises `ValueError`.
     """
     options = request.config.stash[_OPTIONS]
 
     def write(
-        datasets: Mapping[str, Dataset], extra_attrs: Mapping[str, Any] | None = None
+        datasets: Mapping[str, tuple[Any, str]], extra_attrs: Mapping[str, Any] | None = None
     ) -> Path:
         attrs = _root_attrs(options, sim_case_index, sim_draws)
         extra_attrs = extra_attrs or {}
@@ -205,7 +196,7 @@ def _run_files(count: int) -> str:
     return f"{count} run file" if count == 1 else f"{count} run files"
 
 
-def _plant_type(name: str) -> "type[Plant[Any]]":
+def _plant_type(name: str) -> "type[Plant]":
     """The plant class `name` registers in `PLANTS`, imported with Basilisk on first use."""
     from wise_dynamics.basilisk.plants import PLANTS
 
@@ -223,12 +214,6 @@ def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
-def _draws_rng(seed: int, index: int) -> np.random.Generator:
-    """A fresh generator on case `index`'s first stream."""
-    draws_stream, _ = _streams(seed, index)
-    return np.random.default_rng(draws_stream)
-
-
 def _noise_seed(seed: int, index: int) -> int:
     """Case `index`'s sensor-noise seed, from its second stream."""
     _, noise_stream = _streams(seed, index)
@@ -241,8 +226,8 @@ def _root_attrs(options: SessionOptions, index: int, draws: Mapping[str, Any]) -
         "case": index,
         "seed": options.seed,
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "versions_wise_dynamics": distribution_version("wise-dynamics"),
-        **_plant_type(options.plant).provenance(),
+        "versions_wise_dynamics": version("wise-dynamics"),
+        "versions_bsk": version("bsk"),
     }
     for name, value in draws.items():
         attrs[f"draw_{name}"] = np.asarray(value, dtype=float)

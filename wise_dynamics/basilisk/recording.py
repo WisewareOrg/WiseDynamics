@@ -1,26 +1,22 @@
 """The recorders of one case, and the run-file datasets they hold."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 
-from wise_dynamics.basilisk.bsk_types import Recorder
 from wise_dynamics.basilisk.recorded_field import RecordedField
-from wise_dynamics.dataset import Dataset
 
 __all__ = ["Recording"]
 
 _NANOSECONDS_PER_SECOND = 1e9
 
 
-class Recording(Mapping[str, Recorder]):
-    """The recorders of one case, by message role, all sampled on one cadence from t = 0.
+class Recording:
+    """The Basilisk recorders of one case, by message role, all sampled on one cadence from
+    t = 0."""
 
-    Indexing by role gives the Basilisk recorder, whose payload fields are attributes and whose
-    sample times in nanoseconds come from `times()`.
-    """
-
-    def __init__(self, recorders: Mapping[str, Recorder]) -> None:
+    def __init__(self, recorders: Mapping[str, Any]) -> None:
         """Wrap recorders that have already run.
 
         Args:
@@ -33,17 +29,8 @@ class Recording(Mapping[str, Recorder]):
             raise ValueError("a Recording needs at least one recorder")
         self._recorders = dict(recorders)
 
-    def __getitem__(self, role: str) -> Recorder:
-        return self._recorders[role]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._recorders)
-
-    def __len__(self) -> int:
-        return len(self._recorders)
-
-    def datasets(self, fields: Mapping[str, RecordedField]) -> dict[str, Dataset]:
-        """Recorded fields as unit-tagged datasets, ready for a run file.
+    def datasets(self, fields: Mapping[str, RecordedField]) -> dict[str, tuple[np.ndarray, str]]:
+        """Recorded fields as `(array, units)` datasets, ready for a run file.
 
         Args:
             fields: Dataset name to the recorded field it holds, for example a plant's
@@ -58,7 +45,7 @@ class Recording(Mapping[str, Recorder]):
             ValueError: A field is absent from its recorder.
         """
         first = next(iter(self._recorders.values()))
-        datasets = {"t_s": Dataset(np.asarray(first.times()) / _NANOSECONDS_PER_SECOND, "s")}
+        datasets = {"t_s": (np.asarray(first.times()) / _NANOSECONDS_PER_SECOND, "s")}
         for name, recorded in fields.items():
             recorder = self._recorders[recorded.role]
             try:
@@ -68,5 +55,5 @@ class Recording(Mapping[str, Recorder]):
                     f"dataset {name!r}: the {recorded.role!r} recorder has no field "
                     f"{recorded.field!r}"
                 ) from None
-            datasets[name] = Dataset(data, recorded.units)
+            datasets[name] = (data, recorded.units)
         return datasets

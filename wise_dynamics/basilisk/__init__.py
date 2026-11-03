@@ -5,7 +5,6 @@
 
 from wise_dynamics.basilisk.orbit_elements import OrbitElements
 from wise_dynamics.basilisk.plant import Plant
-from wise_dynamics.basilisk.plant_config import PlantConfig
 from wise_dynamics.basilisk.plants import PLANTS
 from wise_dynamics.basilisk.plants.imu_spacecraft import ImuSpacecraft
 from wise_dynamics.basilisk.plants.imu_spacecraft_config import ImuSpacecraftConfig
@@ -20,7 +19,6 @@ __all__ = [
     "ImuSpacecraftConfig",
     "OrbitElements",
     "Plant",
-    "PlantConfig",
     "RecordedField",
     "Recording",
     "RigidHub",

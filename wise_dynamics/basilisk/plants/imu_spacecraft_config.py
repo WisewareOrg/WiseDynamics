@@ -6,7 +6,6 @@ from Basilisk.utilities.macros import D2R
 
 from wise_dynamics.basilisk.orbit_elements import OrbitElements
 from wise_dynamics.basilisk.rigid_hub import RigidHub
-from wise_dynamics.basilisk.vectors import Vector3
 
 __all__ = ["ImuSpacecraftConfig"]
 
@@ -30,10 +29,10 @@ class ImuSpacecraftConfig:
 
     orbit: OrbitElements = field(default_factory=OrbitElements)
     hub: RigidHub = field(default_factory=RigidHub)
-    sigma0_BN: Vector3 = (0.1, 0.2, -0.3)
-    omega0_BN_B: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
-    gyro_bias_P: Vector3 = (1e-4, -2e-4, 5e-5)
-    accel_bias_P: Vector3 = (1e-4, -5e-5, 2e-4)
+    sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
+    omega0_BN_B: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
+    gyro_bias_P: tuple[float, float, float] = (1e-4, -2e-4, 5e-5)
+    accel_bias_P: tuple[float, float, float] = (1e-4, -5e-5, 2e-4)
     gyro_noise_std_rad_s: float = 5e-5
     accel_noise_std_m_s2: float = 5e-5
     step_s: float = 1.0
