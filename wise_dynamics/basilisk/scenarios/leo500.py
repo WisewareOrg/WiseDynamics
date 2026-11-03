@@ -25,8 +25,8 @@ class Leo500(Scenario):
 
     Attributes:
         mu_m3_s2: Earth's gravitational parameter, in m^3/s^2, keyed `"earth"`.
-        standard_dispersion: The per-axis 1-sigma of `sigma0_BN` and of `omega0_BN_B_rad_s`, in
-            rad/s.
+        standard_dispersion: The per-axis 1-sigma of `sigma0_BN`, a dimensionless MRP, and of
+            `omega0_BN_B_rad_s`, in rad/s.
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
         eccentricity: Eccentricity of the initial orbit, `0 <= e < 1`.
         inclination_rad: Inclination, in radians.
