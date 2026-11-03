@@ -26,7 +26,9 @@ A vehicle is a `Vehicle` subclass: its parameters are keywords, each defaulting 
 attribute of the same name, read when the vehicle is built, so a subclass that overrides an
 attribute is built with its value. Its class attributes are its nominal values, and its class
 docstring gives each parameter's units and frame. Every vehicle takes `noise_seed`, the seed of its
-sensor noise.
+sensor noise. A vehicle class disperses itself: `dispersed(rng, *, noise_seed)` draws its own
+dispersion from `rng`, with the 1-sigmas its class attributes give, and returns a vehicle built
+with it and what it drew.
 
 A vehicle lists its Basilisk modules in `models()`, hands out sensor readers by role in
 `readers()`, and declares what it records in `recorded_fields()`: dataset path to
@@ -36,11 +38,11 @@ HDF5 file, each dataset float64 with a `units` attribute.
 ## Scenarios
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement, its
-step `step_s` and its recording period `record_s`, with units and frames in its class docstring.
-Its constructor takes no arguments: it builds its vehicle, places it, and holds it as
-`scenario.vehicle` and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's
-own dispersions from `rng`, as its docstring lists them, places the scenario at the drawn values,
-builds its vehicle again with them and `noise_seed`, and records what it applied in
+step `step_s` and its recording period `record_s`, with units and frames in its class docstring. Its
+constructor takes no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle`
+and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
+`rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
+`rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
 `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 

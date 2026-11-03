@@ -1,5 +1,5 @@
 """`ImuSpacecraft`: its nominal vehicle, how its keywords reach the Basilisk objects it builds, its
-reader, and what it records."""
+dispersion, its reader, and what it records."""
 
 import inspect
 
@@ -32,6 +32,8 @@ def test_nominal_vehicle_is_the_specified_one():
     assert ImuSpacecraft.gyro_noise_std_rad_s == 5e-5
     assert ImuSpacecraft.accel_noise_std_m_s2 == 5e-5
     assert ImuSpacecraft.noise_seed == 0
+    assert ImuSpacecraft.gyro_bias_std_P_rad_s == 1e-4
+    assert ImuSpacecraft.accel_bias_std_P_m_s2 == 1e-4
 
 
 def test_each_keyword_defaults_to_its_class_attribute():
@@ -71,6 +73,19 @@ def test_keywords_reach_the_basilisk_objects():
     assert np.array_equal(np.array(imu.sensorPos_B).flatten(), np.zeros(3))
     assert imu.RNGSeed == 11
     assert vehicle.models() == [vehicle.spacecraft, imu]
+
+
+def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():
+    vehicle, draws = ImuSpacecraft.dispersed(np.random.default_rng(7), noise_seed=11)
+    rng = np.random.default_rng(7)
+    gyro = np.asarray(ImuSpacecraft.gyro_bias_P_rad_s) + rng.normal(0.0, 1e-4, size=3)
+    accel = np.asarray(ImuSpacecraft.accel_bias_P_m_s2) + rng.normal(0.0, 1e-4, size=3)
+    assert list(draws) == ["gyro_bias_P_rad_s", "accel_bias_P_m_s2"]
+    assert np.array_equal(draws["gyro_bias_P_rad_s"], gyro)
+    assert np.array_equal(draws["accel_bias_P_m_s2"], accel)
+    assert np.array_equal(np.array(vehicle.imu.senRotBias).flatten(), gyro)
+    assert np.array_equal(np.array(vehicle.imu.senTransBias).flatten(), accel)
+    assert vehicle.imu.RNGSeed == 11
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():

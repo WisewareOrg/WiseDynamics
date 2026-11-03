@@ -40,6 +40,9 @@ class ImuSpacecraft(Vehicle):
         noise_seed: Seed of the IMU's white-noise generator.
 
     Attributes:
+        gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `dispersed` draws, in rad/s.
+        accel_bias_std_P_m_s2: Per-axis 1-sigma of the accelerometer bias `dispersed` draws, in
+            m/s^2.
         spacecraft: The Basilisk `Spacecraft` hub.
         imu: The Basilisk `ImuSensor`.
     """
@@ -55,6 +58,32 @@ class ImuSpacecraft(Vehicle):
     gyro_noise_std_rad_s: float = 5e-5
     accel_noise_std_m_s2: float = 5e-5
     noise_seed: int = 0
+    gyro_bias_std_P_rad_s: float = 1e-4
+    accel_bias_std_P_m_s2: float = 1e-4
+
+    @classmethod
+    def dispersed(
+        cls, rng: np.random.Generator, *, noise_seed: int
+    ) -> tuple["ImuSpacecraft", dict[str, np.ndarray]]:
+        """A vehicle built with biases drawn from `rng`, and what was drawn.
+
+        Each bias is its nominal plus independent normal samples per axis of its 1-sigma, the gyro
+        bias first, then the accelerometer bias.
+
+        Args:
+            rng: The generator the biases are drawn from.
+            noise_seed: The vehicle's sensor-noise seed.
+
+        Returns:
+            The vehicle, and `gyro_bias_P_rad_s` and `accel_bias_P_m_s2` as drawn.
+        """
+        draws = {
+            "gyro_bias_P_rad_s": np.asarray(cls.gyro_bias_P_rad_s)
+            + rng.normal(0.0, cls.gyro_bias_std_P_rad_s, size=3),
+            "accel_bias_P_m_s2": np.asarray(cls.accel_bias_P_m_s2)
+            + rng.normal(0.0, cls.accel_bias_std_P_m_s2, size=3),
+        }
+        return cls(**draws, noise_seed=noise_seed), draws
 
     def __init__(
         self,

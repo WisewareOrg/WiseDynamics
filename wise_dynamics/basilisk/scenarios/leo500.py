@@ -53,36 +53,30 @@ class Leo500(Scenario):
         self.vehicles = [self.vehicle]
 
     def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> None:
-        """Draw this case's dispersions from `rng`, place the scenario there, and build the vehicle
-        again with them.
+        """Draw this case's placement from `rng`, then have the vehicle class draw its own
+        dispersion from `rng` and build a vehicle, and place that vehicle.
 
-        Each value is its nominal plus independent normal samples per axis, drawn in this order:
-        `sigma0_BN` with 1-sigma 0.01 (a dimensionless MRP), `omega0_BN_B_rad_s` with 0.2 deg/s,
-        the vehicle's `gyro_bias_P_rad_s` with 1e-4 rad/s and its `accel_bias_P_m_s2` with
-        1e-4 m/s^2. The new vehicle replaces `vehicle`, so readers and other handles on it are
-        taken after dispersing. `draws` records what was applied.
+        The placement is `sigma0_BN` with per-axis 1-sigma 0.01 (a dimensionless MRP), then
+        `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus independent normal samples. The
+        new vehicle replaces `vehicle`, so readers and other handles on it are taken after
+        dispersing. `draws` records the placement's draws and the vehicle's.
 
         Args:
             rng: The generator the dispersions are drawn from.
             noise_seed: The new vehicle's sensor-noise seed.
         """
-        draws = {
-            "sigma0_BN": _dispersed(rng, type(self).sigma0_BN, 0.01),
-            "omega0_BN_B_rad_s": _dispersed(rng, type(self).omega0_BN_B_rad_s, 0.2 * D2R),
-            "gyro_bias_P_rad_s": _dispersed(rng, ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
-            "accel_bias_P_m_s2": _dispersed(rng, ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
-        }
-        self.sigma0_BN = draws["sigma0_BN"]
-        self.omega0_BN_B_rad_s = draws["omega0_BN_B_rad_s"]
-        self.vehicle = self._placed(
-            ImuSpacecraft(
-                gyro_bias_P_rad_s=draws["gyro_bias_P_rad_s"],
-                accel_bias_P_m_s2=draws["accel_bias_P_m_s2"],
-                noise_seed=noise_seed,
-            )
+        self.sigma0_BN = np.asarray(type(self).sigma0_BN) + rng.normal(0.0, 0.01, size=3)
+        self.omega0_BN_B_rad_s = np.asarray(type(self).omega0_BN_B_rad_s) + rng.normal(
+            0.0, 0.2 * D2R, size=3
         )
+        vehicle, vehicle_draws = type(self.vehicle).dispersed(rng, noise_seed=noise_seed)
+        self.vehicle = self._placed(vehicle)
         self.vehicles = [self.vehicle]
-        self.draws = draws
+        self.draws = {
+            "sigma0_BN": self.sigma0_BN,
+            "omega0_BN_B_rad_s": self.omega0_BN_B_rad_s,
+            **vehicle_draws,
+        }
 
     def initial_state(self) -> dict[str, np.ndarray]:
         """The initial condition the placement gives the vehicle, each a float array of shape
@@ -121,9 +115,3 @@ class Leo500(Scenario):
         hub.sigma_BNInit = state["sigma0_BN"]
         hub.omega_BN_BInit = state["omega0_BN_B"]
         return vehicle
-
-
-def _dispersed(rng: np.random.Generator, nominal: tuple[float, ...], std: float) -> np.ndarray:
-    """`nominal` plus independent normal samples of 1-sigma `std` per axis, drawn from `rng`."""
-    nominal_array = np.asarray(nominal, dtype=float)
-    return nominal_array + rng.normal(0.0, std, size=nominal_array.shape)
