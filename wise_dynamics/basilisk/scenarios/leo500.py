@@ -20,14 +20,10 @@ class Leo500(Scenario):
     """A vehicle tumbling on a classical-element orbit about a point-mass Earth.
 
     The inertial frame N is Earth-centred, with no rotation and no epoch: point-mass gravity has
-    nothing that depends on time.
+    nothing that depends on time. The class attributes define the scenario; `disperse` overrides
+    `sigma0_BN` and `omega0_BN_B_rad_s` on one instance.
 
-    Each keyword defaults to the class attribute of the same name, the nominal placement, so a
-    consumer reads a default without building a scenario; a scenario keeps each keyword it is
-    built with as an instance attribute of that name.
-
-    Args:
-        vehicle: The vehicle to place.
+    Attributes:
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
         eccentricity: Eccentricity of the initial orbit, `0 <= e < 1`.
         inclination_rad: Inclination, in radians.
@@ -37,10 +33,6 @@ class Leo500(Scenario):
         sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
         step_s: The integration and sensor step, in seconds.
-
-    Raises:
-        ValueError: `semi_major_axis_m` or `step_s` is not positive, or `eccentricity` is outside
-            [0, 1).
     """
 
     mu_m3_s2: ClassVar[dict[str, float]] = {"earth": 3.986004360e14}
@@ -59,28 +51,17 @@ class Leo500(Scenario):
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     step_s: float = 1.0
 
-    def __init__(
-        self,
-        vehicle: Vehicle,
-        *,
-        semi_major_axis_m: float = semi_major_axis_m,
-        eccentricity: float = eccentricity,
-        inclination_rad: float = inclination_rad,
-        raan_rad: float = raan_rad,
-        arg_periapsis_rad: float = arg_periapsis_rad,
-        true_anomaly_rad: float = true_anomaly_rad,
-        sigma0_BN: tuple[float, float, float] = sigma0_BN,
-        omega0_BN_B_rad_s: tuple[float, float, float] = omega0_BN_B_rad_s,
-        step_s: float = step_s,
-    ) -> None:
-        self.semi_major_axis_m = semi_major_axis_m
-        self.eccentricity = eccentricity
-        self.inclination_rad = inclination_rad
-        self.raan_rad = raan_rad
-        self.arg_periapsis_rad = arg_periapsis_rad
-        self.true_anomaly_rad = true_anomaly_rad
-        self.sigma0_BN = sigma0_BN
-        self.omega0_BN_B_rad_s = omega0_BN_B_rad_s
+    def initial_state(self) -> dict[str, np.ndarray]:
+        """The first vehicle's initial condition, each a float array of shape `(3,)`.
+
+        Returns:
+            `sigma0_BN` (MRP, body relative to N), `r0_N` (position of the centre of mass in N,
+            m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body rate relative to N in
+            body axes, rad/s).
+
+        Raises:
+            ValueError: `semi_major_axis_m` is not positive, or `eccentricity` is outside [0, 1).
+        """
         r_N, v_N = _orbit_to_inertial(
             self.mu_m3_s2["earth"],
             self.semi_major_axis_m,
@@ -90,8 +71,16 @@ class Leo500(Scenario):
             self.arg_periapsis_rad,
             self.true_anomaly_rad,
         )
-        super().__init__(vehicle, step_s=step_s)
+        return {
+            "sigma0_BN": np.asarray(self.sigma0_BN, dtype=float),
+            "r0_N": r_N,
+            "v0_N": v_N,
+            "omega0_BN_B": np.asarray(self.omega0_BN_B_rad_s, dtype=float),
+        }
 
+    def _place(self, vehicle: Vehicle) -> None:
+        """Point-mass Earth as the central body, and the initial state on the hub."""
+        state = self.initial_state()
         self._gravity = simIncludeGravBody.gravBodyFactory()
         earth = self._gravity.createEarth()
         earth.mu = self.mu_m3_s2["earth"]
@@ -99,26 +88,10 @@ class Leo500(Scenario):
         self._gravity.addBodiesTo(vehicle.spacecraft)
 
         hub = vehicle.spacecraft.hub
-        hub.r_CN_NInit = r_N
-        hub.v_CN_NInit = v_N
-        hub.sigma_BNInit = self.sigma0_BN
-        hub.omega_BN_BInit = self.omega0_BN_B_rad_s
-
-    def initial_state(self) -> dict[str, np.ndarray]:
-        """The hub's initial condition, each a float array of shape `(3,)`.
-
-        Returns:
-            `sigma0_BN` (MRP, body relative to N), `r0_N` (position of the centre of mass in N,
-            m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body rate relative to N in
-            body axes, rad/s).
-        """
-        hub = self.vehicle.spacecraft.hub
-        return {
-            "sigma0_BN": np.array(hub.sigma_BNInit, dtype=float).flatten(),
-            "r0_N": np.array(hub.r_CN_NInit, dtype=float).flatten(),
-            "v0_N": np.array(hub.v_CN_NInit, dtype=float).flatten(),
-            "omega0_BN_B": np.array(hub.omega_BN_BInit, dtype=float).flatten(),
-        }
+        hub.r_CN_NInit = state["r0_N"]
+        hub.v_CN_NInit = state["v0_N"]
+        hub.sigma_BNInit = state["sigma0_BN"]
+        hub.omega_BN_BInit = state["omega0_BN_B"]
 
 
 def _orbit_to_inertial(

@@ -77,7 +77,9 @@ def test_imu_reader_is_subscribed_to_the_imu_output():
     vehicle = ImuSpacecraft()
     reader = vehicle.readers()["imu"]
     assert reader.isLinked()
-    datasets = Leo500(vehicle).run(inertial3D.inertial3D(), fsw_fields={}, duration_s=20.0)
+    scenario = Leo500()
+    scenario.add(vehicle)
+    datasets = scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=20.0)
     gyro, _ = datasets["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 

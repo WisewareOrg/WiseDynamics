@@ -1,4 +1,4 @@
-"""The interface every Basilisk scenario meets: a vehicle placed in an environment, run once."""
+"""The interface every Basilisk scenario meets: vehicles placed in an environment, run once."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -16,43 +16,30 @@ _TASK = "scenario_task"
 
 
 class Scenario(ABC):
-    """An operating environment, a vehicle placed in it, and the Basilisk simulation that runs
-    them once.
+    """A prebuilt operating environment, the vehicles placed in it, and the Basilisk simulation
+    that runs them once.
 
-    A subclass takes its environment and placement as keywords defaulting to class attributes of
-    the same name, checks them, calls `super().__init__(vehicle, step_s=...)`, then attaches its
-    gravity bodies to `vehicle.spacecraft` and sets its initial state.
+    A subclass defines its environment and placement as class attributes and takes no
+    constructor arguments. `disperse` overrides the placement of one instance, and `add` places a
+    vehicle. `run` builds the simulation: it checks the placement through `initial_state` before
+    anything is changed, adds each vehicle's models, and has `_place` attach the gravity bodies and
+    write the initial state onto the vehicle's `spacecraft`.
 
     Attributes:
         mu_m3_s2: Gravity body name to its gravitational parameter, in m^3/s^2.
-        standard_dispersion: Placement keyword to its per-axis 1-sigma, drawn in this order by
+        standard_dispersion: Placement attribute to its per-axis 1-sigma, drawn in this order by
             `draw`.
-        vehicle: The vehicle the scenario was given.
+        step_s: The integration and sensor step, in seconds.
+        vehicles: The vehicles added, in order.
     """
 
     mu_m3_s2: ClassVar[Mapping[str, float]]
     standard_dispersion: ClassVar[Mapping[str, float]]
+    step_s: float
 
-    def __init__(self, vehicle: Vehicle, *, step_s: float) -> None:
-        """Create the simulation, with one process holding one task, and add the vehicle's models
-        to the task.
-
-        Args:
-            vehicle: The vehicle to place.
-            step_s: The task's period, in seconds: the integration and sensor step.
-
-        Raises:
-            ValueError: `step_s` is not positive.
-        """
-        if not step_s > 0:
-            raise ValueError(f"step must be positive, got {step_s} s")
-        self.vehicle = vehicle
-        self.step_s = step_s
+    def __init__(self) -> None:
+        self.vehicles: list[Vehicle] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
-        process = self._simulation.CreateNewProcess(_PROCESS)
-        process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(step_s)))
-        for model in vehicle.models():
-            self._simulation.AddModelToTask(_TASK, model)
         self._executed = False
 
     @classmethod
@@ -65,10 +52,45 @@ class Scenario(ABC):
             draws[name] = nominal + rng.normal(0.0, std, size=nominal.shape)
         return draws
 
+    def disperse(self, draws: Mapping[str, Any]) -> None:
+        """Set each entry of `draws` as this instance's value of that placement attribute, as
+        `draw` returns them.
+
+        Raises:
+            ValueError: An entry names no `standard_dispersion` attribute.
+        """
+        unknown = sorted(set(draws) - set(self.standard_dispersion))
+        if unknown:
+            raise ValueError(f"{type(self).__name__} does not disperse {unknown}")
+        for name, value in draws.items():
+            setattr(self, name, value)
+
+    def add(self, vehicle: Vehicle) -> None:
+        """Place `vehicle` at the scenario's placement; `run` adds it to the simulation.
+
+        Raises:
+            ValueError: A vehicle is already added; a second one needs a placement of its own.
+        """
+        if self.vehicles:
+            raise ValueError(
+                f"{type(self).__name__} already holds a vehicle; a second one needs a placement "
+                "of its own"
+            )
+        self.vehicles.append(vehicle)
+
     @abstractmethod
     def initial_state(self) -> dict[str, np.ndarray]:
-        """The vehicle's initial condition as the simulation holds it, by key. A subclass
-        documents its keys."""
+        """The first vehicle's initial condition from the scenario's placement, by key, valid
+        before `run`. A subclass documents its keys.
+
+        Raises:
+            ValueError: The placement is invalid.
+        """
+
+    @abstractmethod
+    def _place(self, vehicle: Vehicle) -> None:
+        """Attach the gravity bodies to `vehicle.spacecraft` and write its initial state. `run`
+        calls it once per vehicle, after `initial_state` has checked the placement."""
 
     def run(
         self,
@@ -80,15 +102,16 @@ class Scenario(ABC):
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicle with one flight-software module and record both.
 
-        Adds `fsw_module` to the task after the vehicle's models, attaches one Basilisk recorder
-        per entry of `vehicle.recorded_fields()` and of `fsw_fields`, each sampling every
-        `record_s` from t = 0, and runs from t = 0 for `duration_s`. The arguments are checked
-        before the simulation is changed.
+        Builds the simulation with one process holding one task at `step_s`, adds each vehicle's
+        models and places it, adds `fsw_module` after them, attaches one Basilisk recorder per
+        entry of each vehicle's `recorded_fields()` and of `fsw_fields`, each sampling every
+        `record_s` from t = 0, and runs from t = 0 for `duration_s`. The arguments and the
+        placement are checked before anything is changed.
 
         Args:
-            fsw_module: Any Basilisk module, for example one reading `vehicle.readers()`.
+            fsw_module: Any Basilisk module, for example one reading a vehicle's `readers()`.
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
-                flight software, in the shape of `vehicle.recorded_fields()`; may be empty.
+                flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
             record_s: Recording period, in seconds.
 
@@ -97,17 +120,24 @@ class Scenario(ABC):
             then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples.
 
         Raises:
-            ValueError: `record_s` or `duration_s` is not positive, an `fsw_fields` path is `t_s`
-                or a vehicle dataset path, or a recorded field is absent from its message.
+            ValueError: No vehicle is added, `step_s`, `record_s` or `duration_s` is not positive,
+                an `fsw_fields` path is `t_s` or a vehicle dataset path, a recorded field is
+                absent from its message, or the placement is invalid.
             RuntimeError: The scenario has already run.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
+        if not self.vehicles:
+            raise ValueError("add a vehicle before running the scenario")
+        if not self.step_s > 0:
+            raise ValueError(f"step must be positive, got {self.step_s} s")
         if not record_s > 0:
             raise ValueError(f"recording period must be positive, got {record_s} s")
         if not duration_s > 0:
             raise ValueError(f"duration must be positive, got {duration_s} s")
-        vehicle_fields = self.vehicle.recorded_fields()
+        vehicle_fields = {}
+        for vehicle in self.vehicles:
+            vehicle_fields.update(vehicle.recorded_fields())
         reused = sorted(set(fsw_fields) & {"t_s", *vehicle_fields})
         if reused:
             raise ValueError(f"fsw_fields reuses the run's own dataset paths {reused}")
@@ -119,7 +149,14 @@ class Scenario(ABC):
             if not isinstance(getattr(type(recorders[path]), field, None), property):
                 raise ValueError(f"dataset {path!r}: its message has no field {field!r}")
 
+        self.initial_state()
         self._executed = True
+        process = self._simulation.CreateNewProcess(_PROCESS)
+        process.addTask(self._simulation.CreateNewTask(_TASK, macros.sec2nano(self.step_s)))
+        for vehicle in self.vehicles:
+            for model in vehicle.models():
+                self._simulation.AddModelToTask(_TASK, model)
+            self._place(vehicle)
         self._simulation.AddModelToTask(_TASK, fsw_module)
         for recorder in recorders.values():
             self._simulation.AddModelToTask(_TASK, recorder)

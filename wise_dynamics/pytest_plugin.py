@@ -5,7 +5,6 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 `wise_dynamics/basilisk/README.md` documents its options and fixtures.
 """
 
-import inspect
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
@@ -143,9 +142,10 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: scenario or vehicle keyword to the value the case is built with and its
-    run file records. The default is the scenario class's `draw`, then the vehicle class's, from
-    the case's first stream; a consumer overrides this fixture to supply its own.
+    """This case's draws: scenario placement attribute or vehicle keyword to the value the case is
+    built with and its run file records. The default is the scenario class's `draw`, then the
+    vehicle class's, from the case's first stream; a consumer overrides this fixture to supply its
+    own.
     """
     draws_stream, _ = _streams(request.config.getoption("--sim-seed"), sim_case_index)
     rng = np.random.default_rng(draws_stream)
@@ -158,10 +158,11 @@ def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[st
 def sim_vehicle(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> "Vehicle":
-    """This case's vehicle, built with the entries of `sim_draws` its scenario does not take as
-    keywords, and its sensor noise seeded from the case's second stream."""
+    """This case's vehicle, built with the entries of `sim_draws` outside its scenario's
+    `standard_dispersion` as keywords, and its sensor noise seeded from the case's second
+    stream."""
     _, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    placement = _keywords(_scenario_type(request.config.getoption("--sim-scenario")))
+    placement = _scenario_type(request.config.getoption("--sim-scenario")).standard_dispersion
     keywords = {name: value for name, value in sim_draws.items() if name not in placement}
     vehicle_type = _vehicle_type(request.config.getoption("--sim-vehicle"))
     return vehicle_type(**keywords, noise_seed=int(noise_stream.generate_state(1)[0]))
@@ -171,12 +172,13 @@ def sim_vehicle(
 def sim_scenario(
     request: pytest.FixtureRequest, sim_draws: Mapping[str, Any], sim_vehicle: "Vehicle"
 ) -> "Scenario":
-    """This case's scenario, `--sim-scenario` built with `sim_vehicle` and the entries of
-    `sim_draws` it takes as keywords."""
-    scenario_type = _scenario_type(request.config.getoption("--sim-scenario"))
-    placement = _keywords(scenario_type)
-    keywords = {name: value for name, value in sim_draws.items() if name in placement}
-    return scenario_type(sim_vehicle, **keywords)
+    """This case's scenario: `--sim-scenario`, dispersed with the entries of `sim_draws` in its
+    `standard_dispersion`, holding `sim_vehicle`."""
+    scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
+    placement = scenario.standard_dispersion
+    scenario.disperse({name: value for name, value in sim_draws.items() if name in placement})
+    scenario.add(sim_vehicle)
+    return scenario
 
 
 @pytest.fixture
@@ -191,7 +193,7 @@ def sim_run_file(
     Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
     them, it returns the file's path. The file's root attributes are `case`, `seed`,
     `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
-    one `draw_<keyword>` per entry of `sim_draws`, with `attrs` beside them; `attrs` naming one of
+    one `draw_<name>` per entry of `sim_draws`, with `attrs` beside them; `attrs` naming one of
     those raises `ValueError`.
     """
     own: dict[str, Any] = {
@@ -253,11 +255,6 @@ def _scenario_type(name: str) -> "type[Scenario]":
         raise ValueError(
             f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
         ) from None
-
-
-def _keywords(scenario_type: "type[Scenario]") -> set[str]:
-    """The placement and environment keywords `scenario_type` takes, beside its vehicle."""
-    return set(inspect.signature(scenario_type).parameters) - {"vehicle"}
 
 
 def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:

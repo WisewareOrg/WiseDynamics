@@ -2,8 +2,8 @@
 
 Basilisk vehicles, the scenarios that place them, and the pytest plugin whose session over
 `--sim-runs` cases is a Monte Carlo run. A vehicle is mass properties, sensors and logging, and
-knows nothing about where it flies. A scenario is the operating environment and the vehicle's
-placement in it, and runs the vehicle once with a flight-software module. Basilisk is the first
+knows nothing about where it flies. A scenario is a prebuilt operating environment and the
+placement of the vehicles added to it, and runs them once with a flight-software module. Basilisk is the first
 simulation host by ADR 0001 rev 1. Each symbol's docstring carries its arguments, returns and
 raises.
 
@@ -19,9 +19,9 @@ raises.
 | `wise_dynamics/basilisk/scenarios/__init__.py` | `SCENARIOS`: the scenarios by name |
 | `wise_dynamics/basilisk/scenarios/leo500.py` | `Leo500`: point-mass Earth, 500 km, 45 degrees |
 
-Consumers import from `wise_dynamics.basilisk`. Each keyword of a vehicle or scenario defaults to
-the class attribute of the same name, so `Leo500.step_s` reads the nominal step without building
-anything.
+Consumers import from `wise_dynamics.basilisk`. Each keyword of a vehicle defaults to the class
+attribute of the same name, and a scenario is its class attributes, so `ImuSpacecraft.mass_kg` and
+`Leo500.step_s` read the nominal values without building anything.
 
 ## Vehicle `imu_spacecraft`: `ImuSpacecraft(**keywords)`
 
@@ -47,13 +47,14 @@ body-frame origin's state, which is the centre of mass's state because the hub's
 sits at that origin. `write_run_file(path, datasets, attrs=None)` writes one HDF5 file, each
 dataset float64 with a `units` attribute.
 
-## Scenario `leo500`: `Leo500(vehicle, **keywords)`
+## Scenario `leo500`: `Leo500()`
 
 Basilisk's point-mass Earth, `Leo500.mu_m3_s2` = `{"earth": 3.986004360e14}`, with the vehicle
 tumbling on a classical-element orbit. The inertial frame N is Earth-centred and non-rotating,
-with no epoch, since point-mass gravity has nothing that depends on time.
+with no epoch, since point-mass gravity has nothing that depends on time. The constructor takes
+no arguments; these class attributes define the scenario:
 
-| keyword | units, frame | nominal | standard dispersion, 1-sigma per axis |
+| attribute | units, frame | value | standard dispersion, 1-sigma per axis |
 |---|---|---|---|
 | `semi_major_axis_m` | m | 6871e3 | |
 | `eccentricity` | - | 0.0001 | |
@@ -65,12 +66,15 @@ with no epoch, since point-mass gravity has nothing that depends on time.
 | `omega0_BN_B_rad_s` | rad/s, body relative to N, body axes | 1 deg/s per axis | 0.2 deg/s |
 | `step_s` | s, integration and sensor step | 1.0 | |
 
-`Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does. `initial_state()`
-returns `sigma0_BN` (MRP), `r0_N` (m, in N), `v0_N` (m/s, in N) and `omega0_BN_B` (rad/s).
-`run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` runs once. `fsw_fields` maps a dataset
-path to a flight-software `(message, field, units)`, as `recorded_fields()` does for the vehicle,
-and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the
-vehicle's fields, then `fsw_fields`.
+`Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does, and
+`disperse(draws)` sets those values on one instance; any other attribute is refused.
+`add(vehicle)` places a vehicle at the scenario's placement; a second vehicle is refused until it
+can be given a placement of its own. `initial_state()` returns the vehicle's `sigma0_BN` (MRP),
+`r0_N` (m, in N), `v0_N` (m/s, in N) and `omega0_BN_B` (rad/s), valid before the run.
+`run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` builds the simulation and runs once.
+`fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
+`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
+`(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
 
 ## pytest plugin
 
@@ -90,10 +94,10 @@ consumer's `conftest.py` names nothing.
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | `--sim-duration-s` |
-| `sim_draws` | the case's draws, keyword to value: by default the scenario's `draw`, then the vehicle's; override it to supply your own |
-| `sim_vehicle` | the case's vehicle, built with the `sim_draws` keywords its scenario does not take and its noise seeded from the case |
-| `sim_scenario` | the case's scenario, built with `sim_vehicle` and the `sim_draws` keywords it takes |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through the vehicle and returns its path, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<keyword>` per draw, and `attrs` beside them |
+| `sim_draws` | the case's draws, name to value: by default the scenario's `draw`, then the vehicle's; override it to supply your own |
+| `sim_vehicle` | the case's vehicle, built with the `sim_draws` entries outside its scenario's standard dispersion and its noise seeded from the case |
+| `sim_scenario` | the case's scenario, dispersed with the `sim_draws` entries in its standard dispersion, holding `sim_vehicle` |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through the vehicle and returns its path, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per draw, and `attrs` beside them |
 
 Case `k` of seed `s` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(s, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`

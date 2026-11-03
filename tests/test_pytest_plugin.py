@@ -215,10 +215,8 @@ def test_the_scenario_and_vehicle_options_select_registered_classes(scenario_dir
         from wise_dynamics.basilisk import SCENARIOS, VEHICLES, ImuSpacecraft, Leo500
 
         class Flipped(Leo500):
+            sigma0_BN = (-0.1, -0.2, 0.3)
             standard_dispersion = {}
-
-            def __init__(self, vehicle, **keywords):
-                super().__init__(vehicle, sigma0_BN=(-0.1, -0.2, 0.3), **keywords)
 
         class Biased(ImuSpacecraft):
             standard_dispersion = {}
