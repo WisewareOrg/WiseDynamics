@@ -1,5 +1,5 @@
-"""`Leo500`: its prebuilt environment and placement, its dispersion, how its placement reaches the
-Basilisk objects, and what it refuses."""
+"""`Leo500`: its prebuilt environment and placement, its draws and dispersion, how its placement
+reaches the Basilisk objects, and what it refuses."""
 
 import inspect
 import math

@@ -2,8 +2,8 @@
 
 Basilisk vehicles, the scenarios that place them, and the pytest plugin whose session over
 `--sim-runs` cases is a Monte Carlo run. A vehicle is mass properties, sensors and logging, and
-knows nothing about where it flies. A scenario is a prebuilt operating environment and the
-placement of the vehicles added to it, and runs them once with a flight-software module. Basilisk is the first
+knows nothing about where it flies. A scenario is a prebuilt operating environment and the placement
+of the vehicles added to it, and runs them once with a flight-software module. Basilisk is the
 simulation host by ADR 0001 rev 1. Each symbol's docstring carries its arguments, returns and
 raises.
 
@@ -19,9 +19,10 @@ raises.
 | `wise_dynamics/basilisk/scenarios/__init__.py` | `SCENARIOS`: the scenarios by name |
 | `wise_dynamics/basilisk/scenarios/leo500.py` | `Leo500`: point-mass Earth, 500 km, 45 degrees |
 
-Consumers import from `wise_dynamics.basilisk`. Each keyword of a vehicle defaults to the class
-attribute of the same name, and a scenario is its class attributes, so `ImuSpacecraft.mass_kg` and
-`Leo500.step_s` read the nominal values without building anything.
+Consumers import from `wise_dynamics.basilisk`. A vehicle keyword left out takes the class
+attribute of the same name when the vehicle is built, and a scenario is its class attributes. So
+`ImuSpacecraft.mass_kg` and `Leo500.step_s` read the nominal values without building anything,
+and a subclass that overrides an attribute is built with its value.
 
 ## Vehicle `imu_spacecraft`: `ImuSpacecraft(**keywords)`
 

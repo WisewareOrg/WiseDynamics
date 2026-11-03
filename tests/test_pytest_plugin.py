@@ -35,8 +35,7 @@ def test_case(sim_case_index, sim_duration_s, sim_vehicle, sim_scenario, sim_run
 
 SHORT = ("--sim-duration-s", "3")
 
-# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every set of runs recorded since
-# reproduces only while these hold.
+# Case 5 of seed 0: run files recorded with this seeding reproduce only while these hold.
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
     "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
@@ -219,10 +218,8 @@ def test_the_scenario_and_vehicle_options_select_registered_classes(scenario_dir
             standard_dispersion = {}
 
         class Biased(ImuSpacecraft):
+            gyro_bias_P_rad_s = (1.0, 2.0, 3.0)
             standard_dispersion = {}
-
-            def __init__(self, **keywords):
-                super().__init__(gyro_bias_P_rad_s=(1.0, 2.0, 3.0), **keywords)
 
         SCENARIOS["flipped"] = Flipped
         VEHICLES["biased"] = Biased

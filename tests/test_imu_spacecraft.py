@@ -42,8 +42,21 @@ def test_each_keyword_defaults_to_its_class_attribute():
     """So a vehicle built with no keywords is the vehicle a consumer reads from the class."""
     parameters = inspect.signature(ImuSpacecraft).parameters
     assert len(parameters) == 7
+    vehicle = ImuSpacecraft()
     for name, parameter in parameters.items():
-        assert parameter.default == getattr(ImuSpacecraft, name), name
+        assert parameter.default is None, name
+        assert getattr(vehicle, name) == getattr(ImuSpacecraft, name), name
+
+
+def test_a_subclass_attribute_is_the_value_its_vehicles_are_built_with():
+    class Heavy(ImuSpacecraft):
+        mass_kg = 1000.0
+        gyro_bias_P_rad_s = (3e-4, -1e-4, 2e-4)
+
+    vehicle = Heavy()
+    assert vehicle.spacecraft.hub.mHub == 1000.0
+    assert np.array_equal(np.array(vehicle.imu.senRotBias).flatten(), Heavy.gyro_bias_P_rad_s)
+    assert Heavy(mass_kg=500.0).spacecraft.hub.mHub == 500.0
 
 
 def test_keywords_reach_the_basilisk_objects():

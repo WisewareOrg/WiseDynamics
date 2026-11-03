@@ -16,13 +16,16 @@ from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__ = ["ImuSpacecraft"]
 
+type Vector3 = tuple[float, float, float]
+
 
 class ImuSpacecraft(Vehicle):
     """A rigid spacecraft with one IMU.
 
-    Each keyword defaults to the class attribute of the same name, the nominal vehicle, so a
-    consumer reads a default without building a vehicle; a vehicle keeps each keyword it is built
-    with as an instance attribute of that name.
+    A keyword left at `None` takes the class attribute of the same name, read when the vehicle is
+    built, so a consumer reads the nominal vehicle without building one and a subclass that
+    overrides an attribute builds with its value. A vehicle keeps each value it is built with as
+    an instance attribute of that name.
 
     Args:
         mass_kg: Hub mass, in kilograms.
@@ -46,13 +49,13 @@ class ImuSpacecraft(Vehicle):
     }
 
     mass_kg: float = 750.0
-    inertia_B_kg_m2: tuple[tuple[float, float, float], ...] = (
+    inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = (
         (900.0, 0.0, 0.0),
         (0.0, 800.0, 0.0),
         (0.0, 0.0, 600.0),
     )
-    gyro_bias_P_rad_s: tuple[float, float, float] = (1e-4, -2e-4, 5e-5)
-    accel_bias_P_m_s2: tuple[float, float, float] = (1e-4, -5e-5, 2e-4)
+    gyro_bias_P_rad_s: Vector3 = (1e-4, -2e-4, 5e-5)
+    accel_bias_P_m_s2: Vector3 = (1e-4, -5e-5, 2e-4)
     gyro_noise_std_rad_s: float = 5e-5
     accel_noise_std_m_s2: float = 5e-5
     noise_seed: int = 0
@@ -60,21 +63,32 @@ class ImuSpacecraft(Vehicle):
     def __init__(
         self,
         *,
-        mass_kg: float = mass_kg,
-        inertia_B_kg_m2: tuple[tuple[float, float, float], ...] = inertia_B_kg_m2,
-        gyro_bias_P_rad_s: tuple[float, float, float] = gyro_bias_P_rad_s,
-        accel_bias_P_m_s2: tuple[float, float, float] = accel_bias_P_m_s2,
-        gyro_noise_std_rad_s: float = gyro_noise_std_rad_s,
-        accel_noise_std_m_s2: float = accel_noise_std_m_s2,
-        noise_seed: int = noise_seed,
+        mass_kg: float | None = None,
+        inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] | None = None,
+        gyro_bias_P_rad_s: Vector3 | None = None,
+        accel_bias_P_m_s2: Vector3 | None = None,
+        gyro_noise_std_rad_s: float | None = None,
+        accel_noise_std_m_s2: float | None = None,
+        noise_seed: int | None = None,
     ) -> None:
-        self.mass_kg = mass_kg
-        self.inertia_B_kg_m2 = inertia_B_kg_m2
-        self.gyro_bias_P_rad_s = gyro_bias_P_rad_s
-        self.accel_bias_P_m_s2 = accel_bias_P_m_s2
-        self.gyro_noise_std_rad_s = gyro_noise_std_rad_s
-        self.accel_noise_std_m_s2 = accel_noise_std_m_s2
-        self.noise_seed = noise_seed
+        nominal = type(self)
+        self.mass_kg = nominal.mass_kg if mass_kg is None else mass_kg
+        self.inertia_B_kg_m2 = (
+            nominal.inertia_B_kg_m2 if inertia_B_kg_m2 is None else inertia_B_kg_m2
+        )
+        self.gyro_bias_P_rad_s = (
+            nominal.gyro_bias_P_rad_s if gyro_bias_P_rad_s is None else gyro_bias_P_rad_s
+        )
+        self.accel_bias_P_m_s2 = (
+            nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
+        )
+        self.gyro_noise_std_rad_s = (
+            nominal.gyro_noise_std_rad_s if gyro_noise_std_rad_s is None else gyro_noise_std_rad_s
+        )
+        self.accel_noise_std_m_s2 = (
+            nominal.accel_noise_std_m_s2 if accel_noise_std_m_s2 is None else accel_noise_std_m_s2
+        )
+        self.noise_seed = nominal.noise_seed if noise_seed is None else noise_seed
 
         self.spacecraft = bsk_spacecraft.Spacecraft()
         self.spacecraft.ModelTag = "spacecraft"
