@@ -52,7 +52,8 @@ class Leo500(Scenario):
     step_s: float = 1.0
 
     def initial_state(self) -> dict[str, np.ndarray]:
-        """The first vehicle's initial condition, each a float array of shape `(3,)`.
+        """The initial condition the placement gives the vehicle, each a float array of shape
+        `(3,)`.
 
         Returns:
             `sigma0_BN` (MRP, body relative to N), `r0_N` (position of the centre of mass in N,

@@ -31,8 +31,8 @@ class Vehicle(ABC):
 
     @classmethod
     def draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
-        """Keyword overrides drawn from `rng`: each `standard_dispersion` entry, in order, as the
-        keyword's class default plus independent normal samples of that 1-sigma."""
+        """Overrides drawn from `rng`: each `standard_dispersion` entry, in order, as the class
+        attribute of that name plus independent normal samples of that 1-sigma."""
         draws = {}
         for name, std in cls.standard_dispersion.items():
             nominal = np.asarray(getattr(cls, name), dtype=float)

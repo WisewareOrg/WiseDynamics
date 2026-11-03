@@ -96,6 +96,14 @@ def test_disperse_refuses_a_placement_outside_the_standard_dispersion():
     assert scenario.sigma0_BN == Leo500.sigma0_BN
 
 
+def test_a_vehicle_added_after_the_run_is_refused():
+    scenario = Leo500()
+    scenario.add(ImuSpacecraft())
+    scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+    with pytest.raises(RuntimeError, match="already run"):
+        scenario.add(ImuSpacecraft())
+
+
 def test_a_second_vehicle_is_refused():
     scenario = Leo500()
     first = ImuSpacecraft()

@@ -64,8 +64,6 @@ configuration tried; and the integration step, not the model set, is what sets t
 - An algorithm written as a Basilisk Python module costs a small multiple of the wall time of the
   same algorithm in C. Acceptable for design iteration; promotion to C++ is the path when
   throughput matters.
-- The shipped bskSim examples integrate at 0.1 s. Scenarios here choose their step from the
-  problem, not from the example, and state it.
 - First use of a scenario that loads SPICE kernels or the World Magnetic Model downloads support
   data to a user cache. CI that runs such scenarios needs the cache or network access.
 - Vizard, Basilisk's visualizer, is a closed-source binary and optional. Nothing here depends on it.

@@ -42,15 +42,8 @@ class Scenario(ABC):
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
-    @classmethod
-    def draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
-        """Keyword overrides drawn from `rng`: each `standard_dispersion` entry, in order, as the
-        keyword's class default plus independent normal samples of that 1-sigma."""
-        draws = {}
-        for name, std in cls.standard_dispersion.items():
-            nominal = np.asarray(getattr(cls, name), dtype=float)
-            draws[name] = nominal + rng.normal(0.0, std, size=nominal.shape)
-        return draws
+    draw = classmethod(Vehicle.draw.__func__)
+    """Placement overrides drawn from `rng`, as `Vehicle.draw` draws a vehicle's."""
 
     def disperse(self, draws: Mapping[str, Any]) -> None:
         """Set each entry of `draws` as this instance's value of that placement attribute, as
@@ -69,8 +62,11 @@ class Scenario(ABC):
         """Place `vehicle` at the scenario's placement; `run` adds it to the simulation.
 
         Raises:
+            RuntimeError: The scenario has already run.
             ValueError: A vehicle is already added; a second one needs a placement of its own.
         """
+        if self._executed:
+            raise RuntimeError("this scenario has already run; build a new one for another run")
         if self.vehicles:
             raise ValueError(
                 f"{type(self).__name__} already holds a vehicle; a second one needs a placement "
@@ -80,8 +76,8 @@ class Scenario(ABC):
 
     @abstractmethod
     def initial_state(self) -> dict[str, np.ndarray]:
-        """The first vehicle's initial condition from the scenario's placement, by key, valid
-        before `run`. A subclass documents its keys.
+        """The initial condition the scenario's placement gives its vehicle, by key, valid before
+        `add` and `run`. A subclass documents its keys.
 
         Raises:
             ValueError: The placement is invalid.
@@ -100,7 +96,7 @@ class Scenario(ABC):
         duration_s: float,
         record_s: float = 10.0,
     ) -> dict[str, tuple[np.ndarray, str]]:
-        """Run the vehicle with one flight-software module and record both.
+        """Run the vehicles with one flight-software module and record them all.
 
         Builds the simulation with one process holding one task at `step_s`, adds each vehicle's
         models and places it, adds `fsw_module` after them, attaches one Basilisk recorder per
