@@ -114,7 +114,7 @@ class ReadingFsw(sysModel.SysModel):
 
 def test_a_plant_is_freed_after_its_case():
     """A case whose flight software holds the plant's reader leaves nothing referencing the
-    plant once the case's own references go, so a campaign's plants do not accumulate."""
+    plant once the case's own references go, so a session's plants do not accumulate."""
     plant = ImuSpacecraft()
     released = weakref.ref(plant)
     fsw = ReadingFsw(plant.readers()["imu"])

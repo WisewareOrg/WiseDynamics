@@ -1,7 +1,7 @@
-"""The registry of Basilisk plants, by the name a campaign and `--sim-spacecraft` use.
+"""The registry of Basilisk plants, by the name `--sim-spacecraft` uses.
 
-A plant joins by subclassing `wise_dynamics.basilisk.Plant` in its own module here and adding one
-entry to `PLANTS`.
+A plant joins as a package here, one class per module (its configuration and its `Plant`
+subclass), and one entry in `PLANTS`.
 """
 
 from collections.abc import Mapping

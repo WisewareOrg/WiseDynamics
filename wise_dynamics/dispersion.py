@@ -4,17 +4,13 @@ import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, ClassVar, Protocol
+from typing import Any
 
 import numpy as np
 
-__all__ = ["DataclassConfig", "Dispersion", "apply_draws"]
+from wise_dynamics.dataclass_config import DataclassConfig
 
-
-class DataclassConfig(Protocol):
-    """Any dataclass instance: the shape of a plant configuration."""
-
-    __dataclass_fields__: ClassVar[dict[str, Any]]
+__all__ = ["Dispersion", "apply_draws"]
 
 
 @dataclass(frozen=True)
@@ -23,7 +19,7 @@ class Dispersion:
 
     Attributes:
         std: Configuration field name to its per-axis 1-sigma, in that field's own units. The
-            mapping's order is the order values are drawn in, which is part of a campaign's
+            mapping's order is the order values are drawn in, which is part of a session's
             reproducibility.
     """
 

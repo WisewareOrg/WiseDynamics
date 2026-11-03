@@ -1,5 +1,5 @@
-"""The WiseDynamics pytest plugin: a pytest session over `--sim-runs` cases is a Monte Carlo
-campaign of one plant.
+"""The WiseDynamics pytest plugin: a pytest session runs one plant over `--sim-runs` Monte Carlo
+cases.
 
 Installing `wise-dynamics` registers this module through its `pytest11` entry point.
 `wise_dynamics/basilisk/README.md` documents its options and fixtures.
@@ -8,73 +8,36 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 import secrets
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
+from wise_dynamics.dataset import Dataset
 from wise_dynamics.dispersion import apply_draws
 from wise_dynamics.provenance import distribution_version
-from wise_dynamics.run_file import Dataset, write_run
+from wise_dynamics.run_file import write_run
+from wise_dynamics.run_writer import RunWriter
+from wise_dynamics.session_options import SessionOptions
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
 
-__all__ = ["RunWriter"]
+__all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 
 
-class RunWriter(Protocol):
-    """The `sim_run_writer` fixture's value: writes the case's run file."""
-
-    def __call__(
-        self, datasets: Mapping[str, Dataset], extra_attrs: Mapping[str, Any] | None = None
-    ) -> Path:
-        """Write `<out_dir>/run_<NNNN>.h5` and return its path.
-
-        Args:
-            datasets: Dataset name to `Dataset`, as `wise_dynamics.write_run` takes them.
-            extra_attrs: Further root attributes, for example the flight software's version as
-                `versions_<distribution>`.
-
-        Raises:
-            ValueError: An entry of `extra_attrs` names one of the case's own root attributes.
-            FileExistsError: The run file already exists.
-        """
-        ...
-
-
-@dataclass(frozen=True)
-class _Options:
-    """The session's `--sim-*` options, parsed and checked once."""
-
-    plant: str
-    seed: int
-    runs: int
-    duration_s: float
-    out_dir: Path
-
-    def __post_init__(self) -> None:
-        if self.seed < 0:
-            raise ValueError(f"--sim-seed must be non-negative, got {self.seed}")
-        if self.runs < 1:
-            raise ValueError(f"--sim-runs must be at least 1, got {self.runs}")
-        if not self.duration_s > 0:
-            raise ValueError(f"--sim-duration-s must be positive, got {self.duration_s}")
-
-
-_OPTIONS = pytest.StashKey[_Options]()
+_OPTIONS = pytest.StashKey[SessionOptions]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the `--sim-*` options."""
-    group = parser.getgroup("wise-dynamics", "WiseDynamics Monte Carlo campaign")
+    group = parser.getgroup("wise-dynamics", "WiseDynamics plant cases")
     group.addoption(
-        "--sim-runs", type=int, default=8, help="number of cases in the campaign (default: 8)"
+        "--sim-runs", type=int, default=8, help="number of cases in the session (default: 8)"
     )
     group.addoption(
         "--sim-out",
@@ -82,7 +45,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="directory the run files are written to (default: a new directory under the "
         "system temporary directory)",
     )
-    group.addoption("--sim-seed", type=int, default=0, help="campaign seed (default: 0)")
+    group.addoption("--sim-seed", type=int, default=0, help="session seed (default: 0)")
     group.addoption(
         "--sim-duration-s",
         type=float,
@@ -115,13 +78,13 @@ def pytest_configure(config: pytest.Config) -> None:
         if stale:
             raise pytest.UsageError(
                 f"--sim-out {out_dir} already holds {_run_files(len(stale))}; "
-                "give each campaign a directory of its own"
+                "give each session a directory of its own"
             )
     else:
         out_dir = Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
 
     try:
-        options = _Options(
+        options = SessionOptions(
             plant=config.getoption("--sim-spacecraft"),
             seed=config.getoption("--sim-seed"),
             runs=config.getoption("--sim-runs"),
@@ -272,7 +235,7 @@ def _noise_seed(seed: int, index: int) -> int:
     return int(noise_stream.generate_state(1)[0])
 
 
-def _root_attrs(options: _Options, index: int, draws: Mapping[str, Any]) -> dict[str, Any]:
+def _root_attrs(options: SessionOptions, index: int, draws: Mapping[str, Any]) -> dict[str, Any]:
     """The root attributes of case `index`'s run file."""
     attrs: dict[str, Any] = {
         "case": index,

@@ -12,7 +12,7 @@ import pytest
 import tests.support
 from wise_dynamics.basilisk import ImuSpacecraft
 
-CAMPAIGN_TEST = """
+SCENARIO_TEST = """
 import numpy as np
 
 from support import StubFsw
@@ -39,7 +39,7 @@ def test_case(sim_duration_s, sim_plant, sim_run_writer):
 
 SHORT = ("--sim-duration-s", "3")
 
-# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every campaign recorded since
+# Case 5 of seed 0, as wise-dynamics recorded it at 04150b2: every set of runs recorded since
 # reproduces only while these hold.
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
@@ -51,17 +51,17 @@ CASE_5_DRAWS = {
 
 
 @pytest.fixture
-def campaign_dir(pytester: pytest.Pytester) -> pytest.Pytester:
-    """A pytester directory holding the stub module and a one-test campaign."""
+def scenario_dir(pytester: pytest.Pytester) -> pytest.Pytester:
+    """A pytester directory holding the stub module and a one-test scenario."""
     pytester.makepyfile(support=Path(tests.support.__file__).read_text())
-    pytester.makepyfile(test_campaign=CAMPAIGN_TEST)
+    pytester.makepyfile(test_scenario=SCENARIO_TEST)
     return pytester
 
 
-def run_campaign(campaign_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
-    """Run the campaign into `out` and return each run file's attributes and datasets."""
-    out_dir = campaign_dir.path / out
-    campaign_dir.runpytest_subprocess("--sim-out", str(out_dir), *SHORT, *args).assert_outcomes(
+def run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
+    """Run the scenario's session into `out` and return each run file's attributes and datasets."""
+    out_dir = scenario_dir.path / out
+    scenario_dir.runpytest_subprocess("--sim-out", str(out_dir), *SHORT, *args).assert_outcomes(
         passed=passed
     )
     runs = []
@@ -95,40 +95,40 @@ def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     return ImuSpacecraft.standard_dispersion.draw(ImuSpacecraft.nominal(), rng)
 
 
-def test_case_seeding_matches_recorded_campaigns(campaign_dir):
-    (run,) = run_campaign(
-        campaign_dir, "out", "--sim-runs", "852", "test_campaign.py::test_case[5]", passed=1
+def test_case_seeding_matches_recorded_runs(scenario_dir):
+    (run,) = run_session(
+        scenario_dir, "out", "--sim-runs", "852", "test_scenario.py::test_case[5]", passed=1
     )
     assert run["name"] == "run_0005.h5"
     assert run["attrs"]["probe_noise_seed"] == CASE_5_NOISE_SEED
     assert {name: value.tolist() for name, value in draws_of(run).items()} == CASE_5_DRAWS
 
 
-def test_a_case_is_the_same_whatever_the_run_count(campaign_dir):
-    (small,) = run_campaign(
-        campaign_dir, "small", "--sim-runs", "8", "test_campaign.py::test_case[5]", passed=1
+def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
+    (small,) = run_session(
+        scenario_dir, "small", "--sim-runs", "8", "test_scenario.py::test_case[5]", passed=1
     )
-    (large,) = run_campaign(
-        campaign_dir, "large", "--sim-runs", "852", "test_campaign.py::test_case[5]", passed=1
+    (large,) = run_session(
+        scenario_dir, "large", "--sim-runs", "852", "test_scenario.py::test_case[5]", passed=1
     )
     assert small["attrs"]["probe_noise_seed"] == large["attrs"]["probe_noise_seed"]
     for name, value in draws_of(small).items():
         assert np.array_equal(value, draws_of(large)[name])
 
 
-def test_noise_seeds_differ_across_cases_and_campaign_seeds(campaign_dir):
+def test_noise_seeds_differ_across_cases_and_session_seeds(scenario_dir):
     seeds = [
         run["attrs"]["probe_noise_seed"]
         for seed in ("0", "1")
-        for run in run_campaign(
-            campaign_dir, f"seed{seed}", "--sim-runs", "2", "--sim-seed", seed, passed=2
+        for run in run_session(
+            scenario_dir, f"seed{seed}", "--sim-runs", "2", "--sim-seed", seed, passed=2
         )
     ]
     assert len(set(seeds)) == 4, seeds
 
 
-def test_each_case_records_the_standard_draws_its_plant_used(campaign_dir):
-    runs = run_campaign(campaign_dir, "out", "--sim-runs", "3", passed=3)
+def test_each_case_records_the_standard_draws_its_plant_used(scenario_dir):
+    runs = run_session(scenario_dir, "out", "--sim-runs", "3", passed=3)
 
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2]
     for index, run in enumerate(runs):
@@ -144,8 +144,8 @@ def test_each_case_records_the_standard_draws_its_plant_used(campaign_dir):
         assert not np.allclose(draws_of(runs[0])[name], draws_of(runs[1])[name])
 
 
-def test_the_run_file_carries_the_case_root_attrs(campaign_dir):
-    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
+def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
+    runs = run_session(scenario_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
 
     run = runs[1]
     attrs = run["attrs"]
@@ -177,10 +177,10 @@ def test_extra_attrs_cannot_replace_a_root_attr(pytester):
     ).assert_outcomes(passed=1)
 
 
-def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
+def test_cases_with_equal_draws_record_distinct_sensor_noise(scenario_dir):
     """With every case at the nominal vehicle, the gyro record differs between cases through
     each case's own noise seed alone."""
-    campaign_dir.makeconftest(
+    scenario_dir.makeconftest(
         """
         import pytest
 
@@ -189,7 +189,7 @@ def test_cases_with_equal_draws_record_distinct_sensor_noise(campaign_dir):
             return {}
         """
     )
-    first, second = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
+    first, second = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     assert not draws_of(first) and not draws_of(second)
     assert np.array_equal(first["sigma_BN"], second["sigma_BN"])
@@ -210,11 +210,11 @@ def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
-def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign_dir):
+def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(scenario_dir):
     """The plant is built from the scenario's draws with the case's own noise seed, and the
     run file records exactly those draws."""
-    campaign_dir.makeconftest(OWN_DRAWS_CONFTEST)
-    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
+    scenario_dir.makeconftest(OWN_DRAWS_CONFTEST)
+    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     for index, run in enumerate(runs):
         draws_stream, noise_stream = case_streams(0, index)
@@ -225,23 +225,23 @@ def test_a_scenario_supplying_its_own_draws_records_what_its_plant_used(campaign
         assert run["attrs"]["probe_noise_seed"] == int(noise_stream.generate_state(1)[0])
 
 
-def test_scenario_draws_differ_between_neighbouring_cases_of_neighbouring_seeds(campaign_dir):
+def test_scenario_draws_differ_between_neighbouring_cases_of_neighbouring_seeds(scenario_dir):
     """Case 1 of seed 0 and case 0 of seed 1, the pair a seed-plus-index scheme collides."""
-    campaign_dir.makeconftest(OWN_DRAWS_CONFTEST)
-    _, case_1_of_seed_0 = run_campaign(campaign_dir, "seed0", "--sim-runs", "2", passed=2)
-    case_0_of_seed_1, _ = run_campaign(
-        campaign_dir, "seed1", "--sim-runs", "2", "--sim-seed", "1", passed=2
+    scenario_dir.makeconftest(OWN_DRAWS_CONFTEST)
+    _, case_1_of_seed_0 = run_session(scenario_dir, "seed0", "--sim-runs", "2", passed=2)
+    case_0_of_seed_1, _ = run_session(
+        scenario_dir, "seed1", "--sim-runs", "2", "--sim-seed", "1", passed=2
     )
     assert not np.allclose(
         draws_of(case_1_of_seed_0)["gyro_bias_P"], draws_of(case_0_of_seed_1)["gyro_bias_P"]
     )
 
 
-def test_a_campaign_reproduces_from_its_seed(campaign_dir):
-    def campaign(seed: str, out: str) -> list[dict]:
-        return run_campaign(campaign_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
+def test_a_session_reproduces_from_its_seed(scenario_dir):
+    def session(seed: str, out: str) -> list[dict]:
+        return run_session(scenario_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
 
-    first, again, other = campaign("3", "a"), campaign("3", "b"), campaign("4", "c")
+    first, again, other = session("3", "a"), session("3", "b"), session("4", "c")
     for case_first, case_again, case_other in zip(first, again, other, strict=True):
         assert case_first["attrs"]["probe_noise_seed"] == case_again["attrs"]["probe_noise_seed"]
         assert case_first["attrs"]["probe_noise_seed"] != case_other["attrs"]["probe_noise_seed"]
@@ -253,8 +253,8 @@ def test_a_campaign_reproduces_from_its_seed(campaign_dir):
             assert not np.array_equal(value, draws_of(case_other)[name]), name
 
 
-def test_consumer_fixtures_with_common_names_leave_the_campaign_unchanged(campaign_dir):
-    campaign_dir.makeconftest(
+def test_consumer_fixtures_with_common_names_leave_the_cases_unchanged(scenario_dir):
+    scenario_dir.makeconftest(
         """
         import numpy as np
         import pytest
@@ -280,30 +280,30 @@ def test_consumer_fixtures_with_common_names_leave_the_campaign_unchanged(campai
             return {}
         """
     )
-    runs = run_campaign(campaign_dir, "out", "--sim-runs", "2", passed=2)
+    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     for index, run in enumerate(runs):
         for name, value in standard_draws(0, index).items():
             assert np.array_equal(draws_of(run)[name], value)
 
 
-def test_workers_share_the_default_out_dir(campaign_dir, monkeypatch):
+def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
     """`TMPDIR` points the default directory into this test's own directory, where it can be
     found."""
-    monkeypatch.setenv("TMPDIR", str(campaign_dir.path))
-    result = campaign_dir.runpytest_subprocess("-n", "2", "--sim-runs", "2", *SHORT)
+    monkeypatch.setenv("TMPDIR", str(scenario_dir.path))
+    result = scenario_dir.runpytest_subprocess("-n", "2", "--sim-runs", "2", *SHORT)
 
     result.assert_outcomes(passed=2)
-    files = list(campaign_dir.path.rglob("run_*.h5"))
+    files = list(scenario_dir.path.rglob("run_*.h5"))
     assert len(files) == 2
     assert len({path.parent for path in files}) == 1
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {files[0].parent}"])
 
 
-def test_workers_write_to_the_relative_out_dir_the_controller_resolved(campaign_dir):
+def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_dir):
     """Each worker changes directory before the plugin configures it, and `--sim-out` is
     relative; the run files still land in the one directory the controller resolved."""
-    campaign_dir.makeconftest(
+    scenario_dir.makeconftest(
         """
         import os
         import pytest
@@ -316,22 +316,22 @@ def test_workers_write_to_the_relative_out_dir_the_controller_resolved(campaign_
                 os.chdir(worker_dir)
         """
     )
-    campaign_dir.runpytest_subprocess(
+    scenario_dir.runpytest_subprocess(
         "-n", "2", "--sim-runs", "2", "--sim-out", "out", *SHORT
     ).assert_outcomes(passed=2)
 
-    in_out_dir = sorted((campaign_dir.path / "out").glob("run_*.h5"))
+    in_out_dir = sorted((scenario_dir.path / "out").glob("run_*.h5"))
     assert len(in_out_dir) == 2
-    assert sorted(campaign_dir.path.rglob("run_*.h5")) == in_out_dir
+    assert sorted(scenario_dir.path.rglob("run_*.h5")) == in_out_dir
 
 
-def test_each_case_runs_for_sim_duration_s(campaign_dir):
-    (run,) = run_campaign(campaign_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
+def test_each_case_runs_for_sim_duration_s(scenario_dir):
+    (run,) = run_session(scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
     assert run["t_s"][-1] == 4.0
 
 
-def test_a_campaign_runs_without_xdist(campaign_dir):
-    runs = run_campaign(campaign_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
+def test_a_session_runs_without_xdist(scenario_dir):
+    runs = run_session(scenario_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
     assert len(runs) == 1
 
 

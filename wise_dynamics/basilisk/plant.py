@@ -2,46 +2,18 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol
+from typing import ClassVar
 
 import numpy as np
 from Basilisk.utilities import SimulationBaseClass, macros
 
-from wise_dynamics.dispersion import DataclassConfig, Dispersion
+from wise_dynamics.basilisk.plant_config import PlantConfig
+from wise_dynamics.basilisk.recorded_field import RecordedField
+from wise_dynamics.basilisk.swig import Message, MessageReader, SysModel
+from wise_dynamics.dispersion import Dispersion
 from wise_dynamics.provenance import distribution_version
 
-__all__ = ["Plant", "PlantConfig", "RecordedField"]
-
-# Basilisk's SWIG-generated message, reader and module classes are typed as `Any`.
-type Message = Any
-type MessageReader = Any
-type SysModel = Any
-
-
-@dataclass(frozen=True)
-class RecordedField:
-    """One field of one recorded message, and the units it is expressed in.
-
-    Attributes:
-        role: The message's role, a key of `Plant.truth_messages()` or of the flight software's
-            outputs handed to `run_case`.
-        field: The payload field the recorder exposes, for example `"r_BN_N"`.
-        units: The units string a run file stores with it, for example `"m"`.
-    """
-
-    role: str
-    field: str
-    units: str
-
-
-class PlantConfig(DataclassConfig, Protocol):
-    """A plant's configuration: a dataclass carrying the plant's step."""
-
-    @property
-    def step_s(self) -> float:
-        """The dynamics and sensor step, in seconds."""
-        ...
+__all__ = ["Plant"]
 
 
 class Plant[ConfigT: PlantConfig](ABC):

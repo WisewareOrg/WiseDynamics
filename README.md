@@ -1,7 +1,7 @@
 # WiseDynamics
 
 WiseDynamics is a library of spacecraft plant models for Wiseware's GNC work, with a one-case
-runner, an HDF5 run writer and a pytest plugin for Monte Carlo campaigns. Flight software pins a
+runner, an HDF5 run writer and a pytest plugin for Monte Carlo runs as pytest sessions. Flight software pins a
 tagged release and runs its own scenario tests against these plants. Basilisk is the first
 simulation host ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)).
 
@@ -17,7 +17,8 @@ sim = ["wise-dynamics"]
 wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0.1.0" }
 ```
 
-Installing it registers the pytest plugin. A campaign is the consumer's scenario test at scale:
+Installing it registers the pytest plugin. A Monte Carlo run is the consumer's scenario test,
+parametrized over `--sim-runs` cases in one pytest session:
 
 ```sh
 pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR

@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 
+from tests.other_mu_spacecraft import OtherMuSpacecraft
 from tests.support import EARTH_MU_M3_S2, run_with_stub
 from wise_dynamics.basilisk import ImuSpacecraft, OrbitElements
 
@@ -61,11 +62,8 @@ def test_the_orbit_follows_the_class_mu():
     """A plant whose class `mu` differs from Basilisk's Earth default moves on the two-body orbit
     of its own `mu`."""
 
-    class OtherMu(ImuSpacecraft):
-        mu = EARTH_MU_M3_S2 * 1.001
-
     duration_s = 1000.0
-    truth = run_with_stub(OtherMu(), duration_s=duration_s, record_s=100.0)["truth"]
-    r_N, v_N = kepler_state(OtherMu.nominal().orbit, OtherMu.mu, duration_s)
+    truth = run_with_stub(OtherMuSpacecraft(), duration_s=duration_s, record_s=100.0)["truth"]
+    r_N, v_N = kepler_state(OtherMuSpacecraft.nominal().orbit, OtherMuSpacecraft.mu, duration_s)
     assert np.linalg.norm(np.array(truth.r_BN_N)[-1] - r_N) < POSITION_TOL_M
     assert np.linalg.norm(np.array(truth.v_BN_N)[-1] - v_N) < VELOCITY_TOL_M_S

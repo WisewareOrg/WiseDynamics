@@ -8,7 +8,7 @@ from wise_dynamics import Dataset, write_run
 
 
 def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
-    path = tmp_path / "campaign" / "nested" / "run_0000.h5"
+    path = tmp_path / "session" / "nested" / "run_0000.h5"
     written = write_run(
         path,
         {

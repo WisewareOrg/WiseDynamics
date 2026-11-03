@@ -1,28 +1,16 @@
-"""One HDF5 file per simulated case: unit-tagged float64 datasets plus root attributes."""
+"""Writes one HDF5 file per simulated case: unit-tagged float64 datasets plus root attributes."""
 
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 import h5py
 import numpy as np
 
-__all__ = ["Dataset", "write_run"]
+from wise_dynamics.dataset import Dataset
 
-
-class Dataset(NamedTuple):
-    """One array destined for a run file, with the units it is expressed in.
-
-    Attributes:
-        data: The values; written as float64, in whatever shape they have (for example `(N,)`
-            for a time vector or `(N, 3)` for a vector history).
-        units: The units string stored as the dataset's `units` attribute, for example `"s"`,
-            `"m"`, `"rad/s"` or `"MRP"`.
-    """
-
-    data: Any
-    units: str
+__all__ = ["write_run"]
 
 
 def write_run(

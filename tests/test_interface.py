@@ -2,6 +2,7 @@
 
 import inspect
 
+from tests.other_mu_spacecraft import OtherMuSpacecraft
 from tests.support import EARTH_MU_M3_S2
 from wise_dynamics.basilisk import PLANTS, ImuSpacecraft, Plant
 
@@ -30,12 +31,9 @@ def test_the_gravity_model_takes_mu_from_the_class():
     """A subclass with a different `mu` builds a gravity body with that `mu`, which Basilisk's
     own Earth default differs from."""
 
-    class OtherMu(ImuSpacecraft):
-        mu = EARTH_MU_M3_S2 * 1.001
-
-    plant = OtherMu()
+    plant = OtherMuSpacecraft()
     (earth,) = plant.spacecraft.gravField.gravBodies
-    assert earth.mu == OtherMu.mu
+    assert earth.mu == OtherMuSpacecraft.mu
 
 
 def test_recorded_fields_name_the_run_file_datasets_with_their_units():

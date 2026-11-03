@@ -1,24 +1,39 @@
 # wise_dynamics.basilisk
 
 Basilisk spacecraft plants, the one-case runner, the run-file writer, and the pytest plugin
-whose session over `--sim-runs` cases is a Monte Carlo campaign. Basilisk is the first
+whose session over `--sim-runs` cases is a Monte Carlo run. Basilisk is the first
 simulation host by ADR 0001 rev 1. This file is the reference for the `wise-dynamics`
 distribution; each symbol's docstring carries its full contract.
 
 ## Modules
 
+Each module holds one class, or the functions of one concern, and is named for what it holds.
+
 | module | holds |
 |---|---|
-| `wise_dynamics/dispersion.py` | `Dispersion`, `apply_draws`, `DataclassConfig`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/dataclass_config.py` | `DataclassConfig`: the shape of any dataclass instance |
+| `wise_dynamics/dispersion.py` | `Dispersion` and its inverse `apply_draws`: per-case normal dispersion of a configuration's 3-vector fields |
+| `wise_dynamics/dataset.py` | `Dataset`: one array with its units |
+| `wise_dynamics/run_file.py` | `write_run`: one HDF5 run file |
 | `wise_dynamics/provenance.py` | `distribution_version`: the installed version a run file records |
-| `wise_dynamics/run_file.py` | `Dataset` and `write_run`: one HDF5 run file |
-| `wise_dynamics/pytest_plugin.py` | the pytest plugin: `--sim-*` options, `sim_*` fixtures, `RunWriter` |
-| `wise_dynamics/basilisk/plant.py` | `Plant`, the contract every plant meets; `PlantConfig`; `RecordedField` |
-| `wise_dynamics/basilisk/runner.py` | `run_case` and `Recording` |
-| `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one module per plant |
+| `wise_dynamics/session_options.py` | `SessionOptions`: a pytest session's parsed `--sim-*` options |
+| `wise_dynamics/run_writer.py` | `RunWriter`: the type of the `sim_run_writer` fixture's value |
+| `wise_dynamics/pytest_plugin.py` | the pytest plugin's hooks and `sim_*` fixtures |
+| `wise_dynamics/basilisk/plant.py` | `Plant`: the contract every plant meets |
+| `wise_dynamics/basilisk/plant_config.py` | `PlantConfig`: the shape of a plant's configuration |
+| `wise_dynamics/basilisk/recorded_field.py` | `RecordedField`: one recorded message field with its units |
+| `wise_dynamics/basilisk/recording.py` | `Recording`: one case's recorders and the datasets they hold |
+| `wise_dynamics/basilisk/runner.py` | `run_case`: runs one case |
+| `wise_dynamics/basilisk/orbit_elements.py` | `OrbitElements`: an initial orbit as classical elements |
+| `wise_dynamics/basilisk/rigid_hub.py` | `RigidHub`: a hub's mass and inertia |
+| `wise_dynamics/basilisk/vectors.py` | `Vector3`, `Matrix3` and `column()`: configuration vectors and Basilisk's column form |
+| `wise_dynamics/basilisk/swig.py` | type aliases for Basilisk's SWIG classes |
+| `wise_dynamics/basilisk/plants/` | `PLANTS`, the registry by name, and one package per plant |
+| `wise_dynamics/basilisk/plants/imu_spacecraft/` | `config.py`: `ImuSpacecraftConfig`; `plant.py`: `ImuSpacecraft` |
 
 Consumers import from the two packages, `wise_dynamics` and `wise_dynamics.basilisk`; each
-declares its public names in `__all__`.
+declares its public names in `__all__`, and those import paths stay the same whichever module a
+name lives in.
 
 ## Plants
 
@@ -143,7 +158,7 @@ and leaves no file when a write fails. The plugin's `sim_run_writer` writes a ca
 | attribute | value |
 |---|---|
 | `case` | the case number |
-| `seed` | the campaign seed |
+| `seed` | the session seed |
 | `created_utc` | ISO 8601 UTC time of writing, to the second |
 | `producer` | `wise_dynamics.basilisk` |
 | `versions_bsk` | the installed Basilisk version |
@@ -163,9 +178,9 @@ when pytest collects a test that uses `sim_case_index`, directly or through anot
 
 | option | default | meaning |
 |---|---|---|
-| `--sim-runs` | 8 | cases in the campaign, at least 1 |
+| `--sim-runs` | 8 | cases in the session, at least 1 |
 | `--sim-out` | a new directory under the system temporary directory | where run files go; a directory already holding run files is refused |
-| `--sim-seed` | 0 | campaign seed |
+| `--sim-seed` | 0 | session seed |
 | `--sim-duration-s` | 5700 | simulated seconds per case |
 | `--sim-spacecraft` | `imu_spacecraft` | the plant's name in `PLANTS` |
 
@@ -223,7 +238,8 @@ def test_case(sim_duration_s, sim_plant, sim_run_writer):
     sim_run_writer(datasets, extra_attrs={"versions_flight_software": FSW_VERSION})
 ```
 
-A campaign is that test at scale: `pytest <scenario> -n 8 --sim-runs 852 --sim-out DIR`.
+A Monte Carlo run is that test over many cases in one session: `pytest <scenario> -n 8
+--sim-runs 852 --sim-out DIR`.
 
 ## Stable interface
 
