@@ -7,8 +7,10 @@ vehicles. A pytest plugin exposes them to a consumer's tests: for each case it b
 a scenario from the session seed, and the case writes one HDF5 run file. WiseDynamics holds no
 flight software and does no analysis of the run files.
 
-- Vehicles: `imu_spacecraft`, a rigid spacecraft with a gyro and an accelerometer.
-- Scenarios: `leo500`, a 500 km, 45 degree orbit about a point-mass Earth.
+Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
+`wise_dynamics/basilisk/scenarios/`, each registered by name in its package's `__init__.py`. A
+consumer picks one of each with `--sim-vehicle` and `--sim-scenario`, and reads its parameters from
+its class attributes and class docstring.
 
 ## Using it
 
@@ -31,8 +33,8 @@ pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR
 ```
 
 [`wise_dynamics/basilisk/README.md`](wise_dynamics/basilisk/README.md) is the reference: the
-vehicles and scenarios and their parameters, the plugin's options, fixtures and case seeding,
-and a worked example.
+modules, what a vehicle and a scenario are, the plugin's options, fixtures and case seeding, and a
+worked example.
 
 WiseDynamics depends on no flight software; flight software depends on WiseDynamics.
 

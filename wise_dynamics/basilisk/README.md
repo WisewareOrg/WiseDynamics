@@ -14,64 +14,35 @@ raises.
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's options and `sim_*` fixtures |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the interface every vehicle meets, its draws and its run file |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the interface every scenario meets, and its one run |
-| `wise_dynamics/basilisk/vehicles/__init__.py` | `VEHICLES`: the vehicles by name |
-| `wise_dynamics/basilisk/vehicles/imu_spacecraft.py` | `ImuSpacecraft`: the IMU spacecraft |
-| `wise_dynamics/basilisk/scenarios/__init__.py` | `SCENARIOS`: the scenarios by name |
-| `wise_dynamics/basilisk/scenarios/leo500.py` | `Leo500`: point-mass Earth, 500 km, 45 degrees |
+| `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class; `VEHICLES` in its `__init__.py` maps each name to its class |
+| `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, the module named for the class; `SCENARIOS` in its `__init__.py` maps each name to its class |
 
-Consumers import from `wise_dynamics.basilisk`. A vehicle keyword left out takes the class
-attribute of the same name when the vehicle is built, and a scenario is its class attributes. So
-`ImuSpacecraft.mass_kg` and `Leo500.step_s` read the nominal values without building anything,
-and a subclass that overrides an attribute is built with its value.
+Consumers import from `wise_dynamics.basilisk`. A session picks one vehicle with `--sim-vehicle`
+and one scenario with `--sim-scenario`, each a name in its registry.
 
-## Vehicle `imu_spacecraft`: `ImuSpacecraft(**keywords)`
+## Vehicles
 
-A rigid hub with one IMU at its centre of mass and identity mounting, so its platform frame is the
-body frame.
+A vehicle is a `Vehicle` subclass: its parameters are keywords, each defaulting to the class
+attribute of the same name, read when the vehicle is built, so a subclass that overrides an
+attribute is built with its value. Its class attributes are its nominal values, and its class
+docstring gives each parameter's units and frame. `standard_dispersion` maps a parameter to its
+per-axis 1-sigma, and `draw(rng)` returns that dispersion, in order, as nominal plus normal samples
+from the numpy `Generator`. Every vehicle takes `noise_seed`, which the plugin sets per case.
 
-| keyword | units, frame | nominal | standard dispersion, 1-sigma per axis |
-|---|---|---|---|
-| `mass_kg` | kg | 750 | |
-| `inertia_B_kg_m2` | kg m^2, about the centre of mass, body axes | diag(900, 800, 600) | |
-| `gyro_bias_P_rad_s` | rad/s, IMU platform frame | (1e-4, -2e-4, 5e-5) | 1e-4 rad/s |
-| `accel_bias_P_m_s2` | m/s^2, IMU platform frame | (1e-4, -5e-5, 2e-4) | 1e-4 m/s^2 |
-| `gyro_noise_std_rad_s` | rad/s, per-sample 1-sigma per axis | 5e-5 | |
-| `accel_noise_std_m_s2` | m/s^2, per-sample 1-sigma per axis | 5e-5 | |
-| `noise_seed` | seed of the IMU's white-noise generator | 0 | |
-
-`ImuSpacecraft.draw(rng)` returns the standard dispersion's keywords, in table order, as nominal
-plus normal samples from the numpy `Generator`. `readers()` holds role `imu`, an
-`IMUSensorMsgReader`. `recorded_fields()` maps each dataset to its `(message, field, units)`:
-`truth/sigma_BN` (MRP), `truth/omega_BN_B` (rad/s), `truth/r_N` (m, in N), `truth/v_N` (m/s, in
-N), `imu/gyro_P` (rad/s) and `imu/accel_P` (m/s^2). `truth/r_N` and `truth/v_N` are the
-body-frame origin's state, which is the centre of mass's state because the hub's centre of mass
-sits at that origin. `write_run_file(path, datasets, attrs=None)` writes one HDF5 file, each
+A vehicle lists its Basilisk modules in `models()`, hands out sensor readers by role in
+`readers()`, and declares what it records in `recorded_fields()`: dataset path to
+`(message, field, units)`. `write_run_file(path, datasets, attrs=None)` writes one HDF5 file, each
 dataset float64 with a `units` attribute.
 
-## Scenario `leo500`: `Leo500()`
+## Scenarios
 
-Basilisk's point-mass Earth, `Leo500.mu_m3_s2` = `{"earth": 3.986004360e14}`, with the vehicle
-tumbling on a classical-element orbit. The inertial frame N is Earth-centred and non-rotating,
-with no epoch, since point-mass gravity has nothing that depends on time. The constructor takes
-no arguments; these class attributes define the scenario:
+A scenario is a `Scenario` subclass whose class attributes are its environment and its
+placement, with units and frames in its class docstring; its constructor takes no arguments.
+`standard_dispersion` and `draw(rng)` are as for a vehicle, and `disperse(draws)` sets drawn
+values on one instance, refusing any attribute outside the standard dispersion. A scenario takes
+one vehicle: `add(vehicle)` places it at the scenario's placement, and a second `add` is refused.
+`initial_state()` returns the placement the vehicle starts from, valid before `add` and `run`.
 
-| attribute | units, frame | value | standard dispersion, 1-sigma per axis |
-|---|---|---|---|
-| `semi_major_axis_m` | m | 6871e3 | |
-| `eccentricity` | - | 0.0001 | |
-| `inclination_rad` | rad | 45 deg | |
-| `raan_rad` | rad | 48.2 deg | |
-| `arg_periapsis_rad` | rad | 347.8 deg | |
-| `true_anomaly_rad` | rad, at t = 0 | 85.3 deg | |
-| `sigma0_BN` | MRP, body relative to N | (0.1, 0.2, -0.3) | 0.01 |
-| `omega0_BN_B_rad_s` | rad/s, body relative to N, body axes | 1 deg/s per axis | 0.2 deg/s |
-| `step_s` | s, integration and sensor step | 0.02 (50 Hz) | |
-
-`Leo500.draw(rng)` draws its standard dispersion as a vehicle's `draw` does, and
-`disperse(draws)` sets those values on one instance; any other attribute is refused.
-A scenario takes one vehicle: `add(vehicle)` places it at the scenario's placement, and a second
-`add` is refused. `initial_state()` returns the vehicle's `sigma0_BN` (MRP),
-`r0_N` (m, in N), `v0_N` (m/s, in N) and `omega0_BN_B` (rad/s), valid before the run.
 `run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` builds the simulation and runs once.
 `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
 `recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to

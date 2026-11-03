@@ -20,7 +20,8 @@ type Vector3 = tuple[float, float, float]
 
 
 class ImuSpacecraft(Vehicle):
-    """A rigid spacecraft with one IMU.
+    """A rigid hub with one IMU at its centre of mass and identity mounting, so the IMU platform
+    frame P is the body frame B.
 
     A keyword left at `None` takes the class attribute of the same name, read when the vehicle is
     built, so a consumer reads the nominal vehicle without building one and a subclass that
@@ -39,6 +40,8 @@ class ImuSpacecraft(Vehicle):
         noise_seed: Seed of the IMU's white-noise generator.
 
     Attributes:
+        standard_dispersion: The per-axis 1-sigma of `gyro_bias_P_rad_s`, in rad/s, and of
+            `accel_bias_P_m_s2`, in m/s^2.
         spacecraft: The Basilisk `Spacecraft` hub.
         imu: The Basilisk `ImuSensor`.
     """
