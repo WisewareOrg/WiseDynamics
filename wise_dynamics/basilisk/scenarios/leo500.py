@@ -35,8 +35,7 @@ class Leo500(Scenario):
         true_anomaly_rad: True anomaly at t = 0, in radians.
         sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
-        step_s: The dynamics task's period, the integration and sensor step, in seconds.
-        fsw_step_s: The flight-software task's period, in seconds.
+        step_s: The integration and sensor step, in seconds.
     """
 
     mu_m3_s2: ClassVar[dict[str, float]] = {"earth": 3.986004360e14}
@@ -54,7 +53,6 @@ class Leo500(Scenario):
     sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     step_s: float = 0.02
-    fsw_step_s: float = 1.0
 
     def initial_state(self) -> dict[str, np.ndarray]:
         """The initial condition the placement gives the vehicle, each a float array of shape
