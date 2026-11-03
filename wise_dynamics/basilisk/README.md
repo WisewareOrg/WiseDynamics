@@ -95,7 +95,9 @@ is and reruns alone: `pytest <test file> --sim-seed S --sim-runs N "<test file>:
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_vehicle.readers()` and starts from `sim_scenario.initial_state()`; `pytest <test file> -n 8
---sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run:
+--sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run. `run` records only the vehicle's
+fields; flight software that keeps its own outputs adds them to `datasets` as further
+`path: (array, units)` entries before `sim_run_file` writes the file:
 
 ```python
 from Basilisk.fswAlgorithms import inertial3D
