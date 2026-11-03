@@ -16,47 +16,69 @@ _TASK = "scenario_task"
 
 
 class Scenario(ABC):
-    """A prebuilt operating environment, the vehicles placed in it, and the Basilisk simulation
+    """A prebuilt operating environment, the vehicle placed in it, and the Basilisk simulation
     that runs them once.
 
-    A subclass defines its environment and placement as class attributes and takes no
-    constructor arguments. `disperse` overrides the placement of one instance, and `add` places a
-    vehicle. `run` builds the simulation: it checks the placement through `initial_state` before
-    anything is changed, adds each vehicle's models, and has `_place` attach the gravity bodies and
-    write the initial state onto the vehicle's `spacecraft`.
+    A subclass defines its environment, its placement and its vehicle class as class attributes
+    and takes no constructor arguments. A scenario builds its vehicle and adds it; `disperse`
+    overrides the placement of one instance and rebuilds its vehicle from drawn values, and `add`
+    places a vehicle. `run` builds the simulation: it checks the placement through `initial_state`
+    before anything is changed, adds each vehicle's models, and has `_place` attach the gravity
+    bodies and write the initial state onto the vehicle's `spacecraft`.
 
     Attributes:
         mu_m3_s2: Gravity body name to its gravitational parameter, in m^3/s^2.
         standard_dispersion: Placement attribute to its per-axis 1-sigma, drawn in this order by
             `draw`.
         step_s: The integration and sensor step, in seconds.
+        vehicle_type: The class of the vehicle the scenario builds.
+        vehicle: The vehicle the scenario built.
         vehicles: The vehicles added, in order.
     """
 
     mu_m3_s2: ClassVar[Mapping[str, float]]
     standard_dispersion: ClassVar[Mapping[str, float]]
     step_s: float
+    vehicle_type: ClassVar[type[Vehicle]]
 
     def __init__(self) -> None:
         self.vehicles: list[Vehicle] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
+        self.vehicle = self.vehicle_type()
+        self.add(self.vehicle)
 
-    draw = classmethod(Vehicle.draw.__func__)
-    """Placement overrides drawn from `rng`, as `Vehicle.draw` draws a vehicle's."""
+    @classmethod
+    def draw(cls, rng: np.random.Generator) -> dict[str, np.ndarray]:
+        """Overrides drawn from `rng`: the scenario's `standard_dispersion` entries, then its
+        vehicle class's, each drawn as `Vehicle.draw` draws."""
+        return {**Vehicle.draw.__func__(cls, rng), **cls.vehicle_type.draw(rng)}
 
-    def disperse(self, draws: Mapping[str, Any]) -> None:
-        """Set each entry of `draws` as this instance's value of that placement attribute, as
-        `draw` returns them.
+    def disperse(self, draws: Mapping[str, Any], *, noise_seed: int | None = None) -> None:
+        """Apply `draws`, as `draw` returns them: set each placement entry on this instance, and
+        rebuild the vehicle with the vehicle entries and `noise_seed` as constructor keywords.
+
+        Args:
+            draws: Placement or vehicle `standard_dispersion` name to its value.
+            noise_seed: The rebuilt vehicle's sensor-noise seed; `None` keeps its class default.
 
         Raises:
-            ValueError: An entry names no `standard_dispersion` attribute.
+            RuntimeError: The scenario has already run.
+            ValueError: An entry names neither the scenario's nor its vehicle class's
+                `standard_dispersion`; nothing is changed.
         """
-        unknown = sorted(set(draws) - set(self.standard_dispersion))
+        if self._executed:
+            raise RuntimeError("this scenario has already run; build a new one for another run")
+        placement = set(self.standard_dispersion)
+        unknown = sorted(set(draws) - placement - set(self.vehicle_type.standard_dispersion))
         if unknown:
             raise ValueError(f"{type(self).__name__} does not disperse {unknown}")
-        for name, value in draws.items():
-            setattr(self, name, value)
+        vehicle_draws = {name: value for name, value in draws.items() if name not in placement}
+        vehicle = self.vehicle_type(**vehicle_draws, noise_seed=noise_seed)
+        for name in placement & set(draws):
+            setattr(self, name, draws[name])
+        self.vehicles[self.vehicles.index(self.vehicle)] = vehicle
+        self.vehicle = vehicle
 
     def add(self, vehicle: Vehicle) -> None:
         """Place `vehicle` at the scenario's placement; `run` adds it to the simulation.
@@ -113,15 +135,13 @@ class Scenario(ABC):
             then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples.
 
         Raises:
-            ValueError: No vehicle is added, `step_s`, `record_s` or `duration_s` is not positive,
-                an `fsw_fields` path is `t_s` or a vehicle dataset path, a recorded field is
-                absent from its message, or the placement is invalid.
+            ValueError: `step_s`, `record_s` or `duration_s` is not positive, an `fsw_fields` path
+                is `t_s` or a vehicle dataset path, a recorded field is absent from its message, or
+                the placement is invalid.
             RuntimeError: The scenario has already run.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
-        if not self.vehicles:
-            raise ValueError("add a vehicle before running the scenario")
         if not self.step_s > 0:
             raise ValueError(f"step must be positive, got {self.step_s} s")
         if not record_s > 0:

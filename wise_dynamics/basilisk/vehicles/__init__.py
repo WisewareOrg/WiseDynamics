@@ -1,12 +1,2 @@
-"""The registry of Basilisk vehicles, by the name `--sim-vehicle` uses.
-
-A vehicle joins as a module here, `<vehicle>.py` holding its `Vehicle` subclass, and one entry in
-`VEHICLES`.
-"""
-
-from wise_dynamics.basilisk.vehicle import Vehicle
-from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
-
-__all__ = ["VEHICLES"]
-
-VEHICLES: dict[str, type[Vehicle]] = {"imu_spacecraft": ImuSpacecraft}
+"""Basilisk vehicles: each module holds one `Vehicle` subclass and is named for it. A scenario
+names the vehicle class it builds."""

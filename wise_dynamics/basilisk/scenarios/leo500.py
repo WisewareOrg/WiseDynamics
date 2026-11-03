@@ -12,18 +12,21 @@ from Basilisk.utilities.macros import D2R
 
 from wise_dynamics.basilisk.scenario import Scenario
 from wise_dynamics.basilisk.vehicle import Vehicle
+from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["Leo500"]
 
 
 class Leo500(Scenario):
-    """A vehicle tumbling on a classical-element orbit about a point-mass Earth.
+    """An `ImuSpacecraft` tumbling on a classical-element orbit about a point-mass Earth.
 
     The inertial frame N is Earth-centred, with no rotation and no epoch: point-mass gravity has
     nothing that depends on time. The class attributes define the scenario; `disperse` overrides
-    `sigma0_BN` and `omega0_BN_B_rad_s` on one instance.
+    `sigma0_BN` and `omega0_BN_B_rad_s` on one instance and rebuilds its vehicle with the drawn
+    IMU biases.
 
     Attributes:
+        vehicle_type: `ImuSpacecraft`, the vehicle the scenario builds.
         mu_m3_s2: Earth's gravitational parameter, in m^3/s^2, keyed `"earth"`.
         standard_dispersion: The per-axis 1-sigma of `sigma0_BN`, a dimensionless MRP, and of
             `omega0_BN_B_rad_s`, in rad/s.
@@ -38,6 +41,7 @@ class Leo500(Scenario):
         step_s: The integration and sensor step, in seconds.
     """
 
+    vehicle_type: ClassVar[type[Vehicle]] = ImuSpacecraft
     mu_m3_s2: ClassVar[dict[str, float]] = {"earth": 3.986004360e14}
     standard_dispersion: ClassVar[dict[str, float]] = {
         "sigma0_BN": 0.01,

@@ -87,11 +87,9 @@ def test_draw_adds_normal_samples_to_the_defaults_in_dispersion_order():
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():
-    vehicle = ImuSpacecraft()
-    reader = vehicle.readers()["imu"]
-    assert reader.isLinked()
     scenario = Leo500()
-    scenario.add(vehicle)
+    reader = scenario.vehicle.readers()["imu"]
+    assert reader.isLinked()
     datasets = scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=20.0)
     gyro, _ = datasets["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])

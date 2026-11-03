@@ -18,8 +18,8 @@ class Vehicle(ABC):
     A subclass takes its parameters as keywords that default to `None`, meaning the class
     attribute of the same name read when the vehicle is built. It builds its Basilisk objects and
     lists them in `models()`; a `Scenario` adds them to its task and places `spacecraft`. Every
-    vehicle takes `noise_seed: int`, the seed of its sensor noise, which the pytest plugin sets for
-    each case.
+    vehicle takes `noise_seed: int`, the seed of its sensor noise, which a scenario's `disperse`
+    passes on and the pytest plugin sets for each case.
 
     Attributes:
         standard_dispersion: Keyword to its per-axis 1-sigma, drawn in this order by `draw`.

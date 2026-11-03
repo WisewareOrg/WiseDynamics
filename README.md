@@ -2,15 +2,16 @@
 
 WiseDynamics is a thin wrapper over Basilisk
 ([ADR 0001 rev 1](docs/decisions/0001-basilisk-simulation-host.md)). It provides reusable
-vehicles and prebuilt scenarios, each scenario an operating environment with the placement of its
-vehicles. A pytest plugin exposes them to a consumer's tests: for each case it builds a vehicle and
-a scenario from the session seed, and the case writes one HDF5 run file. WiseDynamics holds no
-flight software and does no analysis of the run files.
+vehicles and prebuilt scenarios, each scenario an operating environment that builds and places
+its vehicle. A pytest plugin exposes them to a consumer's tests: for each case it builds a
+scenario, with its vehicle, from the session seed, and the case writes one HDF5 run file.
+WiseDynamics holds no flight software and does no analysis of the run files.
 
 Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
-`wise_dynamics/basilisk/scenarios/`, each registered by name in its package's `__init__.py`. A
-consumer picks one of each with `--sim-vehicle` and `--sim-scenario`, and reads its parameters from
-its class attributes and class docstring.
+`wise_dynamics/basilisk/scenarios/`, where `SCENARIOS` in the package's `__init__.py` registers
+each scenario by name. A scenario names its vehicle class. A consumer picks a scenario with
+`--sim-scenario`, reaches its vehicle as `scenario.vehicle`, and reads the parameters of either
+from its class attributes and class docstring.
 
 ## Using it
 

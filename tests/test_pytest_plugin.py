@@ -18,15 +18,17 @@ import numpy as np
 from Basilisk.fswAlgorithms import inertial3D
 
 
-def test_case(sim_case_index, sim_duration_s, sim_vehicle, sim_scenario, sim_run_file):
+def test_case(sim_case_index, sim_duration_s, sim_scenario, sim_run_file):
     datasets = sim_scenario.run(
         inertial3D.inertial3D(), fsw_fields={}, duration_s=sim_duration_s, record_s=1.0
     )
     path = sim_run_file(
         datasets,
         {
-            "probe_noise_seed": sim_vehicle.imu.RNGSeed,
-            "probe_gyro_bias_P_rad_s": np.array(sim_vehicle.imu.senRotBias, dtype=float).flatten(),
+            "probe_noise_seed": sim_scenario.vehicle.imu.RNGSeed,
+            "probe_gyro_bias_P_rad_s": np.array(
+                sim_scenario.vehicle.imu.senRotBias, dtype=float
+            ).flatten(),
         },
     )
     assert path.name == f"run_{sim_case_index:04d}.h5"
@@ -206,35 +208,27 @@ def test_a_consumer_supplying_its_own_draws_records_what_its_case_used(scenario_
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1e-3, 2e-3, 3e-3])
 
 
-def test_the_scenario_and_vehicle_options_select_registered_classes(scenario_dir):
-    """A second scenario and vehicle, registered by the consumer's conftest, are the ones the
-    session builds when the options name them."""
+def test_the_scenario_option_selects_a_registered_scenario_and_its_vehicle(scenario_dir):
+    """A second scenario, registered by the consumer's conftest with a vehicle class of its own,
+    is the scenario and vehicle the session builds when `--sim-scenario` names it."""
     scenario_dir.makeconftest(
         """
-        from wise_dynamics.basilisk import SCENARIOS, VEHICLES, ImuSpacecraft, Leo500
-
-        class Flipped(Leo500):
-            sigma0_BN = (-0.1, -0.2, 0.3)
-            standard_dispersion = {}
+        from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft, Leo500
 
         class Biased(ImuSpacecraft):
             gyro_bias_P_rad_s = (1.0, 2.0, 3.0)
             standard_dispersion = {}
 
+        class Flipped(Leo500):
+            sigma0_BN = (-0.1, -0.2, 0.3)
+            standard_dispersion = {}
+            vehicle_type = Biased
+
         SCENARIOS["flipped"] = Flipped
-        VEHICLES["biased"] = Biased
         """
     )
     (run,) = _run_session(
-        scenario_dir,
-        "out",
-        "--sim-runs",
-        "1",
-        "--sim-scenario",
-        "flipped",
-        "--sim-vehicle",
-        "biased",
-        passed=1,
+        scenario_dir, "out", "--sim-runs", "1", "--sim-scenario", "flipped", passed=1
     )
     assert np.array_equal(run["sigma_BN"][0], [-0.1, -0.2, 0.3])
     assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1.0, 2.0, 3.0])
@@ -333,18 +327,15 @@ def test_out_of_range_options_are_usage_errors(pytester, option, value, message)
     result.stderr.fnmatch_lines([f"ERROR: wise-dynamics: {message}"])
 
 
-@pytest.mark.parametrize(
-    ("option", "kind", "known"),
-    [("--sim-vehicle", "vehicle", "imu_spacecraft"), ("--sim-scenario", "scenario", "leo500")],
-)
-def test_an_unknown_name_fails_collection_naming_it_and_the_known_ones(
-    pytester, option, kind, known
-):
+def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(pytester):
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess(option, "bogus")
+    result = pytester.runpytest_subprocess("--sim-scenario", "bogus")
     assert result.ret == pytest.ExitCode.INTERRUPTED
     result.stdout.fnmatch_lines(
-        [f"*UsageError: wise-dynamics: {option}: unknown {kind} 'bogus'; known {kind}s: {known}"]
+        [
+            "*UsageError: wise-dynamics: --sim-scenario: unknown scenario 'bogus'; "
+            "known scenarios: leo500"
+        ]
     )
 
 

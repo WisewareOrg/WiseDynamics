@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from Basilisk.fswAlgorithms import inertial3D
 
-from wise_dynamics.basilisk import ImuSpacecraft, Leo500
+from wise_dynamics.basilisk import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
 
@@ -17,10 +17,8 @@ def _guidance():
 
 
 def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
-    vehicle = ImuSpacecraft()
     scenario = Leo500()
-    scenario.add(vehicle)
-    fields = vehicle.recorded_fields()
+    fields = scenario.vehicle.recorded_fields()
     guidance, fsw_fields = _guidance()
     datasets = scenario.run(guidance, fsw_fields=fsw_fields, duration_s=50.0, record_s=10.0)
     t_s, units = datasets["t_s"]
@@ -38,7 +36,6 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
 @pytest.mark.parametrize(
     ("refusal", "error", "message"),
     [
-        ("no vehicle", ValueError, "add a vehicle before running"),
         ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("t_s", ValueError, r"reuses the run's own dataset paths \['t_s'\]"),
@@ -49,10 +46,8 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
 )
 def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
     """A refused run builds nothing and leaves a scenario that has not run able to run."""
-    vehicle = ImuSpacecraft()
     scenario = Leo500()
-    if refusal != "no vehicle":
-        scenario.add(vehicle)
+    vehicle = scenario.vehicle
     guidance, fsw_fields = _guidance()
     arguments = {"fsw_fields": fsw_fields, "duration_s": 10.0, "record_s": 10.0}
     if refusal in ("record_s", "duration_s"):
@@ -69,7 +64,5 @@ def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
         scenario.run(guidance, **arguments)
     assert [list(task.TaskModels) for task in scenario._simulation.TaskList] == tasks_before
     assert len(vehicle.spacecraft.gravField.gravBodies) == (refusal == "already run")
-    if refusal == "no vehicle":
-        scenario.add(vehicle)
     if refusal != "already run":
         scenario.run(guidance, fsw_fields=fsw_fields, duration_s=10.0)

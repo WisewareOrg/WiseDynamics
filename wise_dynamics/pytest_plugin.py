@@ -1,4 +1,4 @@
-"""The WiseDynamics pytest plugin: a pytest session runs one vehicle in one scenario over
+"""The WiseDynamics pytest plugin: a pytest session runs one scenario, with its vehicle, over
 `--sim-runs` Monte Carlo cases.
 
 Installing `wise-dynamics` registers this module through its `pytest11` entry point.
@@ -18,7 +18,6 @@ import pytest
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.scenario import Scenario
-    from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__: list[str] = []
 
@@ -49,11 +48,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--sim-scenario",
         default="leo500",
         help="name of the scenario in wise_dynamics.basilisk.SCENARIOS (default: leo500)",
-    )
-    group.addoption(
-        "--sim-vehicle",
-        default="imu_spacecraft",
-        help="name of the vehicle in wise_dynamics.basilisk.VEHICLES (default: imu_spacecraft)",
     )
 
 
@@ -104,16 +98,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over the case numbers.
 
     Raises:
-        pytest.UsageError: `--sim-vehicle` or `--sim-scenario` names nothing in its registry.
+        pytest.UsageError: `--sim-scenario` names nothing in `SCENARIOS`.
     """
     if "sim_case_index" not in metafunc.fixturenames:
         return
     config = metafunc.config
-    for option, lookup in (("--sim-vehicle", _vehicle_type), ("--sim-scenario", _scenario_type)):
-        try:
-            lookup(config.getoption(option))
-        except ValueError as error:
-            raise pytest.UsageError(f"wise-dynamics: {option}: {error}") from None
+    try:
+        _scenario_type(config.getoption("--sim-scenario"))
+    except ValueError as error:
+        raise pytest.UsageError(f"wise-dynamics: --sim-scenario: {error}") from None
     metafunc.parametrize("sim_case_index", range(config.getoption("--sim-runs")), indirect=True)
 
 
@@ -142,42 +135,24 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: scenario placement attribute or vehicle keyword to the value the case is
-    built with and its run file records. The default is the scenario class's `draw`, then the
-    vehicle class's, from the case's first stream; a consumer overrides this fixture to supply its
-    own.
+    """This case's draws: placement or vehicle dispersion name to the value the case is built with
+    and its run file records. The default is the scenario class's `draw` from the case's first
+    stream; a consumer overrides this fixture to supply its own.
     """
     draws_stream, _ = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    rng = np.random.default_rng(draws_stream)
-    scenario_draws = _scenario_type(request.config.getoption("--sim-scenario")).draw(rng)
-    vehicle_draws = _vehicle_type(request.config.getoption("--sim-vehicle")).draw(rng)
-    return {**scenario_draws, **vehicle_draws}
-
-
-@pytest.fixture
-def sim_vehicle(
-    request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
-) -> "Vehicle":
-    """This case's vehicle, built with the entries of `sim_draws` outside its scenario's
-    `standard_dispersion` as keywords, and its sensor noise seeded from the case's second
-    stream."""
-    _, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
-    placement = _scenario_type(request.config.getoption("--sim-scenario")).standard_dispersion
-    keywords = {name: value for name, value in sim_draws.items() if name not in placement}
-    vehicle_type = _vehicle_type(request.config.getoption("--sim-vehicle"))
-    return vehicle_type(**keywords, noise_seed=int(noise_stream.generate_state(1)[0]))
+    scenario_type = _scenario_type(request.config.getoption("--sim-scenario"))
+    return scenario_type.draw(np.random.default_rng(draws_stream))
 
 
 @pytest.fixture
 def sim_scenario(
-    request: pytest.FixtureRequest, sim_draws: Mapping[str, Any], sim_vehicle: "Vehicle"
+    request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> "Scenario":
-    """This case's scenario: `--sim-scenario`, dispersed with the entries of `sim_draws` in its
-    `standard_dispersion`, holding `sim_vehicle`."""
+    """This case's scenario: `--sim-scenario`, dispersed with `sim_draws` and its vehicle's sensor
+    noise seeded from the case's second stream. Its vehicle is `sim_scenario.vehicle`."""
+    _, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
     scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
-    placement = scenario.standard_dispersion
-    scenario.disperse({name: value for name, value in sim_draws.items() if name in placement})
-    scenario.add(sim_vehicle)
+    scenario.disperse(sim_draws, noise_seed=int(noise_stream.generate_state(1)[0]))
     return scenario
 
 
@@ -186,9 +161,9 @@ def sim_run_file(
     request: pytest.FixtureRequest,
     sim_case_index: int,
     sim_draws: Mapping[str, Any],
-    sim_vehicle: "Vehicle",
+    sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_vehicle`.
+    """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
 
     Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
     them, it returns the file's path. The file's root attributes are `case`, `seed`,
@@ -214,7 +189,7 @@ def sim_run_file(
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
-        sim_vehicle.write_run_file(path, datasets, {**own, **extras})
+        sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
         return path
 
     return write
@@ -223,22 +198,6 @@ def sim_run_file(
 def _run_files(count: int) -> str:
     """`count` run files, in words."""
     return f"{count} run file" if count == 1 else f"{count} run files"
-
-
-def _vehicle_type(name: str) -> "type[Vehicle]":
-    """The vehicle class `name` registers in `VEHICLES`, imported with Basilisk on first use.
-
-    Raises:
-        ValueError: `name` is not registered.
-    """
-    from wise_dynamics.basilisk.vehicles import VEHICLES
-
-    try:
-        return VEHICLES[name]
-    except KeyError:
-        raise ValueError(
-            f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}"
-        ) from None
 
 
 def _scenario_type(name: str) -> "type[Scenario]":
