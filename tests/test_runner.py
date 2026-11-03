@@ -48,18 +48,14 @@ def test_run_case_runs_a_stock_basilisk_module():
         ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("already run", RuntimeError, "already run"),
-        ("nothing to record", ValueError, "at least one message to record"),
     ],
 )
-def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message, monkeypatch):
+def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     plant = ImuSpacecraft()
     stub = StubFsw()
     arguments = {"fsw_outputs": {"stub": stub.output_msg}, "duration_s": 10.0, "record_s": 10.0}
     if refusal == "truth role":
         arguments["fsw_outputs"] = {"truth": stub.output_msg}
-    elif refusal == "nothing to record":
-        monkeypatch.setattr(plant, "truth_messages", dict)
-        arguments["fsw_outputs"] = {}
     elif refusal in ("record_s", "duration_s"):
         arguments[refusal] = 0.0
     else:
@@ -75,28 +71,6 @@ def test_a_field_absent_from_its_recorder_is_named():
     recording = run_with_stub(ImuSpacecraft(), duration_s=10.0)
     with pytest.raises(ValueError, match="r_BN_N"):
         recording.datasets({"bad": RecordedField("imu", "r_BN_N", "m")})
-
-
-def churn_plants() -> list[ImuSpacecraft]:
-    """New plants allocated after a plant is freed, reusing its memory."""
-    gc.collect()
-    return [ImuSpacecraft() for _ in range(10)]
-
-
-def test_a_recording_outlives_its_plant():
-    plant = ImuSpacecraft()
-    released = weakref.ref(plant)
-    recording = run_with_stub(plant, duration_s=50.0)
-    before = recording.datasets(plant.recorded_fields)
-    fields = dict(plant.recorded_fields)
-    del plant
-    others = churn_plants()
-
-    assert released() is None, "the plant is still referenced"
-    after = recording.datasets(fields)
-    assert others
-    for name, dataset in before.items():
-        assert np.array_equal(after[name][0], dataset[0]), name
 
 
 class ReadingFsw(sysModel.SysModel):

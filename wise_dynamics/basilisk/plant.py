@@ -24,7 +24,7 @@ class Plant(ABC):
     Basilisk objects a subclass exposes as attributes, along with anything reached through them,
     are valid while the plant is referenced: a recorder holds its message, so a message holding
     its plant would form a loop through Basilisk's C++ objects that the garbage collector leaves
-    in place. A `Recording` holds its own data and outlives its plant.
+    in place.
 
     A subclass implements `nominal()`, `_build()`, `_readers()`, `truth_messages()` and
     `initial_state()`, and sets three class attributes:

@@ -38,17 +38,14 @@ def run_case(
         The `Recording`, holding the truth roles and the `fsw_outputs` roles.
 
     Raises:
-        ValueError: An `fsw_outputs` role equals a truth role, the plant has no truth messages and
-            `fsw_outputs` is empty, or `record_s` or `duration_s` is not positive.
+        ValueError: An `fsw_outputs` role equals a truth role, or `record_s` or `duration_s` is
+            not positive.
         RuntimeError: The plant has already run.
     """
     truth_messages = plant.truth_messages()
     collisions = sorted(set(truth_messages) & set(fsw_outputs))
     if collisions:
         raise ValueError(f"fsw_outputs reuses the plant's truth roles {collisions}")
-    recorded = {**truth_messages, **fsw_outputs}
-    if not recorded:
-        raise ValueError("run_case needs at least one message to record")
     if not record_s > 0:
         raise ValueError(f"recording period must be positive, got {record_s} s")
     if not duration_s > 0:
@@ -56,7 +53,10 @@ def run_case(
 
     plant.add_model(fsw_module)
     period_ns = macros.sec2nano(record_s)
-    recorders = {role: message.recorder(period_ns) for role, message in recorded.items()}
+    recorders = {
+        role: message.recorder(period_ns)
+        for role, message in {**truth_messages, **fsw_outputs}.items()
+    }
     for recorder in recorders.values():
         plant.add_model(recorder)
     plant.execute(duration_s)

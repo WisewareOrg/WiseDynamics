@@ -160,7 +160,20 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
-    assert "probe_noise_seed" in attrs
+    probes = {"probe_noise_seed", "probe_gyro_bias_P"}
+    draws = {f"draw_{name}" for name in ImuSpacecraft.standard_dispersion.std}
+    assert (
+        set(attrs)
+        == {
+            "case",
+            "seed",
+            "created_utc",
+            "versions_bsk",
+            "versions_wise_dynamics",
+        }
+        | draws
+        | probes
+    )
 
 
 def test_extra_attrs_cannot_replace_a_root_attr(pytester):

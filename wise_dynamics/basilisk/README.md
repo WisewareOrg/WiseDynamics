@@ -7,8 +7,6 @@ distribution; each symbol's docstring carries its arguments, returns and raises.
 
 ## Modules
 
-Each module holds one class, or the functions of one concern, and is named for what it holds.
-
 | module | holds |
 |---|---|
 | `wise_dynamics/dispersion.py` | `Dispersion`, which draws per-case values for a configuration's 3-vector fields, and `apply_draws`, which applies them |
@@ -31,28 +29,16 @@ name lives in.
 
 ## Plants
 
-A plant is a `Plant` subclass: it owns its own Basilisk simulation with one process and one
-task, built by the constructor `(config=None, *, noise_seed=0)` from a frozen configuration
-dataclass, which carries the step as `step_s`. A subclass adds its models in `_build(config,
-noise_seed)`. Each plant class provides:
-
-- `nominal()`, the vehicle's nominal configuration;
-- `standard_dispersion`, the vehicle's standard per-case dispersion;
-- `recorded_fields`, run-file dataset name to recorded message field and units;
-- `mu`, a class attribute: the central body's gravitational parameter its gravity model uses,
-  in m^3/s^2;
-- `readers()`, sensor outputs by role as subscribed Basilisk message readers;
-- `truth_messages()`, recordable output messages by role;
-- `initial_state()`, the initial condition by key;
-- `config`, the configuration it was built from;
-- `add_model(module)` and `execute(duration_s)`. A plant runs once.
+A plant is a `Plant` subclass, built by `(config=None, *, noise_seed=0)` from a frozen
+configuration dataclass carrying its step as `step_s`. It owns one Basilisk simulation, runs once
+through `execute(duration_s)`, and provides `readers()`, `truth_messages()`, `initial_state()`,
+`config`, and the class attributes `mu` (m^3/s^2), `standard_dispersion` and `recorded_fields`.
 
 Each reader `readers()` returns holds its plant, so it reads the plant's live output for as long
 as it is held. The messages `truth_messages()` returns, `spacecraft` and `imu`, along with
 anything reached through them such as `spacecraft.gravField.gravBodies`, are valid while the
 plant is referenced: a recorder holds its message, so a message holding its plant would form a
-loop through Basilisk's C++ objects that the garbage collector leaves in place. A `Recording`
-holds its own data and outlives its plant.
+loop through Basilisk's C++ objects that the garbage collector leaves in place.
 
 ### `imu_spacecraft`: `ImuSpacecraft`
 
@@ -98,12 +84,8 @@ Messages and their recorded fields:
 | `imu` | | | `AccelPlatform` | `imu/accel_P` | m/s^2 |
 
 `initial_state()` returns `sigma0_BN` (MRP), `r0_N` (m), `v0_N` (m/s) and `omega0_BN_B` (rad/s).
-The plant configures Basilisk's `imuSensor` at the hub's centre of mass with an identity `dcm_PB`,
-so its platform frame is the body frame, with the configured biases as `senRotBias` and
-`senTransBias`, the configured per-sample standard deviations on the diagonals of `PMatrixGyro`
-and `PMatrixAccel`, and the case's noise seed as `RNGSeed`; it records the sensor's
-`AngVelPlatform` and `AccelPlatform`. Basilisk's `imuSensor` documentation describes the sensor
-model those settings drive.
+The IMU sits at the hub's centre of mass with identity mounting, so its platform frame is the body
+frame; Basilisk's `imuSensor` documentation describes the sensor model.
 
 ## Running one case
 
@@ -167,9 +149,7 @@ and leaves no file when a write fails. The plugin's `sim_run_writer` writes a ca
 
 Installing `wise-dynamics` registers the plugin through its `pytest11` entry point, so a
 consumer's `conftest.py` names nothing; naming the module in `pytest_plugins` as well makes
-pytest raise "Plugin already registered under a different name". The plugin imports Basilisk
-when pytest collects a test that uses `sim_case_index`, directly or through another per-case
-`sim_` fixture.
+pytest raise "Plugin already registered under a different name".
 
 | option | default | meaning |
 |---|---|---|
