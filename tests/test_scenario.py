@@ -52,7 +52,8 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
 def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(
     fidelity, step_ns, integrator_type
 ):
-    scenario = Leo500(fidelity)
+    scenario = Leo500()
+    scenario.fidelity = fidelity
     scenario.disperse(np.random.default_rng(0), noise_seed=1)
     scenario.run(_Guidance(), {}, duration_s=1.0)
     dynamics, fsw, record = scenario._simulation.TaskList

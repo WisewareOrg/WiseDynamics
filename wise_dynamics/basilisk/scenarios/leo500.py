@@ -17,9 +17,6 @@ class Leo500(Scenario):
     nothing that depends on time. The class attributes define the scenario, and the constructor
     builds the vehicle and places it there.
 
-    Args:
-        fidelity: `"hi"`, `"med"` or `"lo"`, as `Scenario` defines them.
-
     Attributes:
         mu_m3_s2: Earth's gravitational parameter, in m^3/s^2, keyed `"earth"`.
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
@@ -47,8 +44,8 @@ class Leo500(Scenario):
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     record_s: float = 10.0
 
-    def __init__(self, fidelity: str = "lo") -> None:
-        super().__init__(fidelity)
+    def __init__(self) -> None:
+        super().__init__()
         self.draws: dict[str, np.ndarray] = {}
         self.vehicle = self._placed(ImuSpacecraft())
         self.vehicles = [self.vehicle]

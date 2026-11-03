@@ -39,15 +39,16 @@ HDF5 file, each dataset float64 with a `units` attribute.
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
 its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
-one argument, the fidelity, and builds its vehicle, places it, and holds it as `scenario.vehicle`
+no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle`
 and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
 `rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
 `rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
 `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
-The fidelity, from `Scenario`, sets the integration step `step_s` and the integrator `run` gives
-every vehicle's spacecraft. The differences are measured on Leo500 at the end of one 5700 s orbit,
+`scenario.fidelity`, an attribute from `Scenario` that defaults to `"lo"`, is the level `run`
+builds at. `run` derives the integration step and the integrator it gives every vehicle's
+spacecraft from it. The differences below are measured on Leo500 at the end of one 5700 s orbit,
 against hi:
 
 | fidelity | integrator | step | position | attitude |
@@ -57,13 +58,13 @@ against hi:
 | `lo` | RK2 | 0.05 s | 17.7 cm | 9.05 urad |
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
-`vehicles`, `step_s` and `record_s`, and runs once. The vehicles run every `step_s`. The
-flight-software module runs in its own task at its own `period_s`, an attribute it declares in
+`vehicles`, `fidelity` and `record_s`, and runs once. The vehicles run every step of the fidelity.
+The flight-software module runs in its own task at its own `period_s`, an attribute it declares in
 seconds, after the vehicles at each instant they share, so it reads that instant's sensor output.
 The recorders run every `record_s`, after both, so truth and flight output are recorded from the
 same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
-`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
-`(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
+`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to `(array,
+units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
 
 ## pytest plugin
 

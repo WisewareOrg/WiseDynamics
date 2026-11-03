@@ -143,9 +143,8 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     stream, with its vehicle's sensor noise seeded from the case's second. Its vehicle is
     `sim_scenario.vehicle`."""
     draws_stream, noise_stream = _streams(sim_case_index)
-    scenario = _scenario_type(request.config.getoption("--sim-scenario"))(
-        request.config.getoption("--sim-fidelity")
-    )
+    scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
+    scenario.fidelity = request.config.getoption("--sim-fidelity")
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
     )

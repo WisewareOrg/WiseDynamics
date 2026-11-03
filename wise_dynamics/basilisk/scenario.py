@@ -26,25 +26,20 @@ _FIDELITY = {
 class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
-    A subclass's constructor calls `super().__init__(fidelity)`, builds its vehicles and places
-    them, and sets `vehicles` and `record_s`; `run` reads them.
-
-    The fidelity sets the integration step and the integrator `run` gives every vehicle's
-    spacecraft: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at 0.05 s and `"lo"` RK2 at 0.05 s.
-
-    Args:
-        fidelity: `"hi"`, `"med"` or `"lo"`.
+    A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
+    sets `vehicles` and `record_s`; `run` reads them, and `fidelity`.
 
     Attributes:
-        fidelity: The fidelity the scenario was built at.
-        step_s: The integration and sensor step, in seconds, set by the fidelity.
+        fidelity: `"hi"`, `"med"` or `"lo"`. `run` derives the integration step and the integrator
+            it gives every vehicle's spacecraft from it: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at
+            0.05 s and `"lo"` RK2 at 0.05 s.
         vehicles: The vehicles `run` adds to the simulation, in order.
         record_s: The recording period, in seconds.
     """
 
-    def __init__(self, fidelity: str = "lo") -> None:
-        self.fidelity = fidelity
-        self.step_s, self._integrator_type = _FIDELITY[fidelity]
+    fidelity: str = "lo"
+
+    def __init__(self) -> None:
         self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
@@ -58,9 +53,10 @@ class Scenario:
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
-        Gives every vehicle's spacecraft the fidelity's integrator, then builds the simulation with
-        one process holding three tasks, which run in this order at
-        each instant they share. The dynamics task, every `step_s`, holds each vehicle's models.
+        Gives every vehicle's spacecraft the integrator of `fidelity`, then builds the simulation
+        with one process holding three tasks, which run in this order at
+        each instant they share. The dynamics task, every step of `fidelity`, holds each vehicle's
+        models.
         The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
         the sensors' output of that instant. The record task, every `record_s` from t = 0, holds
         one Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`,
@@ -85,9 +81,10 @@ class Scenario:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         self._executed = True
 
+        step_s, integrator_type = _FIDELITY[self.fidelity]
         fields = {}
         for vehicle in self.vehicles:
-            integrator = self._integrator_type(vehicle.spacecraft)
+            integrator = integrator_type(vehicle.spacecraft)
             vehicle.spacecraft.setIntegrator(integrator)
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
@@ -97,7 +94,7 @@ class Scenario:
 
         process = self._simulation.CreateNewProcess(_PROCESS)
         process.addTask(
-            self._simulation.CreateNewTask(_DYNAMICS_TASK, macros.sec2nano(self.step_s)),
+            self._simulation.CreateNewTask(_DYNAMICS_TASK, macros.sec2nano(step_s)),
             _DYNAMICS_PRIORITY,
         )
         process.addTask(

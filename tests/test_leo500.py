@@ -35,8 +35,8 @@ class Placed(Leo500):
 
 def test_the_scenario_is_its_class_attributes():
     """Read from the class, as a consumer reads it without building a scenario."""
-    (fidelity,) = inspect.signature(Leo500).parameters.values()
-    assert (fidelity.name, fidelity.default) == ("fidelity", "lo")
+    assert inspect.signature(Leo500).parameters == {}
+    assert Leo500.fidelity == "lo"
     assert Leo500.mu_m3_s2 == {"earth": 3.986004360e14}
     assert Leo500.semi_major_axis_m == 6871.0e3
     assert Leo500.eccentricity == 0.0001
