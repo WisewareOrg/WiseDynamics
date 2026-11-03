@@ -72,6 +72,14 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert elements.f == pytest.approx(Placed.true_anomaly_rad, abs=1e-9)
 
 
+def test_the_nominal_step_is_the_task_period():
+    scenario = Leo500()
+    scenario.add(ImuSpacecraft())
+    scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+    (task,) = scenario._simulation.TaskList
+    assert task.TaskData.TaskPeriod == 20_000_000
+
+
 def test_draw_adds_normal_samples_to_the_defaults_in_dispersion_order():
     draws = Leo500.draw(np.random.default_rng(7))
     rng = np.random.default_rng(7)

@@ -6,7 +6,7 @@
 
 ## Revisions
 
-- **rev 1** — 2026-10-31 — first written (#1 adopt Basilisk as the first simulation host).
+- **rev 1** — 2026-10-31 — first written (#1 adopt Basilisk as the simulation host).
 
 ## Context
 
