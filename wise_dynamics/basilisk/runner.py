@@ -25,8 +25,7 @@ def run_case(
 
     Adds `fsw_module` to the plant's task after the plant's own models, attaches one Basilisk
     recorder per entry of `fields` sampling every `record_s` from t = 0, and runs the plant for
-    `duration_s`. The arguments are checked before the plant is changed. The plant runs once, so
-    a second case needs a new plant.
+    `duration_s`. The arguments are checked before the plant is changed.
 
     Args:
         plant: The plant to run.

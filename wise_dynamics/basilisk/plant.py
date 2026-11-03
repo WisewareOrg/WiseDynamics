@@ -15,18 +15,16 @@ _TASK = "plant_task"
 class Plant(ABC):
     """A spacecraft plant on its own Basilisk simulation, process and task.
 
-    A subclass takes its parameters as constructor keywords, calls `super().__init__(step_s=...)`
-    and adds its models with `add_model`. A plant runs once: `execute` initializes and runs the
-    simulation, and a new plant is built for the next run. Each reader `readers()` returns holds
-    its plant, so it reads the plant's live output for as long as it is held. The messages in
-    `recorded_fields()` and the Basilisk objects a subclass exposes as attributes are valid while
-    the plant is referenced: a recorder holds its message, so a message holding its plant would
-    form a loop through Basilisk's C++ objects that the garbage collector leaves in place.
+    A subclass takes its parameters as keywords defaulting to class attributes of the same name,
+    calls `super().__init__(step_s=...)` and adds its models with `add_model`. A plant runs once.
+    Each reader `readers()` returns holds its plant, so it reads live output for as long as it is
+    held. The messages in `recorded_fields()` and the Basilisk objects a subclass exposes are
+    valid while the plant is referenced: a message holding its plant would form a loop through
+    Basilisk's C++ objects that the garbage collector leaves in place.
 
-    A subclass sets two class attributes:
-
-    - `mu`: the central body's gravitational parameter its gravity model uses, in m^3/s^2.
-    - `standard_dispersion`: constructor keyword to its per-axis 1-sigma, drawn in this order.
+    Attributes:
+        mu: The central body's gravitational parameter in the plant's gravity model, in m^3/s^2.
+        standard_dispersion: Keyword to its per-axis 1-sigma, drawn in this order.
     """
 
     mu: ClassVar[float]
@@ -50,8 +48,8 @@ class Plant(ABC):
         self._executed = False
 
     def readers(self) -> dict[str, Any]:
-        """The plant's sensor outputs by role, each a Basilisk message reader already subscribed
-        to its sensor, for a flight-software module to read. Each reader holds this plant."""
+        """The plant's sensor outputs by role, each a Basilisk message reader subscribed to its
+        sensor, for a flight-software module to read."""
         handed_out = self._readers()
         for reader in handed_out.values():
             reader._plant = self
@@ -80,10 +78,7 @@ class Plant(ABC):
         self._simulation.AddModelToTask(_TASK, model)
 
     def execute(self, duration_s: float) -> None:
-        """Initialize the simulation and run it from t = 0 for `duration_s`.
-
-        Args:
-            duration_s: Simulated time to run, in seconds.
+        """Initialize the simulation and run it from t = 0 for `duration_s` seconds.
 
         Raises:
             ValueError: `duration_s` is not positive.

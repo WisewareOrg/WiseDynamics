@@ -8,6 +8,7 @@ Installing `wise-dynamics` registers this module through its `pytest11` entry po
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -16,9 +17,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from wise_dynamics.dispersion import draw_standard
 from wise_dynamics.run_file import write_run
-from wise_dynamics.session_options import SessionOptions
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.plant import Plant
@@ -26,6 +25,38 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
+
+
+@dataclass(frozen=True)
+class SessionOptions:
+    """A pytest session's `--sim-*` options, parsed and checked once by the plugin.
+
+    Attributes:
+        plant: `--sim-spacecraft`, a name in `wise_dynamics.basilisk.PLANTS`.
+        seed: `--sim-seed`, non-negative.
+        runs: `--sim-runs`, at least 1.
+        duration_s: `--sim-duration-s`, positive.
+        out_dir: The directory the run files go to.
+
+    Raises:
+        ValueError: `seed`, `runs` or `duration_s` is out of range.
+    """
+
+    plant: str
+    seed: int
+    runs: int
+    duration_s: float
+    out_dir: Path
+
+    def __post_init__(self) -> None:
+        if self.seed < 0:
+            raise ValueError(f"--sim-seed must be non-negative, got {self.seed}")
+        if self.runs < 1:
+            raise ValueError(f"--sim-runs must be at least 1, got {self.runs}")
+        if not self.duration_s > 0:
+            raise ValueError(f"--sim-duration-s must be positive, got {self.duration_s}")
+
+
 _OPTIONS = pytest.StashKey[SessionOptions]()
 
 
@@ -58,9 +89,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Parse and check the `--sim-*` options once, for every fixture of the session.
 
-    The controlling process resolves the output directory to one absolute path, from
-    `--sim-out` or a fresh name under the system temporary directory, and every pytest-xdist
-    worker receives that path. The first run file written creates the directory.
+    The controlling process resolves one absolute output directory, which every pytest-xdist
+    worker receives; the first run file written creates it.
 
     Raises:
         pytest.UsageError: An option is out of range, or `--sim-out` already holds run files.
@@ -139,24 +169,28 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 @pytest.fixture
 def sim_draws(request: pytest.FixtureRequest, sim_case_index: int) -> Mapping[str, np.ndarray]:
-    """This case's draws: plant constructor keyword to the value its plant is built with and its
-    run file records.
-
-    The default is the plant's standard dispersion, drawn from the case's own stream. A scenario
-    supplies its own draws by overriding this fixture.
+    """This case's draws: plant keyword to the value its plant is built with and its run file
+    records. The default draws each `standard_dispersion` entry, in order, as the keyword's
+    default plus independent normal samples of that 1-sigma from the case's first stream; a
+    scenario overrides this fixture to supply its own.
     """
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
     draws_stream, _ = _streams(options.seed, sim_case_index)
-    return draw_standard(plant_type, np.random.default_rng(draws_stream))
+    rng = np.random.default_rng(draws_stream)
+    draws = {}
+    for name, std in plant_type.standard_dispersion.items():
+        nominal = np.asarray(getattr(plant_type, name), dtype=float)
+        draws[name] = nominal + rng.normal(0.0, std, size=nominal.shape)
+    return draws
 
 
 @pytest.fixture
 def sim_plant(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> "Plant":
-    """This case's plant: the plant built with `sim_draws` as keywords, its sensor noise seeded
-    from the case's own stream."""
+    """This case's plant, built with `sim_draws` as keywords and its sensor noise seeded from the
+    case's second stream."""
     options = request.config.stash[_OPTIONS]
     plant_type = _plant_type(options.plant)
     return plant_type(**sim_draws, noise_seed=_noise_seed(options.seed, sim_case_index))
@@ -167,11 +201,11 @@ def sim_run_writer(
     request: pytest.FixtureRequest, sim_case_index: int, sim_draws: Mapping[str, Any]
 ) -> Callable[..., Path]:
     """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`: `writer(datasets,
-    extra_attrs=None) -> Path`, with `datasets` mapping a name to `(array, units)`.
+    extra_attrs=None) -> Path`, with `datasets` as `run_case` returns them.
 
-    The file carries the root attributes `case`, `seed`, `created_utc`, `versions_wise_dynamics`,
-    `versions_bsk` and one `draw_<field>` per entry of `sim_draws`. An `extra_attrs` entry naming
-    one of these raises `ValueError`.
+    The root attributes are `case`, `seed`, `created_utc` (ISO 8601 UTC), `versions_bsk`,
+    `versions_wise_dynamics`, one `draw_<keyword>` per entry of `sim_draws`, and `extra_attrs`,
+    which raises `ValueError` when it names one of the others.
     """
     options = request.config.stash[_OPTIONS]
 
@@ -207,13 +241,12 @@ def _plant_type(name: str) -> "type[Plant]":
 
 
 def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Case `index`'s two random streams: the first draws its configuration, the second seeds
-    its sensor noise."""
+    """Case `index`'s two random streams: the first draws, the second seeds sensor noise."""
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
 def _noise_seed(seed: int, index: int) -> int:
-    """Case `index`'s sensor-noise seed, from its second stream."""
+    """Case `index`'s sensor-noise seed."""
     _, noise_stream = _streams(seed, index)
     return int(noise_stream.generate_state(1)[0])
 

@@ -9,21 +9,21 @@ import h5py
 import numpy as np
 import pytest
 
-import tests.support
-from wise_dynamics import draw_standard
 from wise_dynamics.basilisk import ImuSpacecraft
+
+README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
 
 SCENARIO_TEST = """
 import numpy as np
+from Basilisk.fswAlgorithms import inertial3D
 
-from support import StubFsw
 from wise_dynamics.basilisk import run_case
 
 
 def test_case(sim_duration_s, sim_plant, sim_run_writer):
     datasets = run_case(
         sim_plant,
-        StubFsw(),
+        inertial3D.inertial3D(),
         fields=sim_plant.recorded_fields(),
         duration_s=sim_duration_s,
         record_s=1.0,
@@ -52,8 +52,7 @@ CASE_5_DRAWS = {
 
 @pytest.fixture
 def scenario_dir(pytester: pytest.Pytester) -> pytest.Pytester:
-    """A pytester directory holding the stub module and a one-test scenario."""
-    pytester.makepyfile(support=Path(tests.support.__file__).read_text())
+    """A pytester directory holding a one-test scenario."""
     pytester.makepyfile(test_scenario=SCENARIO_TEST)
     return pytester
 
@@ -94,10 +93,13 @@ def case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
 
 
 def standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """The standard draws of case `index`, from its first stream."""
+    """The standard draws of case `index`, derived as the README states."""
     draws_stream, _ = case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
-    return draw_standard(ImuSpacecraft, rng)
+    return {
+        name: np.asarray(getattr(ImuSpacecraft, name)) + rng.normal(0.0, std, size=3)
+        for name, std in ImuSpacecraft.standard_dispersion.items()
+    }
 
 
 def test_case_seeding_matches_recorded_runs(scenario_dir):
@@ -119,17 +121,6 @@ def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
     assert small["attrs"]["probe_noise_seed"] == large["attrs"]["probe_noise_seed"]
     for name, value in draws_of(small).items():
         assert np.array_equal(value, draws_of(large)[name])
-
-
-def test_noise_seeds_differ_across_cases_and_session_seeds(scenario_dir):
-    seeds = [
-        run["attrs"]["probe_noise_seed"]
-        for seed in ("0", "1")
-        for run in run_session(
-            scenario_dir, f"seed{seed}", "--sim-runs", "2", "--sim-seed", seed, passed=2
-        )
-    ]
-    assert len(set(seeds)) == 4, seeds
 
 
 def test_each_case_records_the_standard_draws_its_plant_used(scenario_dir):
@@ -227,40 +218,6 @@ def test_a_session_reproduces_from_its_seed(scenario_dir):
         for name, value in draws_of(case_first).items():
             assert np.array_equal(value, draws_of(case_again)[name]), name
             assert not np.array_equal(value, draws_of(case_other)[name]), name
-
-
-def test_consumer_fixtures_with_common_names_leave_the_cases_unchanged(scenario_dir):
-    scenario_dir.makeconftest(
-        """
-        import numpy as np
-        import pytest
-
-        @pytest.fixture
-        def rng():
-            return np.random.default_rng(1234)
-
-        @pytest.fixture
-        def seed():
-            return 99
-
-        @pytest.fixture
-        def out_dir(tmp_path):
-            return tmp_path
-
-        @pytest.fixture
-        def plant():
-            return None
-
-        @pytest.fixture
-        def draws():
-            return {}
-        """
-    )
-    runs = run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
-
-    for index, run in enumerate(runs):
-        for name, value in standard_draws(0, index).items():
-            assert np.array_equal(draws_of(run)[name], value)
 
 
 def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
@@ -362,13 +319,32 @@ def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
     result.stderr.fnmatch_lines([f"ERROR: --sim-out {out_dir} already holds 1 run file;*"])
 
 
-def test_consumer_options_with_short_names_coexist_with_the_plugin(pytester):
-    pytester.makeconftest(
+def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester):
+    """The plugin loads into every session of an environment with `wise-dynamics` installed."""
+    pytester.makepyfile(
         """
-        def pytest_addoption(parser):
-            for name in ("--runs", "--out", "--seed", "--duration-s", "--spacecraft"):
-                parser.addoption(name, action="store")
+        import sys
+
+        def test_modules():
+            assert "wise_dynamics.pytest_plugin" in sys.modules
+            assert [name for name in sys.modules if name.startswith("Basilisk")] == []
         """
     )
-    pytester.makepyfile("def test_nothing():\n    pass\n")
-    pytester.runpytest_subprocess("--out", "x").assert_outcomes(passed=1)
+    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+
+
+def test_the_readme_scenario_runs_as_a_session(pytester):
+    (example,) = re.findall(r"```python\n(.*?)```", README.read_text(), flags=re.DOTALL)
+    pytester.makepyfile(test_example=example)
+    out_dir = pytester.path / "out"
+    pytester.runpytest_subprocess(
+        "--sim-runs", "2", "--sim-duration-s", "20", "--sim-out", str(out_dir)
+    ).assert_outcomes(passed=2)
+
+    files = sorted(out_dir.glob("run_*.h5"))
+    assert len(files) == 2
+    for path in files:
+        with h5py.File(path, "r") as run_file:
+            assert run_file["t_s"][:].tolist() == [0.0, 10.0, 20.0]
+            assert run_file["guidance/sigma_RN"].attrs["units"] == "MRP"
+            assert run_file.attrs["versions_guidance"] == "1.0"

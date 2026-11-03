@@ -24,8 +24,11 @@ type Vector3 = tuple[float, float, float]
 
 
 class ImuSpacecraft(Plant):
-    """A tumbling rigid spacecraft in low Earth orbit with one IMU. The defaults are the nominal
-    vehicle, and each keyword is kept as an attribute of the same name.
+    """A tumbling rigid spacecraft in low Earth orbit with one IMU.
+
+    Each keyword defaults to the class attribute of the same name, the nominal vehicle, so a
+    consumer reads a default without building a plant; a plant keeps each keyword it is built with
+    as an instance attribute of that name.
 
     Args:
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
@@ -57,8 +60,7 @@ class ImuSpacecraft(Plant):
     """
 
     mu: ClassVar[float] = 3.986004360e14
-    """Earth's gravitational parameter, in m^3/s^2: the point-mass gravity model's and the orbit
-    conversion's."""
+    """Earth's gravitational parameter in Basilisk's point-mass gravity model, in m^3/s^2."""
 
     standard_dispersion: ClassVar[MappingProxyType[str, float]] = MappingProxyType(
         {
@@ -69,29 +71,46 @@ class ImuSpacecraft(Plant):
         }
     )
 
+    semi_major_axis_m: float = 6871.0e3
+    eccentricity: float = 0.0001
+    inclination_rad: float = 45.0 * D2R
+    raan_rad: float = 48.2 * D2R
+    arg_periapsis_rad: float = 347.8 * D2R
+    true_anomaly_rad: float = 85.3 * D2R
+    mass_kg: float = 750.0
+    inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = (
+        (900.0, 0.0, 0.0),
+        (0.0, 800.0, 0.0),
+        (0.0, 0.0, 600.0),
+    )
+    sigma0_BN: Vector3 = (0.1, 0.2, -0.3)
+    omega0_BN_B: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
+    gyro_bias_P: Vector3 = (1e-4, -2e-4, 5e-5)
+    accel_bias_P: Vector3 = (1e-4, -5e-5, 2e-4)
+    gyro_noise_std_rad_s: float = 5e-5
+    accel_noise_std_m_s2: float = 5e-5
+    step_s: float = 1.0
+    noise_seed: int = 0
+
     def __init__(
         self,
         *,
-        semi_major_axis_m: float = 6871.0e3,
-        eccentricity: float = 0.0001,
-        inclination_rad: float = 45.0 * D2R,
-        raan_rad: float = 48.2 * D2R,
-        arg_periapsis_rad: float = 347.8 * D2R,
-        true_anomaly_rad: float = 85.3 * D2R,
-        mass_kg: float = 750.0,
-        inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = (
-            (900.0, 0.0, 0.0),
-            (0.0, 800.0, 0.0),
-            (0.0, 0.0, 600.0),
-        ),
-        sigma0_BN: Vector3 = (0.1, 0.2, -0.3),
-        omega0_BN_B: Vector3 = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R),
-        gyro_bias_P: Vector3 = (1e-4, -2e-4, 5e-5),
-        accel_bias_P: Vector3 = (1e-4, -5e-5, 2e-4),
-        gyro_noise_std_rad_s: float = 5e-5,
-        accel_noise_std_m_s2: float = 5e-5,
-        step_s: float = 1.0,
-        noise_seed: int = 0,
+        semi_major_axis_m: float = semi_major_axis_m,
+        eccentricity: float = eccentricity,
+        inclination_rad: float = inclination_rad,
+        raan_rad: float = raan_rad,
+        arg_periapsis_rad: float = arg_periapsis_rad,
+        true_anomaly_rad: float = true_anomaly_rad,
+        mass_kg: float = mass_kg,
+        inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] = inertia_B_kg_m2,
+        sigma0_BN: Vector3 = sigma0_BN,
+        omega0_BN_B: Vector3 = omega0_BN_B,
+        gyro_bias_P: Vector3 = gyro_bias_P,
+        accel_bias_P: Vector3 = accel_bias_P,
+        gyro_noise_std_rad_s: float = gyro_noise_std_rad_s,
+        accel_noise_std_m_s2: float = accel_noise_std_m_s2,
+        step_s: float = step_s,
+        noise_seed: int = noise_seed,
     ) -> None:
         r_N, v_N = _orbit_to_inertial(
             self.mu,
@@ -134,7 +153,6 @@ class ImuSpacecraft(Plant):
         self._gravity = simIncludeGravBody.gravBodyFactory()
         earth = self._gravity.createEarth()
         earth.isCentralBody = True
-        earth.mu = self.mu
         self._gravity.addBodiesTo(self.spacecraft)
         hub.r_CN_NInit = r_N.tolist()
         hub.v_CN_NInit = v_N.tolist()

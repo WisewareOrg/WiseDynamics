@@ -1,7 +1,8 @@
 """`ImuSpacecraft`: its nominal vehicle, how its keywords reach the Basilisk objects it builds,
-its validation, and its reader's lifetime."""
+what it records, its validation, and its reader's lifetime."""
 
 import gc
+import inspect
 import math
 import weakref
 
@@ -9,7 +10,7 @@ import numpy as np
 import pytest
 from Basilisk.utilities import orbitalMotion
 
-from tests.support import run_with_stub
+from tests.support import run_with_guidance
 from wise_dynamics.basilisk import ImuSpacecraft
 
 D2R = math.pi / 180.0
@@ -35,22 +36,42 @@ DISPERSED = {
 
 
 def test_nominal_vehicle_is_the_specified_one():
-    nominal = ImuSpacecraft()
-    assert nominal.semi_major_axis_m == 6871.0e3
-    assert nominal.eccentricity == 0.0001
-    assert nominal.inclination_rad == 45.0 * D2R
-    assert nominal.raan_rad == 48.2 * D2R
-    assert nominal.arg_periapsis_rad == 347.8 * D2R
-    assert nominal.true_anomaly_rad == 85.3 * D2R
-    assert nominal.mass_kg == 750.0
-    assert nominal.inertia_B_kg_m2 == ((900.0, 0.0, 0.0), (0.0, 800.0, 0.0), (0.0, 0.0, 600.0))
-    assert nominal.sigma0_BN == (0.1, 0.2, -0.3)
-    assert nominal.omega0_BN_B == (D2R, D2R, D2R)
-    assert nominal.gyro_bias_P == (1e-4, -2e-4, 5e-5)
-    assert nominal.accel_bias_P == (1e-4, -5e-5, 2e-4)
-    assert nominal.gyro_noise_std_rad_s == 5e-5
-    assert nominal.accel_noise_std_m_s2 == 5e-5
-    assert nominal.step_s == 1.0
+    """Read from the class, as a consumer reads it without building a plant."""
+    assert ImuSpacecraft.mu == 3.986004360e14
+    assert ImuSpacecraft.semi_major_axis_m == 6871.0e3
+    assert ImuSpacecraft.eccentricity == 0.0001
+    assert ImuSpacecraft.inclination_rad == 45.0 * D2R
+    assert ImuSpacecraft.raan_rad == 48.2 * D2R
+    assert ImuSpacecraft.arg_periapsis_rad == 347.8 * D2R
+    assert ImuSpacecraft.true_anomaly_rad == 85.3 * D2R
+    assert ImuSpacecraft.mass_kg == 750.0
+    assert ImuSpacecraft.inertia_B_kg_m2 == (
+        (900.0, 0.0, 0.0),
+        (0.0, 800.0, 0.0),
+        (0.0, 0.0, 600.0),
+    )
+    assert ImuSpacecraft.sigma0_BN == (0.1, 0.2, -0.3)
+    assert ImuSpacecraft.omega0_BN_B == (D2R, D2R, D2R)
+    assert ImuSpacecraft.gyro_bias_P == (1e-4, -2e-4, 5e-5)
+    assert ImuSpacecraft.accel_bias_P == (1e-4, -5e-5, 2e-4)
+    assert ImuSpacecraft.gyro_noise_std_rad_s == 5e-5
+    assert ImuSpacecraft.accel_noise_std_m_s2 == 5e-5
+    assert ImuSpacecraft.step_s == 1.0
+    assert ImuSpacecraft.noise_seed == 0
+    assert dict(ImuSpacecraft.standard_dispersion) == {
+        "sigma0_BN": 0.01,
+        "omega0_BN_B": 0.2 * D2R,
+        "gyro_bias_P": 1e-4,
+        "accel_bias_P": 1e-4,
+    }
+
+
+def test_each_keyword_defaults_to_its_class_attribute():
+    """So a plant built with no keywords is the vehicle a consumer reads from the class."""
+    parameters = inspect.signature(ImuSpacecraft).parameters
+    assert len(parameters) == 16
+    for name, parameter in parameters.items():
+        assert parameter.default == getattr(ImuSpacecraft, name), name
 
 
 def test_keywords_reach_the_basilisk_objects():
@@ -68,6 +89,7 @@ def test_keywords_reach_the_basilisk_objects():
     assert np.array_equal(np.array(imu.sensorPos_B).flatten(), np.zeros(3))
     (earth,) = plant.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
+    assert earth.mu == ImuSpacecraft.mu
     assert imu.RNGSeed == 11
 
     state = plant.initial_state()
@@ -86,7 +108,7 @@ def test_initial_state_is_the_keywords_and_the_truth_at_t0():
     assert np.array_equal(state["sigma0_BN"], DISPERSED["sigma0_BN"])
     assert np.array_equal(state["omega0_BN_B"], DISPERSED["omega0_BN_B"])
 
-    truth = run_with_stub(plant, duration_s=10.0)
+    truth = run_with_guidance(plant, duration_s=10.0)
     for dataset, key, tolerance in (
         ("truth/sigma_BN", "sigma0_BN", 1e-15),
         ("truth/omega_BN_B", "omega0_BN_B", 1e-15),
@@ -100,15 +122,20 @@ def test_imu_reader_is_subscribed_to_the_imu_output():
     plant = ImuSpacecraft()
     reader = plant.readers()["imu"]
     assert reader.isLinked()
-    gyro, _ = run_with_stub(plant, duration_s=20.0)["imu/gyro_P"]
+    gyro, _ = run_with_guidance(plant, duration_s=20.0)["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 
 
-def test_a_plant_runs_once():
-    plant = ImuSpacecraft()
-    plant.execute(1.0)
-    with pytest.raises(RuntimeError, match="already run"):
-        plant.execute(1.0)
+def test_recorded_fields_name_the_run_file_datasets_with_their_units():
+    fields = ImuSpacecraft().recorded_fields()
+    assert {name: units for name, (_, _, units) in fields.items()} == {
+        "truth/sigma_BN": "MRP",
+        "truth/omega_BN_B": "rad/s",
+        "truth/r_N": "m",
+        "truth/v_N": "m/s",
+        "imu/gyro_P": "rad/s",
+        "imu/accel_P": "m/s^2",
+    }
 
 
 @pytest.mark.parametrize(
@@ -135,7 +162,7 @@ def test_a_reader_reads_the_live_value_after_its_plant_is_released():
     plant = ImuSpacecraft()
     released = weakref.ref(plant)
     reader = plant.readers()["imu"]
-    run_with_stub(plant, duration_s=20.0)
+    run_with_guidance(plant, duration_s=20.0)
     gyro = list(reader().AngVelPlatform)
     del plant
     gc.collect()

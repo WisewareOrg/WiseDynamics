@@ -8,35 +8,22 @@ import pytest
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
-from tests.support import StubFsw, run_with_stub
+from tests.support import GUIDANCE_SIGMA_RN, run_with_guidance
 from wise_dynamics.basilisk import ImuSpacecraft, run_case
 
 
 def test_a_case_records_its_fields_on_the_record_cadence():
     plant = ImuSpacecraft()
     fields = plant.recorded_fields()
-    datasets = run_with_stub(plant, duration_s=50.0, record_s=10.0)
+    datasets = run_with_guidance(plant, duration_s=50.0, record_s=10.0)
     t_s, units = datasets["t_s"]
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
-    assert list(datasets) == ["t_s", *fields, "stub/sigma_BN"]
+    assert list(datasets) == ["t_s", *fields, "guidance/sigma_RN"]
     for name, (_, _, field_units) in fields.items():
         assert datasets[name][0].shape == (6, 3)
         assert datasets[name][1] == field_units
-    assert np.allclose(datasets["stub/sigma_BN"][0][-1], StubFsw.FIXED_SIGMA_BN)
-
-
-def test_run_case_runs_a_stock_basilisk_module():
-    module = inertial3D.inertial3D()
-    module.ModelTag = "inertial3D"
-    module.sigma_R0N = [0.1, 0.0, 0.0]
-    datasets = run_case(
-        ImuSpacecraft(),
-        module,
-        fields={"ref/sigma_RN": (module.attRefOutMsg, "sigma_RN", "MRP")},
-        duration_s=20.0,
-    )
-    assert np.allclose(datasets["ref/sigma_RN"][0][-1], [0.1, 0.0, 0.0])
+    assert np.allclose(datasets["guidance/sigma_RN"][0][-1], GUIDANCE_SIGMA_RN)
 
 
 @pytest.mark.parametrize(
@@ -50,7 +37,7 @@ def test_run_case_runs_a_stock_basilisk_module():
 )
 def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     plant = ImuSpacecraft()
-    stub = StubFsw()
+    guidance = inertial3D.inertial3D()
     arguments = {"fields": plant.recorded_fields(), "duration_s": 10.0, "record_s": 10.0}
     if refusal == "no fields":
         arguments["fields"] = {}
@@ -61,7 +48,7 @@ def test_a_refused_call_leaves_the_plant_unchanged(refusal, error, message):
     models_before = len(plant._simulation.TaskList[0].TaskModels)
 
     with pytest.raises(error, match=message):
-        run_case(plant, stub, **arguments)
+        run_case(plant, guidance, **arguments)
     assert len(plant._simulation.TaskList[0].TaskModels) == models_before
 
 
@@ -70,7 +57,7 @@ def test_a_field_absent_from_its_message_is_named():
     with pytest.raises(ValueError, match="r_BN_N"):
         run_case(
             plant,
-            StubFsw(),
+            inertial3D.inertial3D(),
             fields={"bad": (plant.imu.sensorOutMsg, "r_BN_N", "m")},
             duration_s=10.0,
         )
