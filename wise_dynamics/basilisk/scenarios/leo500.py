@@ -39,6 +39,7 @@ class Leo500(Scenario):
         sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
         step_s: The integration and sensor step, in seconds.
+        record_s: The recording period, in seconds.
     """
 
     vehicle_type: ClassVar[type[Vehicle]] = ImuSpacecraft
@@ -57,6 +58,7 @@ class Leo500(Scenario):
     sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     step_s: float = 0.02
+    record_s: float = 10.0
 
     def initial_state(self) -> dict[str, np.ndarray]:
         """The initial condition the placement gives the vehicle, each a float array of shape

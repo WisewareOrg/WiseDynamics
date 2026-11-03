@@ -19,9 +19,7 @@ from Basilisk.fswAlgorithms import inertial3D
 
 
 def test_case(sim_case_index, sim_duration_s, sim_scenario, sim_run_file):
-    datasets = sim_scenario.run(
-        inertial3D.inertial3D(), fsw_fields={}, duration_s=sim_duration_s, record_s=1.0
-    )
+    datasets = sim_scenario.run(inertial3D.inertial3D(), {}, duration_s=sim_duration_s)
     path = sim_run_file(
         datasets,
         {
@@ -68,7 +66,6 @@ def _run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: in
                     "name": path.name,
                     "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
                     "t_s": run_file["t_s"][:],
-                    "gyro_P": run_file["imu/gyro_P"][:],
                     "sigma_BN": run_file["truth/sigma_BN"][:],
                     "omega_BN_B": run_file["truth/omega_BN_B"][:],
                 }
@@ -139,13 +136,13 @@ def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
 
 
 def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
-    runs = _run_session(scenario_dir, "out", "--sim-runs", "2", "--sim-seed", "42", passed=2)
+    runs = _run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     run = runs[1]
     attrs = run["attrs"]
     assert run["name"] == "run_0001.h5"
     assert attrs["case"] == 1
-    assert attrs["seed"] == 42
+    assert attrs["seed"] == 0
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", attrs["created_utc"])
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
@@ -211,22 +208,6 @@ def test_the_scenario_option_selects_a_registered_scenario_and_its_vehicle(scena
     assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], [1.0, 2.0, 3.0])
 
 
-def test_a_session_reproduces_from_its_seed(scenario_dir):
-    def session(seed: str, out: str) -> list[dict]:
-        return _run_session(scenario_dir, out, "--sim-runs", "2", "--sim-seed", seed, passed=2)
-
-    first, again, other = session("3", "a"), session("3", "b"), session("4", "c")
-    for case_first, case_again, case_other in zip(first, again, other, strict=True):
-        assert case_first["attrs"]["probe_noise_seed"] == case_again["attrs"]["probe_noise_seed"]
-        assert case_first["attrs"]["probe_noise_seed"] != case_other["attrs"]["probe_noise_seed"]
-        for name in ("gyro_P", "sigma_BN"):
-            assert np.array_equal(case_first[name], case_again[name]), name
-            assert not np.array_equal(case_first[name], case_other[name]), name
-        for name, value in _draws_of(case_first).items():
-            assert np.array_equal(value, _draws_of(case_again)[name]), name
-            assert not np.array_equal(value, _draws_of(case_other)[name]), name
-
-
 def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
     """`TMPDIR` points the default directory into this test's own directory, where it can be
     found."""
@@ -266,8 +247,10 @@ def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_
 
 
 def test_each_case_runs_for_sim_duration_s(scenario_dir):
-    (run,) = _run_session(scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "4", passed=1)
-    assert run["t_s"][-1] == 4.0
+    (run,) = _run_session(
+        scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "20", passed=1
+    )
+    assert run["t_s"].tolist() == [0.0, 10.0, 20.0]
 
 
 def test_a_session_runs_without_xdist(scenario_dir):
@@ -294,7 +277,6 @@ def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
     [
         ("--sim-runs", "0", "--sim-runs must be at least 1, got 0"),
         ("--sim-duration-s", "0", "--sim-duration-s must be positive, got 0.0"),
-        ("--sim-seed", "-1", "--sim-seed must be non-negative, got -1"),
     ],
 )
 def test_out_of_range_options_are_usage_errors(pytester, option, value, message):

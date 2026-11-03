@@ -20,7 +20,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     scenario = Leo500()
     fields = scenario.vehicle.recorded_fields()
     guidance, fsw_fields = _guidance()
-    datasets = scenario.run(guidance, fsw_fields=fsw_fields, duration_s=50.0, record_s=10.0)
+    datasets = scenario.run(guidance, fsw_fields, duration_s=50.0)
     t_s, units = datasets["t_s"]
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
@@ -36,7 +36,6 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
 @pytest.mark.parametrize(
     ("refusal", "error", "message"),
     [
-        ("record_s", ValueError, "recording period must be positive"),
         ("duration_s", ValueError, "duration must be positive"),
         ("t_s", ValueError, r"reuses the run's own dataset paths \['t_s'\]"),
         ("truth/r_N", ValueError, r"reuses the run's own dataset paths \['truth/r_N'\]"),
@@ -49,20 +48,20 @@ def test_a_refused_run_leaves_the_scenario_unchanged(refusal, error, message):
     scenario = Leo500()
     vehicle = scenario.vehicle
     guidance, fsw_fields = _guidance()
-    arguments = {"fsw_fields": fsw_fields, "duration_s": 10.0, "record_s": 10.0}
-    if refusal in ("record_s", "duration_s"):
-        arguments[refusal] = 0.0
+    fields, duration_s = fsw_fields, 10.0
+    if refusal == "duration_s":
+        duration_s = 0.0
     elif refusal in ("t_s", "truth/r_N"):
-        arguments["fsw_fields"] = {refusal: fsw_fields["guidance/sigma_RN"]}
+        fields = {refusal: fsw_fields["guidance/sigma_RN"]}
     elif refusal == "absent field":
-        arguments["fsw_fields"] = {"bad": (guidance.attRefOutMsg, "r_BN_N", "m")}
+        fields = {"bad": (guidance.attRefOutMsg, "r_BN_N", "m")}
     elif refusal == "already run":
-        scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+        scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
     tasks_before = [list(task.TaskModels) for task in scenario._simulation.TaskList]
 
     with pytest.raises(error, match=message):
-        scenario.run(guidance, **arguments)
+        scenario.run(guidance, fields, duration_s=duration_s)
     assert [list(task.TaskModels) for task in scenario._simulation.TaskList] == tasks_before
     assert len(vehicle.spacecraft.gravField.gravBodies) == (refusal == "already run")
     if refusal != "already run":
-        scenario.run(guidance, fsw_fields=fsw_fields, duration_s=10.0)
+        scenario.run(guidance, fsw_fields, duration_s=10.0)

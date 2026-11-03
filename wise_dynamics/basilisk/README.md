@@ -37,17 +37,18 @@ dataset float64 with a `units` attribute.
 
 ## Scenarios
 
-A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
-`vehicle_type`, the class of the vehicle it builds, with units and frames in its class docstring;
-its constructor takes no arguments. The built vehicle is `scenario.vehicle`. `draw(rng)` draws the
-scenario's `standard_dispersion`, then its vehicle class's, as a vehicle's `draw` does.
-`disperse(draws, *, noise_seed=None)` sets the drawn placement on one instance and builds its
-vehicle again with the drawn vehicle values and `noise_seed` as keywords, refusing any name outside
-the two standard dispersions. A scenario takes one vehicle: it adds its own with `add(vehicle)`,
-and a second `add` is refused. `initial_state()` returns the placement the vehicle starts from,
-valid before `run`.
+A scenario is a `Scenario` subclass whose class attributes are its environment, its placement, its
+recording period `record_s` and `vehicle_type`, the class of the vehicle it builds, with units and
+frames in its class docstring; its constructor takes no arguments. The built vehicle is
+`scenario.vehicle`. `draw(rng)` draws the scenario's `standard_dispersion`, then its vehicle
+class's, as a vehicle's `draw` does. `disperse(rng, *, noise_seed=None)` draws them from `rng`,
+sets the drawn placement on one instance, builds its vehicle again with the drawn vehicle values
+and `noise_seed` as keywords, and records what it applied in `scenario.draws`. The new vehicle
+replaces `scenario.vehicle`, so readers and other handles on it are taken after dispersing.
+`initial_state()` returns the placement the vehicle starts from, valid before `run`.
 
-`run(fsw_module, *, fsw_fields, duration_s, record_s=10.0)` builds the simulation and runs once.
+`run(fsw_module, fsw_fields, *, duration_s)` builds the simulation, runs once and records every
+`record_s`.
 `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
 `recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to
 `(array, units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
@@ -61,7 +62,6 @@ consumer's `conftest.py` names nothing.
 |---|---|---|
 | `--sim-runs` | 8 | cases in the session, at least 1 |
 | `--sim-out` | a new directory under the system temporary directory | where run files go; a directory already holding run files is refused |
-| `--sim-seed` | 0 | session seed |
 | `--sim-duration-s` | 5700 | simulated seconds per case |
 | `--sim-scenario` | `leo500` | the scenario's name in `SCENARIOS` |
 
@@ -69,12 +69,12 @@ consumer's `conftest.py` names nothing.
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | `--sim-duration-s` |
-| `sim_scenario` | the case's scenario, dispersed with its own `draw` from the case's stream and its vehicle's noise seeded from the case; its vehicle is `sim_scenario.vehicle` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per draw, and `attrs` beside them |
+| `sim_scenario` | the case's scenario, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
-Case `k` of seed `s` takes its draws and its noise seed from the two streams of
-`numpy.random.SeedSequence(s, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`
-is and reruns alone: `pytest <test file> --sim-seed S --sim-runs N "<test file>::test_case[k]"`.
+Case `k` takes its draws and its noise seed from the two streams of
+`numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`
+is and reruns alone: `pytest <test file> --sim-runs N "<test file>::test_case[k]"`.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. Its output joins
@@ -90,8 +90,6 @@ def test_case(sim_scenario, sim_duration_s, sim_run_file):
     guidance = inertial3D.inertial3D()
     guidance.ModelTag = "guidance"
     fsw_fields = {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
-    datasets = sim_scenario.run(
-        guidance, fsw_fields=fsw_fields, duration_s=sim_duration_s, record_s=10.0
-    )
+    datasets = sim_scenario.run(guidance, fsw_fields, duration_s=sim_duration_s)
     sim_run_file(datasets, {"versions_guidance": "1.0"})
 ```

@@ -41,6 +41,7 @@ def test_the_scenario_is_its_class_attributes():
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
     assert Leo500.step_s == 0.02
+    assert Leo500.record_s == 10.0
     assert Leo500.standard_dispersion == {"sigma0_BN": 0.01, "omega0_BN_B_rad_s": 0.2 * D2R}
     assert Leo500.vehicle_type is ImuSpacecraft
 
@@ -49,7 +50,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     scenario = Placed()
     vehicle = scenario.vehicle
     state = scenario.initial_state()
-    scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
 
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
@@ -74,7 +75,7 @@ def test_the_placement_reaches_the_basilisk_objects():
 
 def test_the_nominal_step_is_the_task_period():
     scenario = Leo500()
-    scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
     (task,) = scenario._simulation.TaskList
     assert task.TaskData.TaskPeriod == 20_000_000
 
@@ -97,49 +98,31 @@ def test_draw_draws_the_placement_then_the_vehicle_in_dispersion_order():
         assert np.array_equal(draws[name], expected), name
 
 
-def test_disperse_sets_the_placement_and_builds_the_vehicle_from_the_draws():
+def test_disperse_applies_its_own_draws_and_builds_the_vehicle_from_them():
     scenario = Leo500()
     built = scenario.vehicle
-    scenario.disperse(
-        {"sigma0_BN": (0.3, -0.2, 0.1), "gyro_bias_P_rad_s": (3e-4, -1e-4, 2e-4)}, noise_seed=11
-    )
-    assert np.array_equal(scenario.initial_state()["sigma0_BN"], [0.3, -0.2, 0.1])
+    assert scenario.draws == {}
+    scenario.disperse(np.random.default_rng(7), noise_seed=11)
+    draws = Leo500.draw(np.random.default_rng(7))
+    assert scenario.draws.keys() == draws.keys()
+    for name, value in draws.items():
+        assert np.array_equal(scenario.draws[name], value), name
+    assert np.array_equal(scenario.initial_state()["sigma0_BN"], draws["sigma0_BN"])
+    assert np.array_equal(scenario.initial_state()["omega0_BN_B"], draws["omega0_BN_B_rad_s"])
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert scenario.vehicle is not built
     assert scenario.vehicles == [scenario.vehicle]
     imu = scenario.vehicle.imu
-    assert np.array_equal(np.array(imu.senRotBias).flatten(), (3e-4, -1e-4, 2e-4))
-    assert np.array_equal(np.array(imu.senTransBias).flatten(), ImuSpacecraft.accel_bias_P_m_s2)
+    assert np.array_equal(np.array(imu.senRotBias).flatten(), draws["gyro_bias_P_rad_s"])
+    assert np.array_equal(np.array(imu.senTransBias).flatten(), draws["accel_bias_P_m_s2"])
     assert imu.RNGSeed == 11
 
 
-def test_disperse_refuses_a_name_outside_the_declared_dispersions():
+def test_disperse_after_the_run_is_refused():
     scenario = Leo500()
-    built = scenario.vehicle
-    with pytest.raises(
-        ValueError, match=r"Leo500 does not disperse \['mass_kg', 'semi_major_axis_m'\]"
-    ):
-        scenario.disperse(
-            {"sigma0_BN": (0.3, -0.2, 0.1), "semi_major_axis_m": 7000.0e3, "mass_kg": 1.0}
-        )
-    assert scenario.sigma0_BN == Leo500.sigma0_BN
-    assert scenario.vehicle is built
-
-
-def test_after_the_run_disperse_and_add_are_refused():
-    scenario = Leo500()
-    scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+    scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
-        scenario.disperse({})
-    with pytest.raises(RuntimeError, match="already run"):
-        scenario.add(ImuSpacecraft())
-
-
-def test_a_second_vehicle_is_refused():
-    scenario = Leo500()
-    with pytest.raises(ValueError, match="Leo500 takes one vehicle and already holds it"):
-        scenario.add(ImuSpacecraft())
-    assert scenario.vehicles == [scenario.vehicle]
+        scenario.disperse(np.random.default_rng(7))
 
 
 class Hyperbolic(Leo500):
@@ -154,18 +137,23 @@ class Stalled(Leo500):
     step_s = 0.0
 
 
+class Unrecorded(Leo500):
+    record_s = 0.0
+
+
 @pytest.mark.parametrize(
     ("scenario_type", "message"),
     [
         (Collapsed, "semi-major axis must be positive"),
         (Hyperbolic, r"eccentricity must be in \[0, 1\)"),
         (Stalled, "step must be positive"),
+        (Unrecorded, "recording period must be positive"),
     ],
 )
 def test_a_refused_placement_leaves_the_vehicle_unplaced(scenario_type, message):
     scenario = scenario_type()
     vehicle = scenario.vehicle
     with pytest.raises(ValueError, match=message):
-        scenario.run(inertial3D.inertial3D(), fsw_fields={}, duration_s=1.0)
+        scenario.run(inertial3D.inertial3D(), {}, duration_s=1.0)
     assert len(vehicle.spacecraft.gravField.gravBodies) == 0
     assert len(scenario._simulation.TaskList) == 0

@@ -23,7 +23,7 @@ __all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
 _OUT_DIR = pytest.StashKey[Path]()
-_DRAWS = pytest.StashKey[dict[str, np.ndarray]]()
+_SEED = 0
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -38,7 +38,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="directory the run files are written to (default: a new directory under the "
         "system temporary directory)",
     )
-    group.addoption("--sim-seed", type=int, default=0, help="session seed (default: 0)")
     group.addoption(
         "--sim-duration-s",
         type=float,
@@ -75,11 +74,8 @@ def pytest_configure(config: pytest.Config) -> None:
     else:
         out_dir = Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
 
-    seed = config.getoption("--sim-seed")
     runs = config.getoption("--sim-runs")
     duration_s = config.getoption("--sim-duration-s")
-    if seed < 0:
-        raise pytest.UsageError(f"wise-dynamics: --sim-seed must be non-negative, got {seed}")
     if runs < 1:
         raise pytest.UsageError(f"wise-dynamics: --sim-runs must be at least 1, got {runs}")
     if not duration_s > 0:
@@ -139,11 +135,11 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     """This case's scenario: `--sim-scenario`, dispersed with its own `draw` from the case's first
     stream and its vehicle's sensor noise seeded from the case's second. Its vehicle is
     `sim_scenario.vehicle`."""
-    draws_stream, noise_stream = _streams(request.config.getoption("--sim-seed"), sim_case_index)
+    draws_stream, noise_stream = _streams(sim_case_index)
     scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
-    draws = scenario.draw(np.random.default_rng(draws_stream))
-    scenario.disperse(draws, noise_seed=int(noise_stream.generate_state(1)[0]))
-    request.node.stash[_DRAWS] = draws
+    scenario.disperse(
+        np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
+    )
     return scenario
 
 
@@ -163,12 +159,12 @@ def sim_run_file(
     """
     own: dict[str, Any] = {
         "case": sim_case_index,
-        "seed": request.config.getoption("--sim-seed"),
+        "seed": _SEED,
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
     }
-    for name, value in request.node.stash[_DRAWS].items():
+    for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
     path = request.config.stash[_OUT_DIR] / f"run_{sim_case_index:04d}.h5"
 
@@ -206,6 +202,7 @@ def _scenario_type(name: str) -> "type[Scenario]":
         ) from None
 
 
-def _streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Case `index`'s two random streams: the first draws, the second seeds sensor noise."""
-    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+def _streams(index: int) -> list[np.random.SeedSequence]:
+    """Case `index`'s two random streams from the seed `_SEED`: the first draws, the second seeds
+    sensor noise."""
+    return np.random.SeedSequence(_SEED, spawn_key=(index,)).spawn(2)
