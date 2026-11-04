@@ -1,8 +1,8 @@
-"""The WiseDynamics pytest plugin: a pytest session runs one scenario, with its vehicle, over
-`--sim-runs` Monte Carlo cases.
+"""The WiseDynamics pytest plugin: one scenario, with its vehicle, over `--sim-runs` cases.
 
-Installing `wise-dynamics` registers this module through its `pytest11` entry point.
-`wise_dynamics/basilisk/README.md` documents its options and fixtures.
+A pytest session runs the cases as one Monte Carlo run. Installing `wise-dynamics` registers this
+module through its `pytest11` entry point. `wise_dynamics/basilisk/README.md` documents its
+options and fixtures.
 """
 
 import secrets
@@ -27,7 +27,11 @@ _SEED = 0
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the `--sim-*` options."""
+    """Register the `--sim-*` options.
+
+    Args:
+        parser: The pytest command-line parser.
+    """
     group = parser.getgroup("wise-dynamics", "WiseDynamics vehicle cases")
     group.addoption(
         "--sim-runs", type=int, default=8, help="number of cases in the session (default: 8)"
@@ -64,6 +68,9 @@ def pytest_configure(config: pytest.Config) -> None:
     The controlling process resolves one absolute output directory, which every pytest-xdist
     worker receives; the first run file written creates it.
 
+    Args:
+        config: The session's pytest configuration, which holds the options and the stash.
+
     Raises:
         pytest.UsageError: An option is out of range, or `--sim-out` already holds run files.
     """
@@ -94,12 +101,19 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
-    """pytest-xdist hook: hand a starting worker the controller's output directory."""
+    """Hand a starting pytest-xdist worker the controller's output directory.
+
+    Args:
+        node: The pytest-xdist worker node being configured.
+    """
     node.workerinput[_WORKER_OUT_DIR] = str(node.config.stash[_OUT_DIR])
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over the case numbers.
+
+    Args:
+        metafunc: The test function being collected.
 
     Raises:
         pytest.UsageError: `--sim-scenario` names nothing in `SCENARIOS`.
@@ -115,7 +129,12 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 
 def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> None:
-    """Report where the run files are, when the session wrote any."""
+    """Report where the run files are, when the session wrote any.
+
+    Args:
+        terminalreporter: pytest's terminal reporter, which writes the summary line.
+        config: The session's pytest configuration.
+    """
     if hasattr(config, "workerinput"):
         return
     out_dir = config.stash[_OUT_DIR]
@@ -126,22 +145,45 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
 
 @pytest.fixture
 def sim_case_index(request: pytest.FixtureRequest) -> int:
-    """This case's number, `0 <= index < --sim-runs`. A test using it, directly or through
-    another per-case `sim_` fixture, runs once per case."""
+    """This case's number.
+
+    A test using it, directly or through another `sim_` fixture, runs once per case.
+
+    Args:
+        request: The fixture request, whose `param` is the case number.
+
+    Returns:
+        The case number, `0 <= index < --sim-runs`.
+    """
     return request.param
 
 
 @pytest.fixture
 def sim_duration_s(request: pytest.FixtureRequest) -> float:
-    """Each case's simulated duration, in seconds: `--sim-duration-s`."""
+    """Each case's simulated duration.
+
+    Args:
+        request: The fixture request, whose config holds `--sim-duration-s`.
+
+    Returns:
+        `--sim-duration-s`, in seconds.
+    """
     return request.config.getoption("--sim-duration-s")
 
 
 @pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
-    """This case's scenario: `--sim-scenario` at `--sim-fidelity`, dispersed from the case's first
-    stream, with its vehicle's sensor noise seeded from the case's second. Its vehicle is
-    `sim_scenario.vehicle`."""
+    """This case's scenario, dispersed from the case's two random streams.
+
+    Args:
+        request: The fixture request, whose config holds `--sim-scenario` and `--sim-fidelity`.
+        sim_case_index: The case number.
+
+    Returns:
+        `--sim-scenario` at `--sim-fidelity`, dispersed from the case's first stream, with its
+        vehicle's sensor noise seeded from the case's second. Its vehicle is
+        `sim_scenario.vehicle`.
+    """
     draws_stream, noise_stream = _streams(sim_case_index)
     scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
     scenario.fidelity = request.config.getoption("--sim-fidelity")
@@ -157,13 +199,19 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """Writes this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
+    """A writer of this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
 
-    Called as `sim_run_file(datasets, attrs=None)`, with `datasets` as `Scenario.run` returns
-    them, it returns the file's path. The file's root attributes are `case`, `seed`, `fidelity`,
-    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
-    one `draw_<name>` per value the scenario drew, with `attrs` beside them; `attrs` naming one of
-    those raises `ValueError`.
+    The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the case's start,
+    ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and one `draw_<name>` per value the
+    scenario drew.
+
+    Args:
+        request: The fixture request, whose config stash holds the output directory.
+        sim_case_index: The case number.
+        sim_scenario: The case's scenario, whose vehicle writes the file.
+
+    Returns:
+        `sim_run_file(datasets, attrs=None)`, which writes the file and returns its path.
     """
     own: dict[str, Any] = {
         "case": sim_case_index,
@@ -180,6 +228,18 @@ def sim_run_file(
     def write(
         datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None
     ) -> Path:
+        """Write the run file.
+
+        Args:
+            datasets: Dataset name to `(array, units)`, as `Scenario.run` returns them.
+            attrs: Root attributes written beside the file's own.
+
+        Returns:
+            The file's path.
+
+        Raises:
+            ValueError: `attrs` names one of the file's own root attributes.
+        """
         extras = dict(attrs or {})
         replaced = sorted(set(own) & set(extras))
         if replaced:
@@ -191,12 +251,25 @@ def sim_run_file(
 
 
 def _run_files(count: int) -> str:
-    """`count` run files, in words."""
+    """Say `count` run files in words.
+
+    Args:
+        count: The number of run files.
+
+    Returns:
+        `"1 run file"` or `"<count> run files"`.
+    """
     return f"{count} run file" if count == 1 else f"{count} run files"
 
 
 def _scenario_type(name: str) -> "type[Scenario]":
-    """The scenario class `name` registers in `SCENARIOS`, imported with Basilisk on first use.
+    """Look up a scenario class by name, importing Basilisk on first use.
+
+    Args:
+        name: A name in `SCENARIOS`.
+
+    Returns:
+        The scenario class `name` registers.
 
     Raises:
         ValueError: `name` is not registered.
@@ -212,6 +285,12 @@ def _scenario_type(name: str) -> "type[Scenario]":
 
 
 def _streams(index: int) -> list[np.random.SeedSequence]:
-    """Case `index`'s two random streams from the seed `_SEED`: the first draws, the second seeds
-    sensor noise."""
+    """Spawn case `index`'s two random streams from the seed `_SEED`.
+
+    Args:
+        index: The case number.
+
+    Returns:
+        The first stream, which draws the dispersions, and the second, which seeds sensor noise.
+    """
     return np.random.SeedSequence(_SEED, spawn_key=(index,)).spawn(2)

@@ -23,7 +23,11 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 
 - `check-adrs` — `docs/decisions/` and its index agree, and every citation of an ADR in the
   tracked tree pins that ADR's current rev.
-- `ruff` — `uv run ruff check .` and `uv run ruff format --check .`.
+- `ruff` — three commands:
+  - `uv run ruff check .`, which includes the Google-convention docstring rules;
+  - `uv run ruff format --check .`;
+  - `uv run interrogate -v --fail-under 100 wise_dynamics tests`, which requires a docstring on
+    every module, class and function in the package and the tests.
 - `pytest` — `uv run pytest`, the full suite.
 
 The same commands run locally after `uv sync`.

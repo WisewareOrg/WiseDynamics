@@ -40,6 +40,7 @@ class Scenario:
     fidelity: str = "lo"
 
     def __init__(self) -> None:
+        """Create the empty Basilisk simulation `run` builds into."""
         self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False

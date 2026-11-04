@@ -45,19 +45,21 @@ class Leo500(Scenario):
     record_s: float = 10.0
 
     def __init__(self) -> None:
+        """Build the `ImuSpacecraft` and place it at the class attributes' placement."""
         super().__init__()
         self.draws: dict[str, np.ndarray] = {}
         self.vehicle = self._placed(ImuSpacecraft())
         self.vehicles = [self.vehicle]
 
     def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> None:
-        """Draw this case's placement from `rng`, then have the vehicle class draw its own
-        dispersion from `rng` and build a vehicle, and place that vehicle.
+        """Disperse this case: the placement first, then the vehicle's own dispersion.
 
-        The placement is `sigma0_BN` with per-axis 1-sigma 0.01 (a dimensionless MRP), then
-        `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus independent normal samples. The
-        new vehicle replaces `vehicle`, so readers and other handles on it are taken after
-        dispersing. `draws` records the placement's draws and the vehicle's.
+        The vehicle class draws its own dispersion from the same `rng` and builds the vehicle,
+        which is then placed. The placement is `sigma0_BN` with per-axis 1-sigma 0.01 (a
+        dimensionless MRP), then `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus
+        independent normal samples. The new vehicle replaces `vehicle`, so readers and other
+        handles on it are taken after dispersing. `draws` records the placement's draws and the
+        vehicle's.
 
         Args:
             rng: The generator the dispersions are drawn from.
@@ -77,13 +79,12 @@ class Leo500(Scenario):
         }
 
     def initial_state(self) -> dict[str, np.ndarray]:
-        """The initial condition the placement gives the vehicle, each a float array of shape
-        `(3,)`.
+        """Compute the initial condition the placement gives the vehicle.
 
         Returns:
             `sigma0_BN` (MRP, body relative to N), `r0_N` (position of the centre of mass in N,
             m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body rate relative to N in
-            body axes, rad/s).
+            body axes, rad/s), each a float array of shape `(3,)`.
         """
         elements = orbitalMotion.ClassicElements()
         elements.a, elements.e = self.semi_major_axis_m, self.eccentricity
@@ -98,8 +99,14 @@ class Leo500(Scenario):
         }
 
     def _placed(self, vehicle: ImuSpacecraft) -> ImuSpacecraft:
-        """`vehicle` under point-mass Earth gravity, with the placement's initial state on its
-        hub."""
+        """Place a vehicle under point-mass Earth gravity, at the placement's initial state.
+
+        Args:
+            vehicle: The vehicle to place.
+
+        Returns:
+            `vehicle`, with Earth attached as its central body and the initial state on its hub.
+        """
         state = self.initial_state()
         self._gravity = simIncludeGravBody.gravBodyFactory()
         earth = self._gravity.createEarth()

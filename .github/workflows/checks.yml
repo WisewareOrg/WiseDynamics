@@ -40,6 +40,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run interrogate -v --fail-under 100 wise_dynamics tests
 
   pytest:
     name: pytest

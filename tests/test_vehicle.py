@@ -8,6 +8,11 @@ from wise_dynamics.basilisk import ImuSpacecraft
 
 
 def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
+    """Datasets read back as float64 with their units, and root attributes as written.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
     path = tmp_path / "session" / "nested" / "run_0000.h5"
     ImuSpacecraft().write_run_file(
         path,
@@ -29,6 +34,11 @@ def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
 
 
 def test_a_run_file_is_written_once(tmp_path):
+    """A second write to the same path is refused.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
     vehicle = ImuSpacecraft()
     vehicle.write_run_file(tmp_path / "run_0000.h5", {"t_s": (np.zeros(1), "s")})
     with pytest.raises(FileExistsError):
@@ -36,6 +46,11 @@ def test_a_run_file_is_written_once(tmp_path):
 
 
 def test_a_failed_write_leaves_no_file(tmp_path):
+    """A write that fails part-way removes its file, and the path stays writable.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
     vehicle = ImuSpacecraft()
     path = tmp_path / "run_0000.h5"
     with pytest.raises(TypeError):

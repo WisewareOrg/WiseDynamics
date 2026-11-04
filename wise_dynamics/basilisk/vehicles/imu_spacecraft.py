@@ -19,24 +19,12 @@ type Vector3 = tuple[float, float, float]
 
 
 class ImuSpacecraft(Vehicle):
-    """A rigid hub with one IMU at its centre of mass and identity mounting, so the IMU platform
-    frame P is the body frame B.
+    """A rigid hub with one IMU at its centre of mass and identity mounting.
 
-    A keyword left at `None` takes the class attribute of the same name, read when the vehicle is
-    built, so a consumer reads the nominal vehicle without building one and a subclass that
-    overrides an attribute builds with its value. A vehicle keeps each value it is built with as
-    an instance attribute of that name.
-
-    Args:
-        mass_kg: Hub mass, in kilograms.
-        inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2, as three
-            rows.
-        gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
-        accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
-        gyro_noise_std_rad_s: Per-sample 1-sigma white noise on each gyro axis, in rad/s.
-        accel_noise_std_m_s2: Per-sample 1-sigma white noise on each accelerometer axis, in
-            m/s^2.
-        noise_seed: Seed of the IMU's white-noise generator.
+    The IMU platform frame P is the body frame B. A keyword left at `None` takes the class
+    attribute of the same name, read when the vehicle is built, so a consumer reads the nominal
+    vehicle without building one and a subclass that overrides an attribute builds with its value.
+    A vehicle keeps each value it is built with as an instance attribute of that name.
 
     Attributes:
         gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `dispersed` draws, in rad/s.
@@ -95,6 +83,19 @@ class ImuSpacecraft(Vehicle):
         accel_noise_std_m_s2: float | None = None,
         noise_seed: int | None = None,
     ) -> None:
+        """Build the hub and the IMU.
+
+        Args:
+            mass_kg: Hub mass, in kilograms.
+            inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2, as
+                three rows.
+            gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+            accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+            gyro_noise_std_rad_s: Per-sample 1-sigma white noise on each gyro axis, in rad/s.
+            accel_noise_std_m_s2: Per-sample 1-sigma white noise on each accelerometer axis, in
+                m/s^2.
+            noise_seed: Seed of the IMU's white-noise generator.
+        """
         nominal = type(self)
         self.mass_kg = nominal.mass_kg if mass_kg is None else mass_kg
         self.inertia_B_kg_m2 = (
@@ -133,22 +134,34 @@ class ImuSpacecraft(Vehicle):
         self.imu.RNGSeed = int(self.noise_seed)
 
     def models(self) -> list[Any]:
-        """The hub, then the IMU."""
+        """List the vehicle's Basilisk modules in task order.
+
+        Returns:
+            The hub, then the IMU.
+        """
         return [self.spacecraft, self.imu]
 
     def readers(self) -> dict[str, Any]:
-        """Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output."""
+        """Build the vehicle's sensor readers.
+
+        Returns:
+            Role `imu`: an `IMUSensorMsgReader` subscribed to the IMU's output.
+        """
         imu_reader = messaging.IMUSensorMsgReader()
         imu_reader.subscribeTo(self.imu.sensorOutMsg)
         return {"imu": imu_reader}
 
     def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
-        """The hub's `SCStatesMsg` attitude, rate, position and velocity under `truth/`, and the
-        IMU's `IMUSensorMsg` gyro and accelerometer outputs under `imu/`.
+        """Declare what the vehicle records.
 
         `truth/r_N` and `truth/v_N` are the body-frame origin's state in the inertial frame N. They
         equal the centre of mass's state, which a scenario places, because the hub's centre of
         mass sits at the body-frame origin.
+
+        Returns:
+            Run-file dataset path to `(message, field, units)`: the hub's `SCStatesMsg` attitude
+            (MRP), rate (rad/s), position (m) and velocity (m/s) under `truth/`, and the IMU's
+            `IMUSensorMsg` gyro (rad/s) and accelerometer (m/s^2) outputs under `imu/`.
         """
         truth = self.spacecraft.scStateOutMsg
         imu = self.imu.sensorOutMsg

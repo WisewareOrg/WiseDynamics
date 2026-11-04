@@ -1,5 +1,7 @@
-"""The pytest plugin, exercised through real pytest sessions in subprocesses, loaded by its
-`pytest11` entry point."""
+"""The pytest plugin, exercised through real pytest sessions in subprocesses.
+
+Each session loads the plugin by its `pytest11` entry point.
+"""
 
 import re
 from importlib.metadata import version
@@ -51,13 +53,31 @@ CASE_5_DRAWS = {
 
 @pytest.fixture
 def scenario_dir(pytester: pytest.Pytester) -> pytest.Pytester:
-    """A pytester directory holding a one-test scenario."""
+    """Make a pytester directory holding a one-test scenario.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+
+    Returns:
+        `pytester`, with `test_scenario.py` written.
+    """
     pytester.makepyfile(test_scenario=SCENARIO_TEST)
     return pytester
 
 
 def _run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: int) -> list[dict]:
-    """Run the scenario's session into `out` and return each run file's attributes and datasets."""
+    """Run the scenario's session into `out` and read back each run file.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+        out: The output directory's name under `scenario_dir`.
+        *args: Further pytest arguments.
+        passed: The number of tests the session must pass.
+
+    Returns:
+        One mapping per run file, in name order: its `name`, root `attrs`, `t_s` (s), `sigma_BN`
+        (MRP) and `omega_BN_B` (rad/s).
+    """
     out_dir = scenario_dir.path / out
     scenario_dir.runpytest_subprocess("--sim-out", str(out_dir), *SHORT, *args).assert_outcomes(
         passed=passed
@@ -78,6 +98,14 @@ def _run_session(scenario_dir: pytest.Pytester, out: str, *args: str, passed: in
 
 
 def _draws_of(run: dict) -> dict[str, np.ndarray]:
+    """Collect a run's `draw_<name>` root attributes.
+
+    Args:
+        run: One run file's mapping, as `_run_session` returns it.
+
+    Returns:
+        Draw name, without its `draw_` prefix, to its value.
+    """
     return {
         key.removeprefix("draw_"): np.asarray(value)
         for key, value in run["attrs"].items()
@@ -96,12 +124,28 @@ states."""
 
 
 def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Case `index`'s two streams, derived as the README states."""
+    """Derive case `index`'s two streams, as the README states.
+
+    Args:
+        seed: The session seed.
+        index: The case number.
+
+    Returns:
+        The draw stream, then the noise stream.
+    """
     return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
 
 
 def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """The standard draws of case `index`, derived as the README states."""
+    """Derive the standard draws of case `index`, as the README states.
+
+    Args:
+        seed: The session seed.
+        index: The case number.
+
+    Returns:
+        Draw name to its value, in draw order, in the units of `_DISPERSION`.
+    """
     draws_stream, _ = _case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
     return {
@@ -111,6 +155,11 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
 
 
 def test_case_seeding_matches_recorded_runs(scenario_dir):
+    """Case 5 of seed 0 draws, and seeds its noise with, the recorded values.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     (run,) = _run_session(
         scenario_dir, "out", "--sim-runs", "852", "test_scenario.py::test_case[5]", passed=1
     )
@@ -120,6 +169,11 @@ def test_case_seeding_matches_recorded_runs(scenario_dir):
 
 
 def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
+    """Case 5 draws the same values in a session of 8 cases as in one of 852.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     (small,) = _run_session(
         scenario_dir, "small", "--sim-runs", "8", "test_scenario.py::test_case[5]", passed=1
     )
@@ -132,6 +186,11 @@ def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
 
 
 def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
+    """Each case records the standard draws, and its vehicle and placement use them.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     runs = _run_session(scenario_dir, "out", "--sim-runs", "3", passed=3)
 
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2]
@@ -149,6 +208,11 @@ def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
 
 
 def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
+    """A run file carries exactly the case's root attributes and the caller's probes.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     runs = _run_session(scenario_dir, "out", "--sim-runs", "2", passed=2)
 
     run = runs[1]
@@ -178,6 +242,11 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
 
 
 def test_attrs_cannot_replace_the_run_files_own(pytester):
+    """Caller attributes naming one of the file's own are refused, and no file is written.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     pytester.makepyfile(
         """
         import numpy as np
@@ -196,8 +265,13 @@ def test_attrs_cannot_replace_the_run_files_own(pytester):
 
 
 def test_the_scenario_option_selects_a_registered_scenario(scenario_dir):
-    """A second scenario, registered by the consumer's conftest, is the scenario the session
-    builds when `--sim-scenario` names it: its attitude is dispersed about its own nominal."""
+    """A scenario the consumer's conftest registers is the one `--sim-scenario` builds.
+
+    Its attitude is dispersed about its own nominal.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     scenario_dir.makeconftest(
         """
         from wise_dynamics.basilisk import SCENARIOS, Leo500
@@ -215,8 +289,14 @@ def test_the_scenario_option_selects_a_registered_scenario(scenario_dir):
 
 
 def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
-    """`TMPDIR` points the default directory into this test's own directory, where it can be
-    found."""
+    """pytest-xdist workers write to the one default directory the controller chose.
+
+    `TMPDIR` points the default directory into this test's own directory, where it can be found.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+        monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
+    """
     monkeypatch.setenv("TMPDIR", str(scenario_dir.path))
     result = scenario_dir.runpytest_subprocess("-n", "2", "--sim-runs", "2", *SHORT)
 
@@ -228,8 +308,14 @@ def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
 
 
 def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_dir):
-    """Each worker changes directory before the plugin configures it, and `--sim-out` is
-    relative; the run files land in the one directory the controller resolved."""
+    """A relative `--sim-out` resolves once, in the controller, for every worker.
+
+    Each worker changes directory before the plugin configures it, and the run files still land in
+    the one directory the controller resolved.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     scenario_dir.makeconftest(
         """
         import os
@@ -253,6 +339,11 @@ def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_
 
 
 def test_each_case_runs_for_sim_duration_s(scenario_dir):
+    """A case runs for `--sim-duration-s`, recording every 10 s.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     (run,) = _run_session(
         scenario_dir, "out", "--sim-runs", "1", "--sim-duration-s", "20", passed=1
     )
@@ -260,6 +351,11 @@ def test_each_case_runs_for_sim_duration_s(scenario_dir):
 
 
 def test_a_session_runs_without_xdist(scenario_dir):
+    """A session runs with pytest-xdist disabled.
+
+    Args:
+        scenario_dir: A pytester directory holding the one-test scenario.
+    """
     runs = _run_session(scenario_dir, "out", "-p", "no:xdist", "--sim-runs", "1", passed=1)
     assert len(runs) == 1
 
@@ -267,8 +363,15 @@ def test_a_session_runs_without_xdist(scenario_dir):
 def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
     pytester, tmp_path, monkeypatch
 ):
-    """The default output directory sits under `TMPDIR`; a session with no case leaves `TMPDIR`
-    as it found it."""
+    """A session with no case leaves `TMPDIR` as it found it.
+
+    The default output directory sits under `TMPDIR`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory, holding the `TMPDIR` used.
+        monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
+    """
     temporary = tmp_path / "tmp"
     temporary.mkdir()
     monkeypatch.setenv("TMPDIR", str(temporary))
@@ -286,6 +389,14 @@ def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
     ],
 )
 def test_out_of_range_options_are_usage_errors(pytester, option, value, message):
+    """An out-of-range option is a usage error naming the option and the value.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        option: The option under test.
+        value: Its out-of-range value.
+        message: The usage error's message.
+    """
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
     result = pytester.runpytest_subprocess(option, value)
     assert result.ret == pytest.ExitCode.USAGE_ERROR
@@ -293,6 +404,11 @@ def test_out_of_range_options_are_usage_errors(pytester, option, value, message)
 
 
 def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(pytester):
+    """An unknown `--sim-scenario` fails collection, naming it and the known scenarios.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
     result = pytester.runpytest_subprocess("--sim-scenario", "bogus")
     assert result.ret == pytest.ExitCode.INTERRUPTED
@@ -305,6 +421,11 @@ def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(pytes
 
 
 def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
+    """A `--sim-out` already holding run files is a usage error.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     out_dir = pytester.path / "out"
     out_dir.mkdir()
     (out_dir / "run_0000.h5").write_bytes(b"")
@@ -315,7 +436,11 @@ def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
 
 
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester):
-    """The plugin loads into every session of an environment with `wise-dynamics` installed."""
+    """The plugin loads into every session without importing Basilisk.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     pytester.makepyfile(
         """
         import sys
@@ -329,6 +454,11 @@ def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester):
 
 
 def test_the_readme_scenario_runs_as_a_session(pytester):
+    """The README's worked example runs as a session and writes its run files.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     (example,) = re.findall(r"```python\n(.*?)```", README.read_text(), flags=re.DOTALL)
     pytester.makepyfile(test_example=example)
     out_dir = pytester.path / "out"

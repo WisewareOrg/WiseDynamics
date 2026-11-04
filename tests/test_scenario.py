@@ -18,13 +18,19 @@ class _Guidance(inertial3D.inertial3D):
 
 
 def _guidance():
-    """Basilisk's stock `inertial3D` standing in for flight software, and its field to record."""
+    """Build Basilisk's stock `inertial3D` standing in for flight software.
+
+    Returns:
+        The guidance module, holding `GUIDANCE_SIGMA_RN`, and its `guidance/sigma_RN` field to
+        record, as `fsw_fields`.
+    """
     guidance = _Guidance()
     guidance.sigma_R0N = GUIDANCE_SIGMA_RN
     return guidance, {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
 
 
 def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
+    """A run records `t_s`, the vehicle's fields and the flight-software fields every `record_s`."""
     scenario = Leo500()
     fields = scenario.vehicle.recorded_fields()
     guidance, fsw_fields = _guidance()
@@ -52,6 +58,13 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
 def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(
     fidelity, step_ns, integrator_type
 ):
+    """Each fidelity sets the task step and the integrator of the vehicle that runs.
+
+    Args:
+        fidelity: The fidelity level set on the scenario.
+        step_ns: The dynamics task period the level gives, in nanoseconds.
+        integrator_type: The Basilisk integrator class the level gives.
+    """
     scenario = Leo500()
     scenario.fidelity = fidelity
     scenario.disperse(np.random.default_rng(0), noise_seed=1)
@@ -67,6 +80,7 @@ def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(
 
 
 def test_a_scenario_runs_once():
+    """A second `run` of the same scenario is refused."""
     scenario = Leo500()
     scenario.run(_Guidance(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
@@ -74,12 +88,19 @@ def test_a_scenario_runs_once():
 
 
 class _Stepping(sysModel.SysModel):
-    """A flight-software module that notes when it is called and when the IMU output it reads was
-    written, and writes its call time plus 100 s to its own message."""
+    """A flight-software module that notes its calls and writes its call time plus 100 s.
+
+    It also notes when the IMU output it reads was written.
+    """
 
     period_s = 1.0
 
     def __init__(self, reader) -> None:
+        """Hold the IMU reader and create the module's output message.
+
+        Args:
+            reader: The vehicle's IMU message reader.
+        """
         super().__init__()
         self.ModelTag = "stepping"
         self.reader = reader
@@ -88,6 +109,11 @@ class _Stepping(sysModel.SysModel):
         self.output_msg = messaging.NavAttMsg()
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Note the call time and the IMU output's write time, and write the call time plus 100 s.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
         self.called_ns.append(CurrentSimNanos)
         self.read_ns.append(self.reader.timeWritten())
         payload = messaging.NavAttMsgPayload()
@@ -96,8 +122,11 @@ class _Stepping(sysModel.SysModel):
 
 
 def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_instant():
-    """Called at whole seconds only, reading the IMU output of that instant; each recorded value is
-    the one it wrote at that row's own time, t = 0 included."""
+    """The module runs at whole seconds only, and is recorded from its own instant.
+
+    It reads the IMU output of that instant, and each recorded value is the one it wrote at that
+    row's own time, t = 0 included.
+    """
     scenario = Leo500()
     fsw = _Stepping(scenario.vehicle.readers()["imu"])
     datasets = scenario.run(

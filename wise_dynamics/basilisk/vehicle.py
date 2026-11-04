@@ -25,8 +25,9 @@ class Vehicle:
         datasets: Mapping[str, tuple[Any, str]],
         attrs: Mapping[str, Any] | None = None,
     ) -> None:
-        """Write one HDF5 run file. A write that fails part-way removes the file it created and
-        re-raises.
+        """Write one HDF5 run file.
+
+        A write that fails part-way removes the file it created and re-raises.
 
         Args:
             path: The file to create. Its parent directories are created.

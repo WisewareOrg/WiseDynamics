@@ -1,5 +1,8 @@
-"""`ImuSpacecraft`: its nominal vehicle, how its keywords reach the Basilisk objects it builds, its
-dispersion, its reader, and what it records."""
+"""`ImuSpacecraft`: its nominal vehicle, its wiring into Basilisk, and what it records.
+
+The tests cover how its keywords reach the Basilisk objects it builds, its dispersion, its reader,
+and its recorded fields.
+"""
 
 import inspect
 
@@ -54,7 +57,11 @@ def test_each_keyword_defaults_to_its_class_attribute():
 
 
 def test_a_subclass_attribute_is_the_value_its_vehicles_are_built_with():
+    """A subclass's class attributes build its hub and IMU; an explicit keyword still wins."""
+
     class Heavy(ImuSpacecraft):
+        """An `ImuSpacecraft` whose class attributes differ in mass and gyro bias."""
+
         mass_kg = 1000.0
         gyro_bias_P_rad_s = (3e-4, -1e-4, 2e-4)
 
@@ -65,6 +72,7 @@ def test_a_subclass_attribute_is_the_value_its_vehicles_are_built_with():
 
 
 def test_keywords_reach_the_basilisk_objects():
+    """Every constructor keyword reaches the hub and the IMU it configures."""
     vehicle = ImuSpacecraft(**DISPERSED, noise_seed=11)
     hub = vehicle.spacecraft.hub
     assert hub.mHub == 500.0
@@ -83,6 +91,7 @@ def test_keywords_reach_the_basilisk_objects():
 
 
 def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():
+    """`dispersed` draws the gyro then the accelerometer bias and builds the IMU with them."""
     vehicle, draws = ImuSpacecraft.dispersed(np.random.default_rng(7), noise_seed=11)
     rng = np.random.default_rng(7)
     gyro = np.asarray(ImuSpacecraft.gyro_bias_P_rad_s) + rng.normal(0.0, 1e-4, size=3)
@@ -96,6 +105,7 @@ def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():
 
 
 def test_imu_reader_is_subscribed_to_the_imu_output():
+    """The `imu` reader reads the IMU's own output message."""
     scenario = Leo500()
     reader = scenario.vehicle.readers()["imu"]
     assert reader.isLinked()
@@ -105,6 +115,7 @@ def test_imu_reader_is_subscribed_to_the_imu_output():
 
 
 def test_recorded_fields_name_the_run_file_datasets_with_their_units():
+    """`recorded_fields` names each run-file dataset with its units."""
     fields = ImuSpacecraft().recorded_fields()
     assert {name: units for name, (_, _, units) in fields.items()} == {
         "truth/sigma_BN": "MRP",

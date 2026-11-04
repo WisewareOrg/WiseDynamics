@@ -1,5 +1,4 @@
-"""`Leo500`: its prebuilt environment and placement, how its placement reaches the Basilisk
-objects, and its dispersion."""
+"""`Leo500`: its prebuilt environment and placement, its Basilisk wiring, and its dispersion."""
 
 import inspect
 import math
@@ -50,6 +49,7 @@ def test_the_scenario_is_its_class_attributes():
 
 
 def test_the_placement_reaches_the_basilisk_objects():
+    """Gravity and every placement attribute reach the hub and the task the run builds."""
     scenario = Placed()
     vehicle = scenario.vehicle
     state = scenario.initial_state()
@@ -76,6 +76,7 @@ def test_the_placement_reaches_the_basilisk_objects():
 
 
 def test_the_scenario_builds_and_holds_its_vehicle():
+    """The constructor builds an `ImuSpacecraft`, holds it in `vehicles`, and has drawn nothing."""
     scenario = Leo500()
     assert type(scenario.vehicle) is ImuSpacecraft
     assert scenario.vehicles == [scenario.vehicle]
@@ -83,6 +84,7 @@ def test_the_scenario_builds_and_holds_its_vehicle():
 
 
 def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_from_them():
+    """`disperse` draws the placement then the vehicle's biases, and builds with them."""
     scenario = Leo500()
     built = scenario.vehicle
     scenario.disperse(np.random.default_rng(7), noise_seed=11)

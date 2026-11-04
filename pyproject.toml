@@ -26,6 +26,7 @@ packages = ["wise_dynamics"]
 
 [dependency-groups]
 dev = [
+    "interrogate>=1.7.0",
     "pytest-xdist>=3.6",
     "ruff>=0.17.0",
 ]
@@ -37,4 +38,11 @@ testpaths = ["tests"]
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "D", "D417"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.interrogate]
+fail-under = 100
+verbose = 1
