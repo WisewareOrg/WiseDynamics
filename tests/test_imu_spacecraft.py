@@ -13,7 +13,11 @@ from wise_dynamics.basilisk import ImuSpacecraft, Leo500
 
 
 class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz."""
+    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
 
     period_s = 1.0
 
@@ -60,7 +64,12 @@ def test_a_subclass_attribute_is_the_value_its_vehicles_are_built_with():
     """A subclass's class attributes build its hub and IMU; an explicit keyword still wins."""
 
     class Heavy(ImuSpacecraft):
-        """An `ImuSpacecraft` whose class attributes differ in mass and gyro bias."""
+        """An `ImuSpacecraft` whose class attributes differ in mass and gyro bias.
+
+        Attributes:
+            mass_kg: Hub mass, in kilograms.
+            gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+        """
 
         mass_kg = 1000.0
         gyro_bias_P_rad_s = (3e-4, -1e-4, 2e-4)

@@ -28,9 +28,6 @@ class Leo500(Scenario):
         sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
         record_s: The recording period, in seconds.
-        vehicle: The `ImuSpacecraft`; `disperse` replaces it.
-        vehicles: `[vehicle]`.
-        draws: What `disperse` drew and applied, name to value; empty before `disperse`.
     """
 
     mu_m3_s2: dict[str, float] = {"earth": 3.986004360e14}
@@ -45,7 +42,11 @@ class Leo500(Scenario):
     record_s: float = 10.0
 
     def __init__(self) -> None:
-        """Build the `ImuSpacecraft` and place it at the class attributes' placement."""
+        """Build the `ImuSpacecraft` and place it at the class attributes' placement.
+
+        The scenario holds it as `vehicle`, which `disperse` replaces, and in `vehicles`, as
+        `[vehicle]`. `draws`, what `disperse` drew and applied, name to value, starts empty.
+        """
         super().__init__()
         self.draws: dict[str, np.ndarray] = {}
         self.vehicle = self._placed(ImuSpacecraft())

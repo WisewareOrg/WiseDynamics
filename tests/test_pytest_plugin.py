@@ -154,7 +154,7 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     }
 
 
-def test_case_seeding_matches_recorded_runs(scenario_dir):
+def test_case_seeding_matches_recorded_runs(scenario_dir: pytest.Pytester):
     """Case 5 of seed 0 draws, and seeds its noise with, the recorded values.
 
     Args:
@@ -168,7 +168,7 @@ def test_case_seeding_matches_recorded_runs(scenario_dir):
     assert {name: value.tolist() for name, value in _draws_of(run).items()} == CASE_5_DRAWS
 
 
-def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
+def test_a_case_is_the_same_whatever_the_run_count(scenario_dir: pytest.Pytester):
     """Case 5 draws the same values in a session of 8 cases as in one of 852.
 
     Args:
@@ -185,7 +185,7 @@ def test_a_case_is_the_same_whatever_the_run_count(scenario_dir):
         assert np.array_equal(value, _draws_of(large)[name])
 
 
-def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
+def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir: pytest.Pytester):
     """Each case records the standard draws, and its vehicle and placement use them.
 
     Args:
@@ -207,7 +207,7 @@ def test_each_case_records_the_standard_draws_its_vehicle_used(scenario_dir):
         assert not np.allclose(_draws_of(runs[0])[name], _draws_of(runs[1])[name])
 
 
-def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
+def test_the_run_file_carries_the_case_root_attrs(scenario_dir: pytest.Pytester):
     """A run file carries exactly the case's root attributes and the caller's probes.
 
     Args:
@@ -241,7 +241,7 @@ def test_the_run_file_carries_the_case_root_attrs(scenario_dir):
     )
 
 
-def test_attrs_cannot_replace_the_run_files_own(pytester):
+def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
     """Caller attributes naming one of the file's own are refused, and no file is written.
 
     Args:
@@ -264,7 +264,7 @@ def test_attrs_cannot_replace_the_run_files_own(pytester):
     assert not out_dir.exists()
 
 
-def test_the_scenario_option_selects_a_registered_scenario(scenario_dir):
+def test_the_scenario_option_selects_a_registered_scenario(scenario_dir: pytest.Pytester):
     """A scenario the consumer's conftest registers is the one `--sim-scenario` builds.
 
     Its attitude is dispersed about its own nominal.
@@ -288,7 +288,9 @@ def test_the_scenario_option_selects_a_registered_scenario(scenario_dir):
     assert np.allclose(run["sigma_BN"][0], [-0.1, -0.2, 0.3], rtol=0, atol=0.1)
 
 
-def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
+def test_workers_share_the_default_out_dir(
+    scenario_dir: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
     """pytest-xdist workers write to the one default directory the controller chose.
 
     `TMPDIR` points the default directory into this test's own directory, where it can be found.
@@ -307,7 +309,9 @@ def test_workers_share_the_default_out_dir(scenario_dir, monkeypatch):
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {files[0].parent}"])
 
 
-def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_dir):
+def test_workers_write_to_the_relative_out_dir_the_controller_resolved(
+    scenario_dir: pytest.Pytester,
+):
     """A relative `--sim-out` resolves once, in the controller, for every worker.
 
     Each worker changes directory before the plugin configures it, and the run files still land in
@@ -338,7 +342,7 @@ def test_workers_write_to_the_relative_out_dir_the_controller_resolved(scenario_
     assert sorted(scenario_dir.path.rglob("run_*.h5")) == in_out_dir
 
 
-def test_each_case_runs_for_sim_duration_s(scenario_dir):
+def test_each_case_runs_for_sim_duration_s(scenario_dir: pytest.Pytester):
     """A case runs for `--sim-duration-s`, recording every 10 s.
 
     Args:
@@ -350,7 +354,7 @@ def test_each_case_runs_for_sim_duration_s(scenario_dir):
     assert run["t_s"].tolist() == [0.0, 10.0, 20.0]
 
 
-def test_a_session_runs_without_xdist(scenario_dir):
+def test_a_session_runs_without_xdist(scenario_dir: pytest.Pytester):
     """A session runs with pytest-xdist disabled.
 
     Args:
@@ -361,7 +365,7 @@ def test_a_session_runs_without_xdist(scenario_dir):
 
 
 def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
-    pytester, tmp_path, monkeypatch
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A session with no case leaves `TMPDIR` as it found it.
 
@@ -388,7 +392,9 @@ def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
         ("--sim-duration-s", "0", "--sim-duration-s must be positive, got 0.0"),
     ],
 )
-def test_out_of_range_options_are_usage_errors(pytester, option, value, message):
+def test_out_of_range_options_are_usage_errors(
+    pytester: pytest.Pytester, option: str, value: str, message: str
+):
     """An out-of-range option is a usage error naming the option and the value.
 
     Args:
@@ -403,7 +409,9 @@ def test_out_of_range_options_are_usage_errors(pytester, option, value, message)
     result.stderr.fnmatch_lines([f"ERROR: wise-dynamics: {message}"])
 
 
-def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(pytester):
+def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(
+    pytester: pytest.Pytester,
+):
     """An unknown `--sim-scenario` fails collection, naming it and the known scenarios.
 
     Args:
@@ -420,7 +428,7 @@ def test_an_unknown_scenario_fails_collection_naming_it_and_the_known_ones(pytes
     )
 
 
-def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
+def test_an_out_dir_holding_run_files_is_a_usage_error(pytester: pytest.Pytester):
     """A `--sim-out` already holding run files is a usage error.
 
     Args:
@@ -435,7 +443,7 @@ def test_an_out_dir_holding_run_files_is_a_usage_error(pytester):
     result.stderr.fnmatch_lines([f"ERROR: --sim-out {out_dir} already holds 1 run file;*"])
 
 
-def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester):
+def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
     """The plugin loads into every session without importing Basilisk.
 
     Args:
@@ -453,7 +461,7 @@ def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester):
     pytester.runpytest_subprocess().assert_outcomes(passed=1)
 
 
-def test_the_readme_scenario_runs_as_a_session(pytester):
+def test_the_readme_scenario_runs_as_a_session(pytester: pytest.Pytester):
     """The README's worked example runs as a session and writes its run files.
 
     Args:

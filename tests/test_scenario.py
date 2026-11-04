@@ -12,7 +12,11 @@ GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
 
 
 class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz."""
+    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
 
     period_s = 1.0
 
@@ -56,7 +60,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     ],
 )
 def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(
-    fidelity, step_ns, integrator_type
+    fidelity: str, step_ns: int, integrator_type: type
 ):
     """Each fidelity sets the task step and the integrator of the vehicle that runs.
 
@@ -91,11 +95,14 @@ class _Stepping(sysModel.SysModel):
     """A flight-software module that notes its calls and writes its call time plus 100 s.
 
     It also notes when the IMU output it reads was written.
+
+    Attributes:
+        period_s: The module's period, in seconds.
     """
 
     period_s = 1.0
 
-    def __init__(self, reader) -> None:
+    def __init__(self, reader: messaging.IMUSensorMsgReader) -> None:
         """Hold the IMU reader and create the module's output message.
 
         Args:

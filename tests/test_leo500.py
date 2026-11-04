@@ -14,13 +14,28 @@ D2R = math.pi / 180.0
 
 
 class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz."""
+    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
 
     period_s = 1.0
 
 
 class Placed(Leo500):
-    """A scenario differing from `Leo500` in every placement attribute."""
+    """A scenario differing from `Leo500` in every placement attribute.
+
+    Attributes:
+        semi_major_axis_m: Semi-major axis of the initial orbit, in metres.
+        eccentricity: Eccentricity of the initial orbit.
+        inclination_rad: Inclination, in radians.
+        raan_rad: Right ascension of the ascending node, in radians.
+        arg_periapsis_rad: Argument of periapsis, in radians.
+        true_anomaly_rad: True anomaly at t = 0, in radians.
+        sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
+        omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
+    """
 
     semi_major_axis_m = 7000.0e3
     eccentricity = 0.01

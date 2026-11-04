@@ -24,14 +24,23 @@ class ImuSpacecraft(Vehicle):
     The IMU platform frame P is the body frame B. A keyword left at `None` takes the class
     attribute of the same name, read when the vehicle is built, so a consumer reads the nominal
     vehicle without building one and a subclass that overrides an attribute builds with its value.
-    A vehicle keeps each value it is built with as an instance attribute of that name.
+    A vehicle keeps each value it is built with as an instance attribute of that name, and holds
+    `spacecraft`, the Basilisk `Spacecraft` hub, and `imu`, the Basilisk `ImuSensor`.
 
     Attributes:
+        mass_kg: Nominal hub mass, in kilograms.
+        inertia_B_kg_m2: Nominal hub inertia about its centre of mass in body axes, in kg*m^2, as
+            three rows.
+        gyro_bias_P_rad_s: Nominal constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P_m_s2: Nominal constant accelerometer bias in the IMU platform frame, in
+            m/s^2.
+        gyro_noise_std_rad_s: Nominal per-sample 1-sigma white noise on each gyro axis, in rad/s.
+        accel_noise_std_m_s2: Nominal per-sample 1-sigma white noise on each accelerometer axis,
+            in m/s^2.
+        noise_seed: Nominal seed of the IMU's white-noise generator.
         gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `dispersed` draws, in rad/s.
         accel_bias_std_P_m_s2: Per-axis 1-sigma of the accelerometer bias `dispersed` draws, in
             m/s^2.
-        spacecraft: The Basilisk `Spacecraft` hub.
-        imu: The Basilisk `ImuSensor`.
     """
 
     mass_kg: float = 750.0

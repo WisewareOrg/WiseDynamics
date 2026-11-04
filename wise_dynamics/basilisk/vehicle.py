@@ -37,8 +37,9 @@ class Vehicle:
             attrs: Root attributes, name to value.
 
         Raises:
-            FileExistsError: `path` already exists.
-            TypeError: An attribute or dataset value is of a type HDF5 cannot store.
+            BaseException: Whatever the write raised, re-raised once the partial file is removed:
+                `FileExistsError` when `path` already exists, and `TypeError` when an attribute or
+                dataset value is of a type HDF5 cannot store.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)

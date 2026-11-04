@@ -1,5 +1,7 @@
 """`Vehicle.write_run_file`: one HDF5 file, read back with h5py directly."""
 
+from pathlib import Path
+
 import h5py
 import numpy as np
 import pytest
@@ -7,7 +9,7 @@ import pytest
 from wise_dynamics.basilisk import ImuSpacecraft
 
 
-def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
+def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path: Path):
     """Datasets read back as float64 with their units, and root attributes as written.
 
     Args:
@@ -33,7 +35,7 @@ def test_datasets_and_attrs_round_trip_as_float64_with_units(tmp_path):
         assert np.array_equal(written.attrs["draw_gyro_bias_P_rad_s"], [0.1, 0.2, -0.3])
 
 
-def test_a_run_file_is_written_once(tmp_path):
+def test_a_run_file_is_written_once(tmp_path: Path):
     """A second write to the same path is refused.
 
     Args:
@@ -45,7 +47,7 @@ def test_a_run_file_is_written_once(tmp_path):
         vehicle.write_run_file(tmp_path / "run_0000.h5", {"t_s": (np.zeros(1), "s")})
 
 
-def test_a_failed_write_leaves_no_file(tmp_path):
+def test_a_failed_write_leaves_no_file(tmp_path: Path):
     """A write that fails part-way removes its file, and the path stays writable.
 
     Args:

@@ -27,14 +27,13 @@ class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
     A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles` and `record_s`; `run` reads them, and `fidelity`.
+    sets `vehicles`, the vehicles `run` adds to the simulation in order, and `record_s`, the
+    recording period in seconds. `run` reads them, and `fidelity`.
 
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`. `run` derives the integration step and the integrator
             it gives every vehicle's spacecraft from it: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at
             0.05 s and `"lo"` RK2 at 0.05 s.
-        vehicles: The vehicles `run` adds to the simulation, in order.
-        record_s: The recording period, in seconds.
     """
 
     fidelity: str = "lo"
