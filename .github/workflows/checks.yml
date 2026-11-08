@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: WisewareOrg/wise-ci/check-adrs@a51ce6032a02e26df62c9ced07fb9e4ca1c36a0b
+      - uses: WisewareOrg/wise-ci/check-adrs@4b3554d330465dee925aa10e0c62355903b1488a
 
   ruff:
     name: ruff
