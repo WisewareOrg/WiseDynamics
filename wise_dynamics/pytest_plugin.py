@@ -380,15 +380,16 @@ def _test_directory(node: pytest.Function, root: Path) -> Path:
         root: The directory the test's campaigns are rooted at.
 
     Returns:
-        `<root>/<test file>/<class>/.../<function>`, the test file being its node-id path
-        without `.py`.
+        `<root>/<test file>/<class>/.../<function>`, the test file being its path relative to
+        the rootdir without `.py`, or its stem when it is outside the rootdir.
     """
-    # A test file outside the rootdir has no relative path; its stem stands in.
-    file_part = node.nodeid.split("::")[0]
-    if Path(file_part).is_absolute() or file_part.startswith(".."):
-        file_part = Path(file_part).stem
+    try:
+        file_part = node.path.relative_to(node.config.rootpath).with_suffix("")
+    except ValueError:
+        # A test file outside the rootdir has no relative path; its stem stands in.
+        file_part = Path(node.path.stem)
     classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
-    return root / file_part.removesuffix(".py") / Path(*classes) / node.originalname
+    return root / file_part / Path(*classes) / node.originalname
 
 
 def _run_files(count: int) -> str:
