@@ -1,24 +1,49 @@
 # WiseDynamics
 
-WiseDynamics is the simulation home for Wiseware's GNC work. Every simulation plant is a sibling
-directory under `sim/` — Basilisk first (`sim/basilisk/`), with other hosts such as Trick
-(`sim/trick/`) joining later as siblings rather than replacements. It also holds the Monte Carlo
-campaign drivers that run those plants in bulk, and the exporters that write recorded runs out to
-the analysis data contract.
+WiseDynamics is a thin wrapper over Basilisk
+([ADR 0001 rev 1](docs/decisions/0001-basilisk-simulation-host.md)). It provides reusable
+vehicles and prebuilt scenarios, each scenario an operating environment that builds and places
+its vehicle. A pytest plugin exposes them to a consumer's tests: for each case it builds a
+scenario, with its vehicle, from the case's own random streams, and the case writes one HDF5
+run file. WiseDynamics holds no flight software and does no analysis of the run files.
 
-Flight, simulation and analysis are split into three homes so any one can be replaced without
-touching the other two: flight GNC algorithms live in
-[WiseGncDesign](https://github.com/WisewareOrg/WiseGncDesign), framework-free and
-simulation-blind; simulation plants and Monte Carlo campaigns that import those algorithms live
-here, in WiseDynamics; analysis of the runs they produce lives in
-[WiseGncAnalysis](https://github.com/WisewareOrg/WiseGncAnalysis), which reads the data contract
-and knows nothing about which simulation produced it.
+Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
+`wise_dynamics/basilisk/scenarios/`, where `SCENARIOS` in the package's `__init__.py` registers
+each scenario by name. A scenario names its vehicle class. A consumer picks a scenario with
+`--sim-scenario`, reaches its vehicle as `scenario.vehicle`, and reads the parameters of either
+from its class attributes and class docstring.
+
+## Using it
+
+A consumer depends on a tag:
+
+```toml
+[project.optional-dependencies]
+sim = ["wise-dynamics"]
+
+[tool.uv.sources]
+wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0.1.0" }
+```
+
+Installing it registers the pytest plugin. A Monte Carlo run is the consumer's test, parametrized
+over `--sim-runs` cases in one pytest session; `-n` runs workers in parallel and needs
+`pytest-xdist`, which the consumer adds itself:
+
+```sh
+pytest tests/sim -n 8 --sim-runs 852 --sim-out DIR
+```
+
+[`wise_dynamics/basilisk/README.md`](wise_dynamics/basilisk/README.md) is the reference: the
+modules, what a vehicle and a scenario are, the plugin's options, fixtures and case seeding, and a
+worked example.
+
+WiseDynamics depends on no flight software; flight software depends on WiseDynamics.
 
 ## Layout
 
-- `sim/basilisk/` — the Basilisk simulation host, the first plant
-  ([ADR 0001 rev 1](docs/decisions/0001-basilisk-first-simulation-host.md)); see its own `README.md`.
-- `sim/<host>/` — a future simulation host, as a sibling directory.
-- Monte Carlo drivers and the exporters to the analysis data contract live alongside the
-  simulation hosts they serve.
+- `wise_dynamics/` — the installed package: the pytest plugin, and the `basilisk` subpackage below.
+- `wise_dynamics/basilisk/` — the vehicle and scenario interfaces, the vehicles and the scenarios.
+- `tests/` — the test suite.
 - `docs/decisions/` — this repository's ADRs.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers how a change is made and checked.
