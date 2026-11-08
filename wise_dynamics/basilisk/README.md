@@ -1,7 +1,7 @@
 # wise_dynamics.basilisk
 
-Basilisk vehicles, the scenarios that place them, and the pytest plugin whose session over
-`--sim-runs` cases is a Monte Carlo run. A vehicle is mass properties, sensors and logging, and
+Basilisk vehicles, the scenarios that place them, and the pytest plugin whose tests are
+Monte Carlo campaigns. A vehicle is mass properties, sensors and logging, and
 knows nothing about where it flies. A scenario is a prebuilt operating environment and the placement
 of the vehicle it builds, and runs them once with a flight-software module. Basilisk is the
 simulation host by ADR 0001 rev 1. Each symbol's docstring carries its arguments, returns and
@@ -11,7 +11,7 @@ raises.
 
 | module | holds |
 |---|---|
-| `wise_dynamics/pytest_plugin.py` | the pytest plugin's options and `sim_*` fixtures |
+| `wise_dynamics/pytest_plugin.py` | the pytest plugin's marks, `--ci` and `sim_*` fixtures |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
@@ -19,7 +19,7 @@ raises.
 
 Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft` and `SCENARIOS` from
 `wise_dynamics.basilisk`, and a scenario class from its own module,
-`wise_dynamics.basilisk.scenarios.<name>`. A session picks one scenario with `--sim-scenario`, a
+`wise_dynamics.basilisk.scenarios.<name>`. A test picks one scenario with the `sim_scenario` mark, a
 name in `SCENARIOS`, and the scenario builds its own vehicle.
 
 ## Vehicles
@@ -77,30 +77,42 @@ units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
 Installing `wise-dynamics` registers the plugin through its `pytest11` entry point, so a
 consumer's `conftest.py` names nothing.
 
-| option | default | meaning |
+Each test that uses a `sim_` fixture is one Monte Carlo campaign, configured by marks on the
+function, a class or the module; the closest mark wins. Each mark takes exactly one argument, and a
+bad one fails collection of the test, naming its node id and the mark.
+
+| mark | argument | default |
 |---|---|---|
-| `--sim-runs` | 8 | cases in the session, at least 1 |
-| `--sim-out` | a new directory under the system temporary directory | where run files go; a directory already holding run files is refused |
-| `--sim-duration-s` | 5700 | simulated seconds per case |
-| `--sim-scenario` | `leo500` | the scenario's name in `SCENARIOS` |
-| `--sim-fidelity` | `lo` | `hi`, `med` or `lo`, as the Scenarios section defines them |
+| `sim_runs(n)` | cases in the campaign, an integer of at least 1 | 8 |
+| `sim_out(path)` | where run files go, relative to the rootdir | a new directory under the system temporary directory |
+| `sim_duration_s(seconds)` | simulated seconds per case, positive | 5700 |
+| `sim_scenario(name)` | the scenario's name in `SCENARIOS` | `leo500` |
+| `sim_fidelity(level)` | `hi`, `med` or `lo`, as the Scenarios section defines them | `lo` |
+
+`--ci` is the plugin's only option: it caps every test's case count at 2, and a test marked for
+fewer runs its own.
 
 | fixture | gives |
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
-| `sim_duration_s` | `--sim-duration-s` |
-| `sim_scenario` | the case's scenario at `--sim-fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` under `--sim-out` through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_duration_s` | the test's `sim_duration_s` |
+| `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
-`numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `--sim-runs`
-is and reruns alone: `pytest <test file> --sim-runs N "<test file>::test_case[k]"`.
+`numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
+is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
+
+A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is the test's
+`sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
+class, outermost first, is a directory. A directory already holding run files fails the test's
+collection, and the terminal summary names each directory that received run files.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
 `period_s` = 1.0, so it steps at 1 Hz while the default fidelity steps the vehicle at 20 Hz. Its
 output joins the run file through `fsw_fields`.
-`pytest <test file> -n 8 --sim-runs 852 --sim-out DIR` runs it as a Monte Carlo run; `-n` runs
+`pytest <test file> -n 8` runs it as a Monte Carlo campaign; `-n` runs
 workers in parallel and needs `pytest-xdist`, which a consumer adds itself:
 
 ```python
