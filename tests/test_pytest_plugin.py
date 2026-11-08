@@ -575,7 +575,7 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         ('sim_fidelity("ultra")', "sim_fidelity"),
         ("sim_runs()", "sim_runs"),
         ("sim_runs(1, 2)", "sim_runs"),
-        ("sim_runs(n=3)", "sim_runs"),
+        ("sim_runs(3, n=3)", "sim_runs"),
         ('sim_out("")', "sim_out"),
     ],
 )
@@ -591,17 +591,9 @@ def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
     """
     result = _bad_mark_session(pytester, mark)
     result.stdout.fnmatch_lines([f"*.py::test_case: {name}: *"])
+    if name == "sim_scenario":
+        result.stdout.fnmatch_lines(["*unknown scenario 'bogus'; known scenarios: leo500*"])
     assert not list(pytester.path.rglob("run_*.h5"))
-
-
-def test_an_unknown_scenario_names_the_known_ones(pytester: pytest.Pytester):
-    """An unknown `sim_scenario` is rejected, naming it and the known scenarios.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    result = _bad_mark_session(pytester, 'sim_scenario("bogus")')
-    result.stdout.fnmatch_lines(["*unknown scenario 'bogus'; known scenarios: leo500*"])
 
 
 @pytest.mark.parametrize(
@@ -678,40 +670,26 @@ def test_ci_still_rejects_a_bad_mark(pytester: pytest.Pytester):
     result.stdout.fnmatch_lines(["*.py::test_case: sim_runs: *"])
 
 
-@pytest.mark.parametrize(
-    ("option", "value"),
-    [
-        ("--sim-scenario", "leo500"),
-        ("--sim-runs", "2"),
-        ("--sim-fidelity", "lo"),
-        ("--sim-duration-s", "3"),
-        ("--sim-out", "out"),
-    ],
-)
-def test_a_removed_option_is_unknown(pytester: pytest.Pytester, option: str, value: str):
+def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
     """Each `--sim-*` option is an unrecognized argument.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        option: The removed option.
-        value: A value it once took.
     """
+    options = {
+        "--sim-scenario": "leo500",
+        "--sim-runs": "2",
+        "--sim-fidelity": "lo",
+        "--sim-duration-s": "3",
+        "--sim-out": "out",
+    }
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess(option, value)
+    result = pytester.runpytest_subprocess(*(arg for item in options.items() for arg in item))
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines([f"*unrecognized arguments: {option}*"])
-
-
-def test_ci_is_accepted(pytester: pytest.Pytester):
-    """`--ci` is an option pytest accepts.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    pytester.makepyfile("def test_nothing():\n    pass\n")
-    result = pytester.runpytest_subprocess("--ci")
-    assert result.ret == pytest.ExitCode.OK
-    result.assert_outcomes(passed=1)
+    unrecognized = [line for line in result.stderr.lines if "unrecognized arguments:" in line]
+    assert len(unrecognized) == 1
+    for option in options:
+        assert option in unrecognized[0]
 
 
 def test_the_five_marks_are_registered(pytester: pytest.Pytester):
