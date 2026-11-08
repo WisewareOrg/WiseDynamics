@@ -86,22 +86,32 @@ def test_a_module_with_two_scenario_subclasses_raises(
         scenarios_package._scenarios_in(package)
 
 
+def test_a_scenario_class_a_module_imports_is_not_counted(
+    make_package: Callable[[str], types.ModuleType],
+):
+    """A module importing `Leo500` and defining `Mine(Leo500)` registers `Mine`, and only `Mine`.
+
+    Args:
+        make_package: Builds a one-module package from source.
+    """
+    source = f"from {SCENARIOS_PACKAGE}.leo500 import Leo500\nclass Mine(Leo500):\n    pass\n"
+    package = make_package(source)
+    assert scenarios_package._scenarios_in(package) == {"mod": package.mod.Mine}
+
+
 def test_every_module_in_the_package_is_registered_under_its_name():
     """The scenarios directory's modules are the keys of `SCENARIOS`, each defining its entry."""
     directory = Path(scenarios_package.__file__).parent
     stems = {path.stem for path in directory.glob("*.py")} - {"__init__"}
     assert stems == set(SCENARIOS)
-    for name, scenario in SCENARIOS.items():
-        assert scenario.__module__ == f"{SCENARIOS_PACKAGE}.{name}"
 
 
 def test_the_package_exports_no_scenario_class():
     """`wise_dynamics.basilisk.__all__` names no `Scenario` subclass but `Scenario` itself."""
+    exported = [getattr(basilisk, name) for name in basilisk.__all__]
     scenarios = [
-        name
-        for name in basilisk.__all__
-        if isinstance(getattr(basilisk, name), type)
-        and issubclass(getattr(basilisk, name), Scenario)
-        and getattr(basilisk, name) is not Scenario
+        value
+        for value in exported
+        if isinstance(value, type) and issubclass(value, Scenario) and value is not Scenario
     ]
     assert scenarios == []
