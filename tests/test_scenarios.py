@@ -1,5 +1,7 @@
 """`SCENARIOS`: each scenarios module registers its one scenario under the module's name."""
 
+import importlib
+import re
 import sys
 import textwrap
 import types
@@ -12,9 +14,6 @@ import wise_dynamics.basilisk as basilisk
 import wise_dynamics.basilisk.scenarios as scenarios_package
 from wise_dynamics.basilisk.scenario import Scenario
 from wise_dynamics.basilisk.scenarios import SCENARIOS
-
-SCENARIOS_PACKAGE = "wise_dynamics.basilisk.scenarios"
-SUBCLASS = "class {name}(Scenario):\n    pass\n"
 
 
 @pytest.fixture
@@ -49,40 +48,34 @@ def make_package(
         package_dir.mkdir()
         (package_dir / "__init__.py").write_text("")
         (package_dir / "mod.py").write_text(textwrap.dedent(source))
-        __import__(name)
-        return sys.modules[name]
+        return importlib.import_module(name)
 
     yield make
     for key in [k for k in sys.modules if k == name or k.startswith(f"{name}.")]:
         del sys.modules[key]
 
 
-def test_a_module_with_no_scenario_subclass_raises(make_package: Callable[[str], types.ModuleType]):
-    """A scenarios module defining no `Scenario` subclass raises `TypeError` naming the module.
-
-    Args:
-        make_package: Builds a one-module package from source.
-    """
-    package = make_package("X = 1\n")
-    with pytest.raises(TypeError, match=rf"{package.__name__}\.mod"):
-        scenarios_package._scenarios_in(package)
-
-
-def test_a_module_with_two_scenario_subclasses_raises(
-    make_package: Callable[[str], types.ModuleType],
-):
-    """A scenarios module defining two `Scenario` subclasses raises `TypeError` naming the module.
-
-    Args:
-        make_package: Builds a one-module package from source.
-    """
-    source = (
+@pytest.mark.parametrize(
+    "source",
+    [
+        "X = 1\n",
         "from wise_dynamics.basilisk.scenario import Scenario\n"
-        + SUBCLASS.format(name="First")
-        + SUBCLASS.format(name="Second")
-    )
+        "class First(Scenario):\n    pass\n"
+        "class Second(Scenario):\n    pass\n",
+    ],
+    ids=["none", "two"],
+)
+def test_a_module_not_defining_exactly_one_scenario_subclass_raises(
+    make_package: Callable[[str], types.ModuleType], source: str
+):
+    """A scenarios module defining no `Scenario` subclass, or two, raises `TypeError` naming it.
+
+    Args:
+        make_package: Builds a one-module package from source.
+        source: The module's source.
+    """
     package = make_package(source)
-    with pytest.raises(TypeError, match=rf"{package.__name__}\.mod"):
+    with pytest.raises(TypeError, match=re.escape(f"{package.__name__}.mod")):
         scenarios_package._scenarios_in(package)
 
 
@@ -94,7 +87,10 @@ def test_a_scenario_class_a_module_imports_is_not_counted(
     Args:
         make_package: Builds a one-module package from source.
     """
-    source = f"from {SCENARIOS_PACKAGE}.leo500 import Leo500\nclass Mine(Leo500):\n    pass\n"
+    source = (
+        "from wise_dynamics.basilisk.scenarios.leo500 import Leo500\n"
+        "class Mine(Leo500):\n    pass\n"
+    )
     package = make_package(source)
     assert scenarios_package._scenarios_in(package) == {"mod": package.mod.Mine}
 
