@@ -445,6 +445,32 @@ def test_two_campaigns_in_one_session_each_run_in_their_own_directory(
     )
 
 
+def test_test_files_outside_the_rootdir_are_named_by_their_stem(
+    pytester: pytest.Pytester, tmp_path_factory: pytest.TempPathFactory
+):
+    """A test file outside `--rootdir` is named by its stem, so same-named tests do not collide.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path_factory: pytest's factory for directories outside the rootdir.
+    """
+    out = pytester.path / "out"
+    source = _source(_case_test("test_case", ("sim_runs(1)", _out_mark(out), "sim_duration_s(3)")))
+    files = []
+    for stem in ("test_one", "test_two"):
+        files.append(tmp_path_factory.mktemp(stem) / f"{stem}.py")
+        files[-1].write_text(source)
+    result = pytester.runpytest_subprocess(
+        "-p", "no:xdist", "--rootdir", str(pytester.path), *map(str, files)
+    )
+
+    result.assert_outcomes(passed=2)
+    for stem in ("test_one", "test_two"):
+        assert [run["name"] for run in _read_runs(out / stem / "test_case")] == ["run_0000.h5"]
+    assert len(list(out.rglob("run_*.h5"))) == 2
+    assert not [path for file in files for path in file.parent.rglob("run_*.h5")]
+
+
 def test_a_class_and_a_nested_class_qualify_the_directory(pytester: pytest.Pytester):
     """A test's directory is its file path, each class outermost first, then its function.
 
