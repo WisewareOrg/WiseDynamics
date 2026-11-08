@@ -8,10 +8,10 @@ scenario, with its vehicle, from the case's own random streams, and the case wri
 run file. WiseDynamics holds no flight software and does no analysis of the run files.
 
 Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
-`wise_dynamics/basilisk/scenarios/`, where `SCENARIOS` in the package's `__init__.py` registers
-each scenario by name. A scenario names its vehicle class. A consumer picks a scenario with
-`--sim-scenario`, reaches its vehicle as `scenario.vehicle`, and reads the parameters of either
-from its class attributes and class docstring.
+`wise_dynamics/basilisk/scenarios/`, one module each, registered by name in `SCENARIOS`. A scenario
+names its vehicle class. A consumer picks a scenario with `--sim-scenario`, reaches its vehicle as
+`scenario.vehicle`, and reads the parameters of either from its class attributes and class
+docstring.
 
 ## Using it
 

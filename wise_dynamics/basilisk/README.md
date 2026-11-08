@@ -15,10 +15,12 @@ raises.
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
-| `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, the module named for the class; `SCENARIOS` in its `__init__.py` maps each name to its class |
+| `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario |
 
-Consumers import from `wise_dynamics.basilisk`. A session picks one scenario with
-`--sim-scenario`, a name in `SCENARIOS`, and the scenario builds its own vehicle.
+Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft` and `SCENARIOS` from
+`wise_dynamics.basilisk`, and a scenario class from its own module,
+`wise_dynamics.basilisk.scenarios.<name>`. A session picks one scenario with `--sim-scenario`, a
+name in `SCENARIOS`, and the scenario builds its own vehicle.
 
 ## Vehicles
 
@@ -37,10 +39,14 @@ HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
 
+To add a scenario, add one module to `wise_dynamics/basilisk/scenarios/`, named for the scenario and
+defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` registers it under the
+module's name. A module defining none or several raises `TypeError` when the package is imported.
+
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
 its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
-no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle`
-and in `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
+no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle` and in
+`scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
 `rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
 `rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
 `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it

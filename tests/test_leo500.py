@@ -8,7 +8,8 @@ import pytest
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.utilities import orbitalMotion
 
-from wise_dynamics.basilisk import ImuSpacecraft, Leo500
+from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 D2R = math.pi / 180.0
 
