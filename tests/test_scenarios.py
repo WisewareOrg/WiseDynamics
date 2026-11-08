@@ -100,7 +100,7 @@ def test_a_scenario_class_a_module_imports_is_not_counted(
 
 
 def test_every_module_in_the_package_is_registered_under_its_name():
-    """The scenarios directory's modules are the keys of `SCENARIOS`, each defining its entry."""
+    """The scenarios directory's modules are the keys of `SCENARIOS`."""
     directory = Path(scenarios_package.__file__).parent
     stems = {path.stem for path in directory.glob("*.py")} - {"__init__"}
     assert stems == set(SCENARIOS)
