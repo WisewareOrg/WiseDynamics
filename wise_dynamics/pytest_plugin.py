@@ -29,20 +29,29 @@ _OUT_DIR = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _SEED = 0
 _CI_RUNS = 2
+_DEFAULT_SCENARIO = "leo500"
+_DEFAULT_RUNS = 8
+_DEFAULT_FIDELITY = "lo"
+_DEFAULT_DURATION_S = 5700.0
+_FIDELITIES = ("hi", "med", "lo")
 _MARKS = (
     (
         "sim_scenario",
         "name",
-        "name of the scenario in wise_dynamics.basilisk.SCENARIOS; default leo500",
+        f"name of the scenario in wise_dynamics.basilisk.SCENARIOS; default {_DEFAULT_SCENARIO}",
     ),
-    ("sim_runs", "n", "number of cases, at least 1; default 8"),
+    ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
         "sim_fidelity",
         "level",
         "integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.05 s; "
-        "default lo",
+        f"default {_DEFAULT_FIDELITY}",
     ),
-    ("sim_duration_s", "seconds", "simulated duration of each case, positive; default 5700"),
+    (
+        "sim_duration_s",
+        "seconds",
+        f"simulated duration of each case, positive; default {_DEFAULT_DURATION_S:g}",
+    ),
     (
         "sim_out",
         "path",
@@ -150,6 +159,18 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             pytrace=False,
         )
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Report a pytest-xdist worker's written directories to the controller.
+
+    Args:
+        session: The finishing session, whose config holds the stash and the worker output.
+    """
+    workeroutput = getattr(session.config, "workeroutput", None)
+    if workeroutput is not None:
+        written = session.config.stash[_WRITTEN_DIRS]
+        workeroutput[_WORKER_DIRS] = sorted(str(path) for path in written)
 
 
 def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> None:
@@ -274,16 +295,13 @@ def sim_run_file(
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
         sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
-        written = config.stash[_WRITTEN_DIRS]
-        written.add(directory)
-        if hasattr(config, "workeroutput"):
-            config.workeroutput[_WORKER_DIRS] = sorted(str(path) for path in written)
+        config.stash[_WRITTEN_DIRS].add(directory)
         return path
 
     return write
 
 
-def _settings(node: pytest.Item | pytest.Function) -> _Settings:
+def _settings(node: pytest.Function) -> _Settings:
     """Resolve a test's configuration from its marks, the defaults and `--ci`.
 
     Args:
@@ -295,18 +313,11 @@ def _settings(node: pytest.Item | pytest.Function) -> _Settings:
     Raises:
         ValueError: A mark's value is malformed; the message starts with the mark's name.
     """
-    values: dict[str, Any] = {}
-    for name, _, _ in _MARKS:
-        mark = node.get_closest_marker(name)
-        if mark is None:
-            continue
-        if len(mark.args) != 1 or mark.kwargs:
-            raise ValueError(f"{name}: takes exactly one positional argument and no keywords")
-        values[name] = mark.args[0]
-    scenario = values.get("sim_scenario", "leo500")
-    runs = values.get("sim_runs", 8)
-    fidelity = values.get("sim_fidelity", "lo")
-    duration_s = values.get("sim_duration_s", 5700.0)
+    values = _marked_values(node)
+    scenario = values.get("sim_scenario", _DEFAULT_SCENARIO)
+    runs = values.get("sim_runs", _DEFAULT_RUNS)
+    fidelity = values.get("sim_fidelity", _DEFAULT_FIDELITY)
+    duration_s = values.get("sim_duration_s", _DEFAULT_DURATION_S)
     if not isinstance(scenario, str):
         raise ValueError(f"sim_scenario: expected a scenario name, got {scenario!r}")
     try:
@@ -315,8 +326,8 @@ def _settings(node: pytest.Item | pytest.Function) -> _Settings:
         raise ValueError(f"sim_scenario: {error}") from None
     if not isinstance(runs, numbers.Integral) or isinstance(runs, bool) or runs < 1:
         raise ValueError(f"sim_runs: expected an integer of at least 1, got {runs!r}")
-    if fidelity not in ("hi", "med", "lo"):
-        raise ValueError(f"sim_fidelity: expected 'hi', 'med' or 'lo', got {fidelity!r}")
+    if fidelity not in _FIDELITIES:
+        raise ValueError(f"sim_fidelity: expected one of {_FIDELITIES}, got {fidelity!r}")
     if (
         not isinstance(duration_s, numbers.Real)
         or isinstance(duration_s, bool)
@@ -333,15 +344,51 @@ def _settings(node: pytest.Item | pytest.Function) -> _Settings:
         root = config.rootpath / out
     else:
         root = config.stash[_OUT_DIR]
+    if config.getoption("ci"):
+        runs = min(runs, _CI_RUNS)
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), _test_directory(node, root))
+
+
+def _marked_values(node: pytest.Function) -> dict[str, Any]:
+    """Read each `sim_` mark's single argument from the closest mark of its name.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+
+    Returns:
+        Mark name to argument, for the marks the test carries.
+
+    Raises:
+        ValueError: A mark does not take exactly one positional argument and no keywords.
+    """
+    values: dict[str, Any] = {}
+    for name, _, _ in _MARKS:
+        mark = node.get_closest_marker(name)
+        if mark is None:
+            continue
+        if len(mark.args) != 1 or mark.kwargs:
+            raise ValueError(f"{name}: takes exactly one positional argument and no keywords")
+        values[name] = mark.args[0]
+    return values
+
+
+def _test_directory(node: pytest.Function, root: Path) -> Path:
+    """Build the directory a test's run files are written to.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+        root: The directory the test's campaigns are rooted at.
+
+    Returns:
+        `<root>/<test file>/<class>/.../<function>`, the test file being its node-id path
+        without `.py`.
+    """
     # A test file outside the rootdir has no relative path; its stem stands in.
     file_part = node.nodeid.split("::")[0]
     if Path(file_part).is_absolute() or file_part.startswith(".."):
         file_part = Path(file_part).stem
     classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
-    directory = root / file_part.removesuffix(".py") / Path(*classes) / node.originalname
-    if config.getoption("ci"):
-        runs = min(runs, _CI_RUNS)
-    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
+    return root / file_part.removesuffix(".py") / Path(*classes) / node.originalname
 
 
 def _run_files(count: int) -> str:
