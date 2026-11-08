@@ -1,12 +1,50 @@
 """The registry of Basilisk scenarios, by the name `--sim-scenario` uses.
 
-A scenario joins as a module here, `<scenario>.py` holding its `Scenario` subclass, and one entry
-in `SCENARIOS`.
+Each module here defines one `Scenario` subclass and is registered in `SCENARIOS` under the module's
+name; no other file names it.
 """
 
+import importlib
+import pkgutil
+import sys
+import types
+
 from wise_dynamics.basilisk.scenario import Scenario
-from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 __all__ = ["SCENARIOS"]
 
-SCENARIOS: dict[str, type[Scenario]] = {"leo500": Leo500}
+
+def _scenarios_in(package: types.ModuleType) -> dict[str, type[Scenario]]:
+    """Map each module of a package to the one `Scenario` subclass it defines.
+
+    Args:
+        package: The package whose modules are imported and searched.
+
+    Returns:
+        The scenario class of each module, keyed by the module's name.
+
+    Raises:
+        TypeError: A module defines no `Scenario` subclass, or more than one. Classes a module
+            imports do not count.
+    """
+    scenarios: dict[str, type[Scenario]] = {}
+    for info in pkgutil.iter_modules(package.__path__):
+        module = importlib.import_module(f"{package.__name__}.{info.name}")
+        defined = [
+            value
+            for value in vars(module).values()
+            if isinstance(value, type)
+            and issubclass(value, Scenario)
+            and value is not Scenario
+            and value.__module__ == module.__name__
+        ]
+        if len(defined) != 1:
+            raise TypeError(
+                f"scenario module {module.__name__} defines {len(defined)} Scenario subclasses; "
+                "it must define exactly one"
+            )
+        scenarios[info.name] = defined[0]
+    return scenarios
+
+
+SCENARIOS: dict[str, type[Scenario]] = _scenarios_in(sys.modules[__name__])
