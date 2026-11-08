@@ -6,7 +6,7 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
 
-from wise_dynamics.basilisk import Leo500
+from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
 

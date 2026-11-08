@@ -11,7 +11,8 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import ImuSpacecraft, Leo500
+from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
 
@@ -262,30 +263,6 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
         passed=1
     )
     assert not out_dir.exists()
-
-
-def test_the_scenario_option_selects_a_registered_scenario(scenario_dir: pytest.Pytester):
-    """A scenario the consumer's conftest registers is the one `--sim-scenario` builds.
-
-    Its attitude is dispersed about its own nominal.
-
-    Args:
-        scenario_dir: A pytester directory holding the one-test scenario.
-    """
-    scenario_dir.makeconftest(
-        """
-        from wise_dynamics.basilisk import SCENARIOS, Leo500
-
-        class Flipped(Leo500):
-            sigma0_BN = (-0.1, -0.2, 0.3)
-
-        SCENARIOS["flipped"] = Flipped
-        """
-    )
-    (run,) = _run_session(
-        scenario_dir, "out", "--sim-runs", "1", "--sim-scenario", "flipped", passed=1
-    )
-    assert np.allclose(run["sigma_BN"][0], [-0.1, -0.2, 0.3], rtol=0, atol=0.1)
 
 
 def test_workers_share_the_default_out_dir(

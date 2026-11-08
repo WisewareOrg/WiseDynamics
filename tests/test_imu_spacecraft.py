@@ -9,7 +9,8 @@ import inspect
 import numpy as np
 from Basilisk.fswAlgorithms import inertial3D
 
-from wise_dynamics.basilisk import ImuSpacecraft, Leo500
+from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 
 class _Guidance(inertial3D.inertial3D):
