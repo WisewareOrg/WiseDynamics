@@ -104,6 +104,7 @@ output joins the run file through `fsw_fields`.
 workers in parallel and needs `pytest-xdist`, which a consumer adds itself:
 
 ```python
+import pytest
 from Basilisk.fswAlgorithms import inertial3D
 
 
@@ -111,6 +112,9 @@ class Guidance(inertial3D.inertial3D):
     period_s = 1.0
 
 
+@pytest.mark.sim_runs(2)
+@pytest.mark.sim_duration_s(20)
+@pytest.mark.sim_out("runs")
 def test_case(sim_scenario, sim_duration_s, sim_run_file):
     guidance = Guidance()
     guidance.ModelTag = "guidance"
