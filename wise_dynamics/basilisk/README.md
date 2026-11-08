@@ -15,7 +15,7 @@ raises.
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
-| `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario; `SCENARIOS` in its `__init__.py` is built from the modules, each under its module's name |
+| `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario |
 
 Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft` and `SCENARIOS` from
 `wise_dynamics.basilisk`, and a scenario class from its own module,
@@ -39,10 +39,9 @@ HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
 
-A scenario is added by adding its module to `wise_dynamics/basilisk/scenarios/`: one module, named
-for the scenario, defining one `Scenario` subclass. `SCENARIOS` registers it under the module's
-name, and no other file names it. A module defining none or several raises `TypeError` when the
-package is imported.
+To add a scenario, add one module to `wise_dynamics/basilisk/scenarios/`, named for the scenario and
+defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` registers it under the
+module's name. A module defining none or several raises `TypeError` when the package is imported.
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
 its recording period `record_s`, with units and frames in its class docstring. Its constructor takes

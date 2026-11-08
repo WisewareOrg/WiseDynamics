@@ -1,7 +1,7 @@
 """The registry of Basilisk scenarios, by the name `--sim-scenario` uses.
 
 Each module here defines one `Scenario` subclass and is registered in `SCENARIOS` under the module's
-name; no other file names it.
+name. Importing the package imports every module here.
 """
 
 import importlib
