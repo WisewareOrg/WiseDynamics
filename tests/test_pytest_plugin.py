@@ -54,13 +54,13 @@ CASE_5_DRAWS = {
 }
 
 
-def _case_test(name: str, marks: tuple[str, ...] = (), method: bool = False) -> str:
+def _case_test(marks: tuple[str, ...] = (), method: bool = False, name: str = "test_case") -> str:
     """Write the source of one scenario test, decorated with marks.
 
     Args:
-        name: The test function's name.
         marks: Each mark's call, such as `"sim_runs(3)"`, without `pytest.mark.`.
         method: Whether the test is a method of a class, taking `self`.
+        name: The test function's name.
 
     Returns:
         The test's source.
@@ -146,7 +146,6 @@ def _run_session(
     pytester.makepyfile(
         test_scenario=_source(
             _case_test(
-                "test_case",
                 (f"sim_runs({runs})", _out_mark(out_dir), f"sim_duration_s({duration_s})", *marks),
             )
         )
@@ -342,9 +341,7 @@ def test_workers_share_the_default_out_dir(
         monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
     """
     monkeypatch.setenv("TMPDIR", str(pytester.path))
-    pytester.makepyfile(
-        test_scenario=_source(_case_test("test_case", ("sim_runs(2)", "sim_duration_s(3)")))
-    )
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
     result = pytester.runpytest_subprocess("-n", "2")
 
     result.assert_outcomes(passed=2)
@@ -382,9 +379,7 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
         """
     )
     pytester.makepyfile(
-        test_scenario=_source(
-            _case_test("test_case", ("sim_runs(2)", 'sim_out("out")', "sim_duration_s(3)"))
-        )
+        test_scenario=_source(_case_test(("sim_runs(2)", 'sim_out("out")', "sim_duration_s(3)")))
     )
     pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=2)
 
@@ -429,8 +424,8 @@ def test_two_campaigns_in_one_session_each_run_in_their_own_directory(
     out_a, out_b = pytester.path / "out_a", pytester.path / "out_b"
     pytester.makepyfile(
         test_two=_source(
-            _case_test("test_a", ("sim_runs(3)", _out_mark(out_a), "sim_duration_s(3)")),
-            _case_test("test_b", ("sim_runs(2)", _out_mark(out_b), "sim_duration_s(3)")),
+            _case_test(name="test_a", marks=("sim_runs(3)", _out_mark(out_a), "sim_duration_s(3)")),
+            _case_test(name="test_b", marks=("sim_runs(2)", _out_mark(out_b), "sim_duration_s(3)")),
         )
     )
     result = pytester.runpytest_subprocess(*xdist)
@@ -455,7 +450,7 @@ def test_test_files_outside_the_rootdir_are_named_by_their_stem(
         tmp_path_factory: pytest's factory for directories outside the rootdir.
     """
     out = pytester.path / "out"
-    source = _source(_case_test("test_case", ("sim_runs(1)", _out_mark(out), "sim_duration_s(3)")))
+    source = _source(_case_test(("sim_runs(1)", _out_mark(out), "sim_duration_s(3)")))
     files = []
     for stem in ("test_one", "test_two"):
         files.append(tmp_path_factory.mktemp(stem) / f"{stem}.py")
@@ -478,8 +473,8 @@ def test_a_class_and_a_nested_class_qualify_the_directory(pytester: pytest.Pytes
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     out_dir = pytester.path / "out"
-    inner = textwrap.indent(_case_test("test_inner", method=True), "        ")
-    outer = textwrap.indent(_case_test("test_outer", method=True), "    ")
+    inner = textwrap.indent(_case_test(name="test_inner", method=True), "        ")
+    outer = textwrap.indent(_case_test(name="test_outer", method=True), "    ")
     source = (
         SCENARIO_HEADER
         + f"\npytestmark = [pytest.mark.sim_runs(1), pytest.mark.{_out_mark(out_dir)},"
@@ -771,9 +766,7 @@ def test_a_test_directory_holding_run_files_fails_that_tests_collection(
     stale_dir.mkdir(parents=True)
     (stale_dir / "run_0000.h5").write_bytes(b"")
     pytester.makepyfile(
-        test_scenario=_source(
-            _case_test("test_case", ("sim_runs(1)", _out_mark(out_dir), "sim_duration_s(3)"))
-        )
+        test_scenario=_source(_case_test(("sim_runs(1)", _out_mark(out_dir), "sim_duration_s(3)")))
     )
     result = pytester.runpytest_subprocess("-p", "no:xdist")
     assert result.ret == pytest.ExitCode.INTERRUPTED
