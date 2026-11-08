@@ -1,9 +1,9 @@
 # wise_dynamics.basilisk
 
 Basilisk vehicles, the scenarios that place them, and the pytest plugin whose tests are
-Monte Carlo campaigns. A vehicle is mass properties, sensors and logging, and
-knows nothing about where it flies. A scenario is a prebuilt operating environment and the placement
-of the vehicle it builds, and runs them once with a flight-software module. Basilisk is the
+Monte Carlo campaigns. A vehicle is mass properties, sensors and logging, and knows nothing about
+where it flies. A scenario is a prebuilt operating environment and the placement of the vehicle it
+builds, and runs them once with a flight-software module. Basilisk is the
 simulation host by ADR 0001 rev 1. Each symbol's docstring carries its arguments, returns and
 raises.
 

@@ -9,9 +9,9 @@ run file. WiseDynamics holds no flight software and does no analysis of the run 
 
 Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
 `wise_dynamics/basilisk/scenarios/`, one module each, registered by name in `SCENARIOS`. A scenario
-names its vehicle class. A consumer picks a scenario with the `sim_scenario` mark, reaches its vehicle as
-`scenario.vehicle`, and reads the parameters of either from its class attributes and class
-docstring.
+names its vehicle class. A consumer picks a scenario with the `sim_scenario` mark, reaches its
+vehicle as `scenario.vehicle`, and reads the parameters of either from its class attributes and
+class docstring.
 
 ## Using it
 
@@ -26,9 +26,8 @@ wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0
 ```
 
 Installing it registers the pytest plugin. Each consumer test that uses a `sim_` fixture is one
-Monte Carlo campaign, configured by marks such as `sim_runs(852)` and `sim_out("DIR")`; `--ci` caps
-every campaign at 2 cases, and `-n` runs workers in parallel and needs `pytest-xdist`, which the
-consumer adds itself:
+Monte Carlo campaign, configured by marks (see the basilisk README); `-n` runs workers in parallel
+and needs `pytest-xdist`, which the consumer adds itself:
 
 ```sh
 pytest tests/sim -n 8

@@ -1,11 +1,8 @@
 """The WiseDynamics pytest plugin: each test that uses a `sim_` fixture is one Monte Carlo campaign.
 
 A test configures its campaign with marks on the function, a class or the module, the closest
-winning: `sim_scenario`, `sim_runs`, `sim_fidelity`, `sim_duration_s` and `sim_out`. A test runs
-once per case and writes its run files under its own directory, so campaigns in one session are
-separate. `--ci` caps every campaign at two cases. Installing `wise-dynamics` registers this
-module through its `pytest11` entry point. `wise_dynamics/basilisk/README.md` documents the marks
-and fixtures.
+winning. Installing `wise-dynamics` registers this module through its `pytest11` entry point.
+`wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
 """
 
 import numbers
@@ -179,7 +176,7 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
         request: The fixture request, whose `param` is the case number.
 
     Returns:
-        The case number, `0 <= index < ` the test's `sim_runs`.
+        The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
     """
     return request.param
 
@@ -229,11 +226,10 @@ def sim_run_file(
 ) -> Callable[..., Path]:
     """A writer of this case's run file, `<test directory>/run_<NNNN>.h5`.
 
-    The file is written through `sim_scenario.vehicle`. The test directory is
-    `<root>/<test file>/<class>/.../<function>`, where the root is the test's `sim_out`. The
-    file's root attributes are `case`, `seed`, `fidelity`, `created_utc`
-    (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and one
-    `draw_<name>` per value the scenario drew.
+    The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
+    basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
+    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
+    one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -332,9 +328,12 @@ def _settings(node: pytest.Item | pytest.Function) -> _Settings:
         out = values["sim_out"]
         if not isinstance(out, str | os.PathLike):
             raise ValueError(f"sim_out: expected a path, got {out!r}")
+        if not os.fspath(out):
+            raise ValueError("sim_out: expected a non-empty path")
         root = config.rootpath / out
     else:
         root = config.stash[_OUT_DIR]
+    # A test file outside the rootdir has no relative path; its stem stands in.
     file_part = node.nodeid.split("::")[0]
     if Path(file_part).is_absolute() or file_part.startswith(".."):
         file_part = Path(file_part).stem
