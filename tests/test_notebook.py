@@ -310,7 +310,7 @@ def test_a_notebook_paired_only_by_jupytext_toml_runs(
 def test_a_notebook_given_as_its_paired_py_runs(
     shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """A notebook opened as the Jupytext `.py` runs that `.py`'s test.
+    """A notebook opened as the Jupytext `.py` runs that `.py`'s test and is not re-synced.
 
     Args:
         shell: The in-process shell with the magic loaded.
@@ -319,11 +319,15 @@ def test_a_notebook_given_as_its_paired_py_runs(
     """
     cell = _magic(_marker_test("test_here", tmp_path / "ran"))
     py = _sync(_write_notebook(tmp_path, [_code(LOAD), cell]))
+    py.with_suffix(".ipynb").unlink()
+    mtime = py.stat().st_mtime_ns
     _magic_env(monkeypatch, py)
 
     shell.run_cell_magic("monte_carlo", "", _body(cell))
 
     assert (tmp_path / "ran").read_text() == "ran"
+    assert not py.with_suffix(".ipynb").exists()
+    assert py.stat().st_mtime_ns == mtime
 
 
 def test_a_cell_defining_no_test_is_refused(
