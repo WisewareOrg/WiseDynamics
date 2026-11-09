@@ -497,9 +497,10 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     env = _env(path)
     notebook = _execute(tmp_path, campaign, env)
     streams = "".join(out.text for out in notebook.cells[1].outputs if out.output_type == "stream")
-    widgets = notebook.metadata.widgets["application/vnd.jupyter.widget-state+json"]["state"]
-    (bar,) = [
-        model["state"] for model in widgets.values() if model["model_name"] == "FloatProgressModel"
+    meter = [
+        out.data["text/plain"]
+        for out in notebook.cells[1].outputs
+        if out.output_type == "display_data"
     ]
 
     (line,) = [
@@ -513,7 +514,7 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
 
     expected = _expected_runs(tmp_path / "monte_carlo" / "campaign" / "test_leo")
     assert "PytestAssertRewriteWarning" not in streams
-    assert (bar["value"], bar["max"]) == (4, 4)
+    assert "4/4" in meter[-1]
     assert loaded["cases"] == [0, 1, 2, 3]
     assert len(set(loaded["worker_pids"])) > 1
     assert loaded["kernel_pid"] not in loaded["worker_pids"]

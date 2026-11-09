@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,8 @@ try:
     import jupytext.cli
     from IPython import get_ipython
     from IPython.core.interactiveshell import InteractiveShell
-    from tqdm.auto import tqdm
+    from IPython.display import Pretty, display
+    from tqdm import tqdm
 except ImportError as error:
     raise ImportError(
         "wise_dynamics.notebook needs IPython, jupytext and tqdm; "
@@ -82,7 +84,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
             raise RuntimeError("This cell defines no test.")
         ipython.run_cell(cell).raise_error()
         ci = ["--ci"] if os.environ.get("CI") else []
-        bar = tqdm(unit="test")
+        progress = _Progress()
         exit_code = pytest.main(
             [
                 *(f"{py}::{name}" for name in tests),
@@ -92,9 +94,9 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
                 "ignore::pytest.PytestAssertRewriteWarning",
                 *ci,
             ],
-            plugins=[_Progress(bar)],
+            plugins=[progress],
         )
-        bar.close()
+        progress.update(force=True)
         if exit_code != pytest.ExitCode.OK:
             raise RuntimeError(f"pytest exited with {exit_code!r}")
 
@@ -171,20 +173,43 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 
 
 class _Progress:
-    """A pytest plugin that counts finished tests on a progress bar.
+    """A pytest plugin that shows the count of finished tests as one display, updated in place.
 
-    The bar's total is the number of collected tests, and its postfix the number of failed
-    reports in any phase.
+    The total is the number of collected tests; the text follows tqdm's meter, with the number of
+    failed reports in any phase as its postfix. The display is redrawn about once a second.
     """
 
-    def __init__(self, bar: tqdm) -> None:
-        """Hold the bar.
+    def __init__(self) -> None:
+        """Start the clock and show an empty meter."""
+        self.total: int | None = None
+        self.done = 0
+        self.failed = 0
+        self.start = self.shown = time.monotonic()
+        self.handle = display(Pretty(self._text()), display_id=True)
+
+    def _text(self) -> str:
+        """Format the meter.
+
+        Returns:
+            tqdm's meter for the tests finished so far.
+        """
+        return tqdm.format_meter(
+            self.done,
+            self.total,
+            time.monotonic() - self.start,
+            unit="test",
+            postfix=f"failed={self.failed}",
+        )
+
+    def update(self, force: bool = False) -> None:
+        """Redraw the display, unless it was redrawn within the last second.
 
         Args:
-            bar: A `tqdm` bar with no total yet.
+            force: Redraw whatever the time since the last redraw.
         """
-        self.bar = bar
-        self.failed = 0
+        if force or time.monotonic() - self.shown >= 1:
+            self.shown = time.monotonic()
+            self.handle.update(Pretty(self._text()))
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         """Set the total from the collected items when pytest-xdist is off.
@@ -193,7 +218,7 @@ class _Progress:
             session: The finished collection session.
         """
         if session.items:
-            self.bar.reset(total=len(session.items))
+            self.total = len(session.items)
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_xdist_node_collection_finished(self, node: Any, ids: list[str]) -> None:
@@ -203,20 +228,18 @@ class _Progress:
             node: The pytest-xdist worker node that finished collecting.
             ids: The node ids it collected.
         """
-        if self.bar.total is None:
-            self.bar.reset(total=len(ids))
+        if self.total is None:
+            self.total = len(ids)
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        """Advance the bar at each test's teardown and show the failed count.
+        """Count a failed report, and a finished test at its teardown.
 
         Args:
             report: One phase's report of a test.
         """
-        if report.failed:
-            self.failed += 1
-            self.bar.set_postfix(failed=self.failed)
-        if report.when == "teardown":
-            self.bar.update()
+        self.failed += report.failed
+        self.done += report.when == "teardown"
+        self.update()
 
 
 def _notebook_path(line: str) -> Path:
