@@ -4,7 +4,6 @@ Each session loads the plugin by its `pytest11` entry point. Each session's test
 own marks in source.
 """
 
-import json
 import re
 import subprocess
 import textwrap
@@ -20,7 +19,6 @@ from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
 REPOSITORY = Path(__file__).parent.parent
-DATA = Path(__file__).parent / "data"
 SERIAL = ("-p", "no:xdist")
 XDIST = ("-n", "auto")
 
@@ -982,10 +980,9 @@ def _editable_direct_url(repository: Path) -> dict:
         repository: The checkout installed.
 
     Returns:
-        The golden editable fixture, as uv writes it, with `repository` substituted.
+        The form uv writes for an editable install, naming `repository`.
     """
-    text = (DATA / "direct_url_editable.json").read_text().replace("{repo}", str(repository))
-    return json.loads(text)
+    return {"url": f"file://{repository}", "dir_info": {"editable": True}}
 
 
 def _provenance_session(
@@ -1032,7 +1029,14 @@ def test_a_pinned_install_records_its_commit_as_pinned(pytester: pytest.Pytester
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    direct_url = json.loads((DATA / "direct_url_vcs.json").read_text())
+    direct_url = {
+        "url": "https://github.com/WisewareOrg/WiseDynamics",
+        "vcs_info": {
+            "vcs": "git",
+            "commit_id": "746add8156aa61701971cf4cdde30f092277d962",
+            "requested_revision": "746add8",
+        },
+    }
     _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=1)
 
     found = _provenance_attrs(pytester)
