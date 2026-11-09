@@ -130,7 +130,8 @@ def load_runs(
         report = Path(scratch) / "run_dir.json"
         collected = subprocess.run(
             [sys.executable, "-m", "pytest", f"{py}::{node}", "--collect-only", "-q"]
-            + ["-o", "addopts=", "-p", "no:xdist", "-p", "wise_dynamics.notebook"],
+            + ["-o", "addopts=", "-p", "no:xdist", "-p", "wise_dynamics.notebook"]
+            + (["--ci"] if os.environ.get("CI") else []),
             cwd=py.parent,
             env={**os.environ, _REPORT: str(report)},
             capture_output=True,

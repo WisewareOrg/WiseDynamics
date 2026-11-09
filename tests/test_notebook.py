@@ -527,15 +527,17 @@ class _Holder:
 
 
 @pytest.fixture
-def sim_notebook(tmp_path: Path) -> Path:
+def sim_notebook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Save and sync a paired notebook defining `TestA.test_x`, `TestA.test_y` and `test_x`.
 
     Args:
         tmp_path: The test's own temporary directory.
+        monkeypatch: pytest's fixture; it unsets `CI` for the test.
 
     Returns:
         The notebook's path; nothing has run, so there are no run files.
     """
+    monkeypatch.delenv("CI", raising=False)
     path = _write_notebook(tmp_path, [_code(SIM_TESTS)])
     _sync(path)
     return path
@@ -554,25 +556,29 @@ def test_load_runs_with_no_run_files_names_the_expected_folder(sim_notebook: Pat
 
 
 def test_load_runs_reads_the_newest_session_and_reports_found_of_planned(
-    sim_notebook: Path, capsys: pytest.CaptureFixture[str]
+    sim_notebook: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ):
     """The newest stamp folder wins, even unfinished: its found and planned counts are printed.
 
-    The older session ran one case of one; the newer one was interrupted after two of three.
+    The older session ran one case of one; the newer one was interrupted after two of three. With
+    `CI` set, it reads the `ci` root's own session instead.
 
     Args:
         sim_notebook: The paired notebook, never run.
         capsys: pytest's fixture for capturing what `load_runs` prints.
+        monkeypatch: pytest's fixture for setting `CI` for this test only.
     """
-    test_dir = sim_notebook.parent / "monte_carlo" / "campaign" / "TestA" / "test_x"
-    for stamp, cases, planned in [
-        ("20260101T000000Z-aaaa", [0], 1),
-        ("20260102T000000Z-bbbb", [0, 1], 3),
+    root = sim_notebook.parent / "monte_carlo"
+    for folder, stamp, cases, planned in [
+        (root, "20260101T000000Z-aaaa", [0], 1),
+        (root, "20260102T000000Z-bbbb", [0, 1], 3),
+        (root / "ci", "20260103T000000Z-cccc", [0], 2),
     ]:
-        (test_dir / stamp).mkdir(parents=True)
-        (test_dir / stamp / "planned.json").write_text(json.dumps({"runs": planned}))
+        session = folder / "campaign" / "TestA" / "test_x" / stamp
+        session.mkdir(parents=True)
+        (session / "planned.json").write_text(json.dumps({"runs": planned}))
         for case in cases:
-            with h5py.File(test_dir / stamp / f"run_{case:04d}.h5", "w") as run_file:
+            with h5py.File(session / f"run_{case:04d}.h5", "w") as run_file:
                 run_file.attrs["case"] = case
                 run_file.create_dataset("t_s", data=[0.0]).attrs["units"] = "s"
 
@@ -580,6 +586,10 @@ def test_load_runs_reads_the_newest_session_and_reports_found_of_planned(
 
     assert [int(run["attrs"]["case"]) for run in runs] == [0, 1]
     assert capsys.readouterr().out == "20260102T000000Z-bbbb: 2 of 3 cases\n"
+
+    monkeypatch.setenv("CI", "true")
+    wd_notebook.load_runs("TestA::test_x", sim_notebook)
+    assert capsys.readouterr().out == "20260103T000000Z-cccc: 1 of 2 cases\n"
 
 
 def test_load_runs_turns_a_methods_qualified_name_into_its_node_path(sim_notebook: Path):
