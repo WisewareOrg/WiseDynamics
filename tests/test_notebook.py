@@ -310,6 +310,9 @@ def test_a_notebook_paired_only_by_jupytext_toml_runs(
 ):
     """With the pairing in `jupytext.toml` and none in the notebook, the cell's test runs.
 
+    The kernel also sets VS Code's `__vsc_ipynb_file__` beside a `JPY_SESSION_NAME` that names no
+    file, as VS Code does; the notebook is the one `__vsc_ipynb_file__` names.
+
     Args:
         shell: The in-process shell with the magic loaded.
         monkeypatch: pytest's fixture for setting the environment for this test only.
@@ -318,7 +321,8 @@ def test_a_notebook_paired_only_by_jupytext_toml_runs(
     cell = _magic(_marker_test("test_here", tmp_path / "ran"))
     path = _write_notebook(tmp_path, [_code(LOAD), cell], paired=False)
     (tmp_path / "jupytext.toml").write_text(f'formats = "{FORMATS}"\n')
-    _magic_env(monkeypatch, path)
+    _magic_env(monkeypatch, tmp_path / "campaign-a26c00bd-330f-48bb-9948-601a740c347e.ipynb")
+    shell.user_ns["__vsc_ipynb_file__"] = str(path)
 
     shell.run_cell_magic("monte_carlo", "", _body(cell))
 

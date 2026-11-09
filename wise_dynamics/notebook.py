@@ -220,7 +220,7 @@ class _Progress:
 
 
 def _notebook_path(line: str) -> Path:
-    """Find the notebook: the argument, else `JPY_SESSION_NAME`, else `__vsc_ipynb_file__`.
+    """Find the notebook: the argument, else `__vsc_ipynb_file__`, else `JPY_SESSION_NAME`.
 
     Args:
         line: The argument, possibly empty.
@@ -232,7 +232,7 @@ def _notebook_path(line: str) -> Path:
         RuntimeError: None of the three names a notebook.
     """
     user_ns = getattr(get_ipython(), "user_ns", {})
-    found = line.strip() or os.environ.get("JPY_SESSION_NAME") or user_ns.get("__vsc_ipynb_file__")
+    found = line.strip() or user_ns.get("__vsc_ipynb_file__") or os.environ.get("JPY_SESSION_NAME")
     if not found:
         raise RuntimeError(
             "The notebook's path is unknown; pass it as an argument, such as "

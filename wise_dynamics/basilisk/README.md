@@ -149,7 +149,7 @@ from a cell. Install the `notebook` extra, `wise-dynamics[notebook]`, and load t
 paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest
 with `-n auto` (plus `--ci` when the `CI` environment variable is set); the cell then raises if any
 test fails, so Run All stops before the plot cells. The notebook's path comes from the argument,
-else `JPY_SESSION_NAME`, else `__vsc_ipynb_file__`.
+else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
 
 Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
 may be the `.ipynb` or the paired `.py` opened as a notebook. Analysis and plot cells must be
