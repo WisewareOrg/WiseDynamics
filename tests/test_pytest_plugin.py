@@ -366,6 +366,9 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
 ):
     """Run files land in `<rootdir>/monte_carlo/<test file>/<test>/`; `TMPDIR` stays empty.
 
+    A `--ci` session then writes under `monte_carlo/ci/` and leaves the first session's files
+    untouched.
+
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         tmp_path: The test's own temporary directory, holding the `TMPDIR` used.
@@ -381,6 +384,12 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     assert len(list(pytester.path.rglob("run_*.h5"))) == 2
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {directory}"])
     assert list(temporary.iterdir()) == []
+
+    before = {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")}
+    pytester.runpytest_subprocess(*SERIAL, "--ci").assert_outcomes(passed=2)
+    ci_directory = pytester.path / "monte_carlo" / "ci" / "test_scenario" / "test_case"
+    assert [run["name"] for run in _read_runs(ci_directory)] == ["run_0000.h5", "run_0001.h5"]
+    assert {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")} == before
 
 
 def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(

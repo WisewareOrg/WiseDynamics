@@ -362,20 +362,22 @@ def _run_dir(node: pytest.Function) -> Path:
 
     Returns:
         `_test_directory` under the test's `sim_out` mark, resolved against the rootdir, else
-        under the session's default root.
+        under the session's default root; under `--ci`, under that root's `ci` directory.
 
     Raises:
         ValueError: A mark is malformed; the message starts with the mark's name.
     """
     values = _marked_values(node)
-    if "sim_out" not in values:
-        return _test_directory(node, node.config.stash[_DEFAULT_ROOT])
-    out = values["sim_out"]
-    if not isinstance(out, str | os.PathLike):
-        raise ValueError(f"sim_out: expected a path, got {out!r}")
-    if not os.fspath(out):
-        raise ValueError("sim_out: expected a non-empty path")
-    return _test_directory(node, node.config.rootpath / out)
+    if "sim_out" in values:
+        out = values["sim_out"]
+        if not isinstance(out, str | os.PathLike):
+            raise ValueError(f"sim_out: expected a path, got {out!r}")
+        if not os.fspath(out):
+            raise ValueError("sim_out: expected a non-empty path")
+        root = node.config.rootpath / out
+    else:
+        root = node.config.stash[_DEFAULT_ROOT]
+    return _test_directory(node, root / "ci" if node.config.getoption("ci") else root)
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:

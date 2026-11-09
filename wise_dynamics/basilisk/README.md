@@ -109,7 +109,8 @@ A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is 
 `sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
 class, outermost first, is a directory. Every root, the default included, is overwritten case by case:
 each case replaces its own file, and a session that runs cases removes the files beyond the run
-count, so under `--ci` only the cases it runs remain; `--collect-only` removes nothing. The
+count; `--collect-only` removes nothing. A `--ci` session writes under `<root>/ci/` instead, so it
+never overwrites or removes a full campaign's files. The
 terminal summary names each directory that received run files. An install that is neither a git
 pin (`uv sync` against a git dependency) nor an editable local checkout
 (`uv pip install -e <checkout>`) stops every session before collection.
