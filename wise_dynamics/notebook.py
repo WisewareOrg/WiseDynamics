@@ -70,14 +70,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         if not tests:
             raise RuntimeError("This cell defines no test.")
         ipython.run_cell(cell).raise_error()
-        exit_code = pytest.main(
-            [
-                *(f"{py}::{name}" for name in tests),
-                "-n",
-                "auto",
-                *(["--ci"] if os.environ.get("CI") else []),
-            ]
-        )
+        exit_code = pytest.main(_pytest_args(py, tests))
         if exit_code != pytest.ExitCode.OK:
             raise RuntimeError(f"pytest exited with {exit_code!r}")
 
@@ -253,6 +246,24 @@ def _paired_py(notebook: Path) -> Path:
     if not pys:
         raise RuntimeError(f"{notebook} has no paired .py; {_PAIR_HOW}")
     return Path(pys[0])
+
+
+def _pytest_args(py: Path, tests: list[str]) -> list[str]:
+    """Build the arguments of the campaign's pytest run.
+
+    Args:
+        py: The paired `.py` holding the tests.
+        tests: The names of the tests to run.
+
+    Returns:
+        One node id per test, `-n auto`, and `--ci` when the `CI` environment variable is set.
+    """
+    return [
+        *(f"{py}::{name}" for name in tests),
+        "-n",
+        "auto",
+        *(["--ci"] if os.environ.get("CI") else []),
+    ]
 
 
 def _sync_py(notebook: Path, py: Path) -> None:
