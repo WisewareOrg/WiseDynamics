@@ -27,7 +27,7 @@ try:
     from tqdm.auto import tqdm
 except ImportError as error:
     raise ImportError(
-        "wise_dynamics.notebook needs IPython and jupytext; "
+        "wise_dynamics.notebook needs IPython, jupytext and tqdm; "
         "install them with the extra: pip install 'wise-dynamics[notebook]'"
     ) from error
 
@@ -177,7 +177,7 @@ class _Progress:
     reports in any phase.
     """
 
-    def __init__(self, bar: Any) -> None:
+    def __init__(self, bar: tqdm) -> None:
         """Hold the bar.
 
         Args:

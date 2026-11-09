@@ -175,6 +175,31 @@ def _sync(notebook: Path) -> Path:
     return notebook.with_suffix(".py")
 
 
+def _execute(
+    directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str]
+) -> nbformat.NotebookNode:
+    """Run `cells` in order in a new kernel in `directory`, started with exactly `env`.
+
+    Args:
+        directory: The kernel's working directory.
+        cells: The cells to run, in memory, whatever the saved notebook holds.
+        env: The kernel's whole environment.
+
+    Returns:
+        The executed notebook, with each cell's outputs and the widget state. A cell that raises
+        ends the run with `CellExecutionError`.
+    """
+    notebook = nbformat.v4.new_notebook(cells=copy.deepcopy(cells))
+    client = NotebookClient(
+        notebook,
+        kernel_name="python3",
+        timeout=900,
+        resources={"metadata": {"path": str(directory)}},
+    )
+    client.execute(env=env)
+    return notebook
+
+
 def _run(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str]) -> list[str]:
     """Run `cells` in order in a new kernel in `directory`, started with exactly `env`.
 
@@ -187,14 +212,7 @@ def _run(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str
         What each cell wrote to standard output. A cell that raises ends the run with
         `CellExecutionError`.
     """
-    notebook = nbformat.v4.new_notebook(cells=copy.deepcopy(cells))
-    client = NotebookClient(
-        notebook,
-        kernel_name="python3",
-        timeout=900,
-        resources={"metadata": {"path": str(directory)}},
-    )
-    client.execute(env=env)
+    notebook = _execute(directory, cells, env)
     return [
         "".join(out.text for out in cell.outputs if out.output_type == "stream")
         for cell in notebook.cells
@@ -473,13 +491,7 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     campaign = [_code(LOAD), nbformat.v4.new_code_cell(CAMPAIGN.strip("\n"))]
     path = _write_notebook(tmp_path, campaign)
     env = _env(path)
-    notebook = nbformat.v4.new_notebook(cells=copy.deepcopy(campaign))
-    NotebookClient(
-        notebook,
-        kernel_name="python3",
-        timeout=900,
-        resources={"metadata": {"path": str(tmp_path)}},
-    ).execute(env=env)
+    notebook = _execute(tmp_path, campaign, env)
     streams = "".join(out.text for out in notebook.cells[1].outputs if out.output_type == "stream")
     widgets = notebook.metadata.widgets["application/vnd.jupyter.widget-state+json"]["state"]
     (bar,) = [
