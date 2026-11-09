@@ -1315,6 +1315,37 @@ def test_an_install_that_cannot_be_described_stops_a_collect_only_session(
     assert not [line for line in result.outlines if "test_scenario.py::" in line]
 
 
+def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
+    """With IPython and jupytext unimportable, a sim test still runs; the notebook module says why.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makeconftest(
+        """
+        import sys
+
+        sys.modules["IPython"] = None
+        sys.modules["jupytext"] = None
+        """
+    )
+    pytester.makepyfile(
+        test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))),
+        test_notebook_import="""
+        import re
+
+        import pytest
+
+
+        def test_the_notebook_module_names_the_extra():
+            with pytest.raises(ImportError, match=re.escape("wise-dynamics[notebook]")):
+                import wise_dynamics.notebook
+        """,
+    )
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+    assert len(list((pytester.path / "monte_carlo").rglob("run_*.h5"))) == 1
+
+
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
     """The plugin loads into every session without importing Basilisk.
 
