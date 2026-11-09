@@ -159,7 +159,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         for path in settings.directory.glob("run_*.h5"):
             match = re.fullmatch(r"run_(\d+)\.h5", path.name)
             if match and int(match[1]) >= settings.runs:
-                path.unlink()
+                path.unlink(missing_ok=True)
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
 
 
