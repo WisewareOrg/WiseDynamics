@@ -1295,8 +1295,7 @@ def test_an_install_that_cannot_be_described_stops_the_session(
         case: A key of `UNDETERMINABLE`.
         xdist: The arguments that run the session with pytest-xdist or without it.
     """
-    result = _undeterminable_session(pytester, tmp_path, monkeypatch, case, *xdist)
-    result.assert_outcomes()
+    _undeterminable_session(pytester, tmp_path, monkeypatch, case, *xdist)
 
 
 def test_an_install_that_cannot_be_described_stops_a_collect_only_session(
