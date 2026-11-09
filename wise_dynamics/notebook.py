@@ -57,7 +57,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         """
         notebook = _notebook_path(line)
         py = _notebook_py(notebook)
-        if jupytext.cli.jupytext(["--sync", "--quiet", str(notebook)]):
+        if py != notebook and jupytext.cli.jupytext(["--sync", "--quiet", str(notebook)]):
             raise RuntimeError(f"jupytext could not sync {notebook}")
         saved = {
             "\n".join(map(str.rstrip, each.source.partition("\n")[2].splitlines())).strip("\n")
