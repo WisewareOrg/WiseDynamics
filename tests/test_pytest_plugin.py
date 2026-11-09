@@ -4,7 +4,9 @@ Each session loads the plugin by its `pytest11` entry point. Each session's test
 own marks in source.
 """
 
+import json
 import re
+import subprocess
 import textwrap
 from importlib.metadata import version
 from pathlib import Path
@@ -297,6 +299,10 @@ def test_the_run_file_carries_the_case_root_attrs(pytester: pytest.Pytester):
             "created_utc",
             "versions_bsk",
             "versions_wise_dynamics",
+            "versions_wise_dynamics_install",
+            "versions_wise_dynamics_commit",
+            "versions_wise_dynamics_requested_revision",
+            "versions_wise_dynamics_dirty",
         }
         | draws
         | probes
@@ -1003,6 +1009,310 @@ def test_every_run_folder_replaces_an_existing_run_file(pytester: pytest.Pyteste
 """
     )
     pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+
+def _git(directory: Path, *args: str) -> str:
+    """Run `git` in `directory`.
+
+    Args:
+        directory: The repository.
+        *args: The `git` arguments.
+
+    Returns:
+        The command's standard output, without its trailing newline.
+    """
+    identity = ("-c", "user.name=Test", "-c", "user.email=test@example.com")
+    result = subprocess.run(
+        ["git", *identity, "-c", "commit.gpgsign=false", "-C", str(directory), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _make_repository(directory: Path, dirty: bool = False) -> str:
+    """Create a git repository with one commit, and optionally an uncommitted file.
+
+    Args:
+        directory: The repository to create.
+        dirty: Whether to leave an untracked file in it.
+
+    Returns:
+        The commit's 40-hex id.
+    """
+    directory.mkdir()
+    _git(directory, "init", "-q")
+    (directory / "tracked.txt").write_text("tracked")
+    _git(directory, "add", "tracked.txt")
+    _git(directory, "commit", "-q", "-m", "first")
+    if dirty:
+        (directory / "untracked.txt").write_text("untracked")
+    return _git(directory, "rev-parse", "HEAD")
+
+
+def _editable_direct_url(repository: Path) -> dict:
+    """Build the `direct_url.json` of an editable install of `repository`.
+
+    Args:
+        repository: The checkout installed.
+
+    Returns:
+        The golden editable fixture, as uv writes it, with `repository` substituted.
+    """
+    text = (DATA / "direct_url_editable.json").read_text().replace("{repo}", str(repository))
+    return json.loads(text)
+
+
+def _provenance_session(
+    pytester: pytest.Pytester, direct_url: dict | None, *args: str
+) -> pytest.RunResult:
+    """Run the two-case scenario with the plugin's `_direct_url` patched to `direct_url`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        direct_url: What `_direct_url` returns: the install's parsed `direct_url.json`, or `None`.
+        *args: Further pytest arguments.
+
+    Returns:
+        The session's result.
+    """
+    pytester.makeconftest(
+        "import wise_dynamics.pytest_plugin as plugin\n\n"
+        f"plugin._direct_url = lambda: {direct_url!r}\n"
+    )
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
+    return pytester.runpytest_subprocess(*args)
+
+
+def _provenance_attrs(pytester: pytest.Pytester) -> list[dict]:
+    """Read each run file's four provenance attributes from the default run folder.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+
+    Returns:
+        One mapping per run file: `install`, `commit`, `requested_revision` and `dirty`.
+    """
+    prefix = "versions_wise_dynamics_"
+    runs = _read_runs(pytester.path / "monte_carlo" / "test_scenario" / "test_case")
+    return [
+        {
+            key: run["attrs"][prefix + key]
+            for key in ("install", "commit", "requested_revision", "dirty")
+        }
+        for run in runs
+    ]
+
+
+def _assert_false(value: object) -> None:
+    """Assert `value` is the boolean `False` as an HDF5 attribute reads back.
+
+    Args:
+        value: The attribute's value.
+    """
+    assert type(value) is np.bool_
+    assert not value
+
+
+def _assert_true(value: object) -> None:
+    """Assert `value` is the boolean `True` as an HDF5 attribute reads back.
+
+    Args:
+        value: The attribute's value.
+    """
+    assert type(value) is np.bool_
+    assert value
+
+
+def test_the_golden_direct_urls_are_the_forms_uv_writes():
+    """The two checked-in `direct_url.json` fixtures are the pinned and the editable forms."""
+    vcs = json.loads((DATA / "direct_url_vcs.json").read_text())
+    assert vcs["vcs_info"]["vcs"] == "git"
+    assert re.fullmatch(r"[0-9a-f]{40}", vcs["vcs_info"]["commit_id"])
+    editable = _editable_direct_url(Path("/some/checkout"))
+    assert editable == {"url": "file:///some/checkout", "dir_info": {"editable": True}}
+
+
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_pinned_install_records_its_commit_as_pinned(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """A VCS install records `pinned`, its commit, its requested revision and a clean tree.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    direct_url = json.loads((DATA / "direct_url_vcs.json").read_text())
+    _provenance_session(pytester, direct_url, *xdist).assert_outcomes(passed=2)
+
+    attrs = _provenance_attrs(pytester)
+    assert len(attrs) == 2
+    for found in attrs:
+        assert found["install"] == "pinned"
+        assert found["commit"] == direct_url["vcs_info"]["commit_id"]
+        assert found["requested_revision"] == direct_url["vcs_info"]["requested_revision"]
+        _assert_false(found["dirty"])
+
+
+def test_a_pinned_install_with_no_requested_revision_records_an_empty_one(
+    pytester: pytest.Pytester,
+):
+    """A VCS install that names no revision records `requested_revision` as an empty string.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    direct_url = json.loads((DATA / "direct_url_vcs.json").read_text())
+    del direct_url["vcs_info"]["requested_revision"]
+    _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=2)
+
+    attrs = _provenance_attrs(pytester)
+    assert len(attrs) == 2
+    for found in attrs:
+        assert found["install"] == "pinned"
+        assert found["commit"] == direct_url["vcs_info"]["commit_id"]
+        assert found["requested_revision"] == ""
+
+
+@pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])
+def test_an_editable_install_records_its_checkouts_commit_and_dirt(
+    pytester: pytest.Pytester, tmp_path: Path, dirty: bool
+):
+    """An editable install records `local`, the checkout's HEAD and whether it has changes.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory, holding the checkout.
+        dirty: Whether the checkout has an uncommitted file.
+    """
+    repository = tmp_path / "checkout"
+    commit = _make_repository(repository, dirty=dirty)
+    direct_url = _editable_direct_url(repository)
+    _provenance_session(pytester, direct_url, *XDIST).assert_outcomes(passed=2)
+
+    attrs = _provenance_attrs(pytester)
+    assert len(attrs) == 2
+    for found in attrs:
+        assert found["install"] == "local"
+        assert found["commit"] == commit
+        assert found["requested_revision"] == ""
+        (_assert_true if dirty else _assert_false)(found["dirty"])
+
+
+def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytester):
+    """With nothing patched, this repository's editable install records `local` and its HEAD.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+    (found,) = _provenance_attrs(pytester)
+    assert found["install"] == "local"
+    assert found["commit"] == _git(REPOSITORY, "rev-parse", "HEAD")
+    assert found["requested_revision"] == ""
+    assert type(found["dirty"]) is np.bool_
+
+
+def _plain_directory(tmp_path: Path) -> Path:
+    """Create a directory that is not in any git repository.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+
+    Returns:
+        The new directory.
+    """
+    directory = tmp_path / "plain"
+    directory.mkdir()
+    return directory
+
+
+UNDETERMINABLE = {
+    "no-direct-url": lambda tmp_path: None,
+    "non-editable-directory": lambda tmp_path: {"url": tmp_path.as_uri(), "dir_info": {}},
+    "non-git-vcs": lambda tmp_path: {
+        "url": "https://example.org/repository",
+        "vcs_info": {"vcs": "hg", "commit_id": "0" * 40},
+    },
+    "not-a-repository": lambda tmp_path: _editable_direct_url(_plain_directory(tmp_path)),
+    "git-unavailable": lambda tmp_path: _editable_direct_url(REPOSITORY),
+}
+"""Each install the plugin cannot describe, as the `direct_url.json` a session is given."""
+
+
+def _undeterminable_session(
+    pytester: pytest.Pytester,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    *args: str,
+) -> pytest.RunResult:
+    """Run a session whose install `case` names, and check it stops with the install message.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory.
+        monkeypatch: pytest's fixture for setting the session's environment for this test only.
+        case: A key of `UNDETERMINABLE`.
+        *args: Further pytest arguments.
+
+    Returns:
+        The session's result, whose exit code is a usage error, with no run file written.
+    """
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    if case == "git-unavailable":
+        (tmp_path / "no_git").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "no_git"))
+    result = _provenance_session(pytester, UNDETERMINABLE[case](tmp_path), *args)
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    output = result.stdout.lines + result.stderr.lines
+    assert len([line for line in output if "uv sync" in line]) == 1
+    assert len([line for line in output if "uv pip install -e" in line]) == 1
+    assert not list(pytester.path.rglob("run_*.h5"))
+    return result
+
+
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+@pytest.mark.parametrize("case", UNDETERMINABLE)
+def test_an_install_that_cannot_be_described_stops_the_session(
+    pytester: pytest.Pytester,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    xdist: tuple[str, ...],
+):
+    """An install the plugin cannot describe exits 4, names both supported installs, runs no case.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory.
+        monkeypatch: pytest's fixture for setting the session's environment for this test only.
+        case: A key of `UNDETERMINABLE`.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    result = _undeterminable_session(pytester, tmp_path, monkeypatch, case, *xdist)
+    result.assert_outcomes()
+
+
+def test_an_install_that_cannot_be_described_stops_a_collect_only_session(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`--collect-only` is a session too: a bad install stops it with exit 4.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory.
+        monkeypatch: pytest's fixture for setting the session's environment for this test only.
+    """
+    result = _undeterminable_session(
+        pytester, tmp_path, monkeypatch, "no-direct-url", *SERIAL, "--collect-only"
+    )
+    assert not [line for line in result.outlines if "test_scenario.py::" in line]
 
 
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
