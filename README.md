@@ -33,6 +33,9 @@ and needs `pytest-xdist`, which the consumer adds itself:
 pytest tests/sim -n 8
 ```
 
+Run files go under `monte_carlo/` in the rootdir (the `sim_out` ini setting). The optional
+`notebook` extra adds a `%%monte_carlo` notebook magic and `load_runs`; see the basilisk README.
+
 [`wise_dynamics/basilisk/README.md`](wise_dynamics/basilisk/README.md) is the reference: the
 modules, what a vehicle and a scenario are, the plugin's marks, fixtures and case seeding, and a
 worked example.
