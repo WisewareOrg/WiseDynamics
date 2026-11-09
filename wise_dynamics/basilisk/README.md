@@ -110,8 +110,7 @@ A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is 
 class, outermost first, is a directory. Every root, the default included, is overwritten case by case:
 each case replaces its own file, and a session that runs cases removes the files beyond the run
 count, so under `--ci` only the cases it runs remain; `--collect-only` removes nothing. The
-terminal summary names each directory that received run files. No temporary directory is
-created. An install that is neither a git pin (`uv sync` against a git dependency) nor an editable
+terminal summary names each directory that received run files. An install that is neither a git pin (`uv sync` against a git dependency) nor an editable
 local checkout (`uv pip install -e <checkout>`) stops every session before collection.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads

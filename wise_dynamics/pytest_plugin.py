@@ -60,8 +60,7 @@ _MARKS = (
         "sim_out",
         "path",
         "directory the run files are written under, relative to the rootdir; default the "
-        "`sim_out` ini setting, itself defaulting to "
-        f"{_DEFAULT_OUT}",
+        "`sim_out` ini setting",
     ),
 )
 
@@ -256,8 +255,8 @@ def sim_run_file(
     The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
     basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
     `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the
-    install's provenance (`versions_wise_dynamics_install`, `_commit`, `_requested_revision` and
-    `_dirty`) and one `draw_<name>` per value the scenario drew.
+    install's provenance (`versions_wise_dynamics_*`, see the basilisk README) and one
+    `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
