@@ -5,6 +5,8 @@
 """
 
 import ast
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -54,14 +56,9 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
                 notebook on disk or defines no test, or the cell or a test fails.
         """
         notebook = _notebook_path(line)
-        if "formats" not in jupytext.read(notebook).metadata.get("jupytext", {}):
-            raise RuntimeError(
-                f"{notebook} has no paired .py; pair it with "
-                "`jupytext --set-formats ipynb,py:percent <notebook>`"
-            )
+        py = _notebook_py(notebook)
         if jupytext.cli.jupytext(["--sync", "--quiet", str(notebook)]):
             raise RuntimeError(f"jupytext could not sync {notebook}")
-        py = notebook if notebook.suffix == ".py" else notebook.with_suffix(".py")
         saved = {
             "\n".join(map(str.rstrip, each.source.partition("\n")[2].splitlines())).strip("\n")
             for each in jupytext.read(notebook).cells
@@ -111,7 +108,7 @@ def load_runs(
         FileNotFoundError: The test's run directory holds no run file.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
-    py = _notebook_path(os.fspath(notebook) if notebook is not None else "").with_suffix(".py")
+    py = _notebook_py(_notebook_path(os.fspath(notebook) if notebook is not None else ""))
     with tempfile.TemporaryDirectory() as scratch:
         report = Path(scratch) / "run_dir.json"
         collected = subprocess.run(
@@ -180,3 +177,30 @@ def _notebook_path(line: str) -> Path:
             "`%%monte_carlo path/to/notebook.ipynb`."
         )
     return Path(found)
+
+
+def _notebook_py(notebook: Path) -> Path:
+    """Find the `.py` whose tests a notebook runs.
+
+    Args:
+        notebook: The `.ipynb`, or the `.py` jupytext opened as a notebook.
+
+    Returns:
+        `notebook` itself when it is a `.py`, else the `.py` among the paths jupytext pairs with
+        it, from the notebook's metadata or a `jupytext.toml`.
+
+    Raises:
+        RuntimeError: An `.ipynb` has no paired `.py`.
+    """
+    if notebook.suffix == ".py":
+        return notebook
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        jupytext.cli.jupytext(["--paired-paths", str(notebook)])
+    pys = [line for line in out.getvalue().splitlines() if line.endswith(".py")]
+    if not pys:
+        raise RuntimeError(
+            f"{notebook} has no paired .py; pair it with "
+            "`jupytext --set-formats ipynb,py:percent <notebook>`"
+        )
+    return Path(pys[0])
