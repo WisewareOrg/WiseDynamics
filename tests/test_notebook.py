@@ -483,11 +483,11 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     assert loaded["sums"] == [run["sums"] for run in expected]
 
 
-class TestA:
-    """A class whose method `load_runs` takes as a test object, named as the notebook's is."""
+class _Holder:
+    """A class pytest does not collect, whose method `load_runs` takes as a test object."""
 
     def test_x(self) -> None:
-        """Stand in for the notebook's `TestA.test_x`; it is never meant to run."""
+        """Stand in for a method defined in a notebook; it is never meant to run."""
 
 
 @pytest.fixture
@@ -505,18 +505,26 @@ def sim_notebook(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("test", ["TestA::test_x", TestA.test_x], ids=["node-path", "function"])
-def test_load_runs_with_no_run_files_names_the_expected_folder(sim_notebook: Path, test: object):
+def test_load_runs_with_no_run_files_names_the_expected_folder(sim_notebook: Path):
     """With no run files, `load_runs` raises `FileNotFoundError` naming the method's folder.
 
     Args:
         sim_notebook: The paired notebook, never run.
-        test: The method as a node path and as the method object `TestA.test_x`.
     """
     folder = sim_notebook.parent / "monte_carlo" / "campaign" / "TestA" / "test_x"
 
     with pytest.raises(FileNotFoundError, match=re.escape(str(folder))):
-        wd_notebook.load_runs(test, sim_notebook)
+        wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+
+def test_load_runs_turns_a_methods_qualified_name_into_its_node_path(sim_notebook: Path):
+    """A method object is looked up as `Class::method`, so a class the `.py` lacks is named so.
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+    """
+    with pytest.raises(RuntimeError, match="_Holder::test_x does not collect"):
+        wd_notebook.load_runs(_Holder.test_x, sim_notebook)
 
 
 def test_load_runs_names_a_test_that_does_not_collect(sim_notebook: Path):
