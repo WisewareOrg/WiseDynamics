@@ -84,7 +84,7 @@ bad one fails collection of the test, naming its node id and the mark.
 | mark | argument | default |
 |---|---|---|
 | `sim_runs(n)` | cases in the campaign, an integer of at least 1 | 8 |
-| `sim_out(path)` | where run files go, relative to the rootdir | a new directory under the system temporary directory for each session; an explicit `sim_out` is overwritten on every run |
+| `sim_out(path)` | where run files go, relative to the rootdir | a new directory under the system temporary directory for each session |
 | `sim_duration_s(seconds)` | simulated seconds per case, positive | 5700 |
 | `sim_scenario(name)` | the scenario's name in `SCENARIOS` | `leo500` |
 | `sim_fidelity(level)` | `hi`, `med` or `lo`, as the Scenarios section defines them | `lo` |
@@ -106,9 +106,8 @@ is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
 A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is the test's
 `sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
 class, outermost first, is a directory. An explicit `sim_out` is overwritten on every run:
-collection deletes the `run_*.h5` files already in the test's directory. Without it, each session
-writes to its own new temporary directory. The terminal summary names each directory that received
-run files.
+collection deletes the `run_*.h5` files already in the test's directory. The terminal summary
+names each directory that received run files.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
