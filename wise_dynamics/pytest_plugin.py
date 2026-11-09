@@ -442,7 +442,8 @@ def _provenance() -> dict[str, str | bool]:
             `git` cannot describe the checkout.
     """
     found = _direct_url()
-    vcs_info = (found or {}).get("vcs_info", {})
+    info = found or {}
+    vcs_info = info.get("vcs_info", {})
     if vcs_info.get("vcs") == "git" and "commit_id" in vcs_info:
         return {
             "install": "pinned",
@@ -450,19 +451,48 @@ def _provenance() -> dict[str, str | bool]:
             "requested_revision": vcs_info.get("requested_revision", ""),
             "dirty": False,
         }
-    url = (found or {}).get("url", "")
-    if (found or {}).get("dir_info", {}).get("editable") and url.startswith("file://"):
-        checkout = Path(url2pathname(urlparse(url).path))
-        try:
-            commit = _git(checkout, "rev-parse", "HEAD").strip()
-            dirty = bool(_git(checkout, "status", "--porcelain").strip())
-        except (OSError, subprocess.CalledProcessError) as error:
-            reason = f"git could not describe the editable checkout {checkout}: {error}"
-        else:
-            return {"install": "local", "commit": commit, "requested_revision": "", "dirty": dirty}
-    else:
-        reason = f"the install of wise-dynamics is not a git pin or an editable checkout: {found}"
+    url = info.get("url", "")
+    if info.get("dir_info", {}).get("editable") and url.startswith("file://"):
+        return _local_install(Path(url2pathname(urlparse(url).path)))
     raise pytest.UsageError(
+        _install_message(
+            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}"
+        )
+    )
+
+
+def _local_install(checkout: Path) -> dict[str, str | bool]:
+    """Describe an editable local checkout by asking `git`.
+
+    Args:
+        checkout: The checkout's directory.
+
+    Returns:
+        The `_provenance` mapping for a local install.
+
+    Raises:
+        pytest.UsageError: `git` cannot describe the checkout.
+    """
+    try:
+        commit = _git(checkout, "rev-parse", "HEAD").strip()
+        dirty = bool(_git(checkout, "status", "--porcelain").strip())
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise pytest.UsageError(
+            _install_message(f"git could not describe the editable checkout {checkout}: {error}")
+        ) from None
+    return {"install": "local", "commit": commit, "requested_revision": "", "dirty": dirty}
+
+
+def _install_message(reason: str) -> str:
+    """Word the error for an install that cannot be described.
+
+    Args:
+        reason: What was found.
+
+    Returns:
+        `reason` followed by the two supported installs.
+    """
+    return (
         f"{reason}\n"
         "Install a pinned release with `uv sync` against a git dependency, or a local checkout "
         "with\n"

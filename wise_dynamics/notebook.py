@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -64,24 +65,8 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
                 "This cell has unsaved changes. Save the notebook and run the cell again."
             )
         py = _paired_py(notebook)
-        if not _in_sync(notebook, py):
-            if py.exists() and py.stat().st_mtime > notebook.stat().st_mtime:
-                raise RuntimeError(
-                    "The .py was edited after the notebook was saved; reload the notebook from "
-                    "disk before running"
-                )
-            status, output = _jupytext(["--sync", str(notebook)])
-            if status:
-                raise RuntimeError(f"jupytext could not sync {notebook}: {output}")
-        tests = [
-            node.name
-            for node in ast.parse(cell).body
-            if (
-                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-                and node.name.startswith("test")
-            )
-            or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
-        ]
+        _sync_py(notebook, py)
+        tests = _test_names(ipython.input_transformer_manager.transform_cell(cell))
         if not tests:
             raise RuntimeError("This cell defines no test.")
         ipython.run_cell(cell).raise_error()
@@ -99,7 +84,9 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
     ipython.register_magic_function(monte_carlo, "cell", "monte_carlo")
 
 
-def load_runs(test: Any, notebook: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
+def load_runs(
+    test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
+) -> list[dict[str, Any]]:
     """Read back the run files a notebook test wrote.
 
     Args:
@@ -112,7 +99,8 @@ def load_runs(test: Any, notebook: str | os.PathLike[str] | None = None) -> list
         `datasets` maps each HDF5 dataset path to `(values, units)`.
 
     Raises:
-        RuntimeError: The test does not collect from the notebook's `.py`.
+        RuntimeError: The test does not collect from the notebook's `.py`, or the node collects
+            tests of more than one function.
         FileNotFoundError: The test's run directory holds no run file.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
@@ -144,7 +132,13 @@ def load_runs(test: Any, notebook: str | os.PathLike[str] | None = None) -> list
             raise RuntimeError(
                 f"{py}::{node} does not collect:\n{collected.stdout}{collected.stderr}"
             )
-        directory = Path(json.loads(report.read_text()))
+        directories = json.loads(report.read_text())
+    if len(directories) != 1:
+        raise RuntimeError(
+            f"{py}::{node} collects tests in {len(directories)} run directories; it must name a "
+            "single test function or method"
+        )
+    directory = Path(directories[0])
     files = sorted(directory.glob("run_*.h5"))
     if not files:
         raise FileNotFoundError(f"no run files in {directory}")
@@ -152,14 +146,14 @@ def load_runs(test: Any, notebook: str | os.PathLike[str] | None = None) -> list
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
-    """Write the collected test's run directory to the file `WISE_DYNAMICS_RUN_DIR_REPORT` names.
+    """Write the collected tests' run directories to the file `WISE_DYNAMICS_RUN_DIR_REPORT` names.
 
     Args:
         session: The finished collection session.
     """
     report = os.environ.get(_REPORT)
     if report and session.items:
-        Path(report).write_text(json.dumps(str(_run_dir(session.items[0]))))
+        Path(report).write_text(json.dumps(sorted({str(_run_dir(item)) for item in session.items})))
 
 
 def _user_ns() -> dict[str, Any]:
@@ -261,6 +255,48 @@ def _paired_py(notebook: Path) -> Path:
     return Path(pys[0])
 
 
+def _sync_py(notebook: Path, py: Path) -> None:
+    """Bring the paired `.py` up to date with the saved notebook, never over its own edits.
+
+    Args:
+        notebook: The `.ipynb` on disk.
+        py: Its paired `.py`.
+
+    Raises:
+        RuntimeError: The `.py` differs from the notebook and is newer, or jupytext fails.
+    """
+    if _in_sync(notebook, py):
+        return
+    if py.exists() and py.stat().st_mtime > notebook.stat().st_mtime:
+        raise RuntimeError(
+            "The .py was edited after the notebook was saved; reload the notebook from disk "
+            "before running"
+        )
+    status, output = _jupytext(["--sync", str(notebook)])
+    if status:
+        raise RuntimeError(f"jupytext could not sync {notebook}: {output}")
+
+
+def _test_names(source: str) -> list[str]:
+    """List the top-level tests a cell defines.
+
+    Args:
+        source: The cell's Python source.
+
+    Returns:
+        The names of its top-level `test*` functions and `Test*` classes.
+    """
+    return [
+        node.name
+        for node in ast.parse(source).body
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name.startswith("test")
+        )
+        or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
+    ]
+
+
 def _in_sync(notebook: Path, py: Path) -> bool:
     """Say whether the `.py` already holds what jupytext would write from the saved notebook.
 
@@ -271,9 +307,11 @@ def _in_sync(notebook: Path, py: Path) -> bool:
     Returns:
         True when `py` exists and its text equals the notebook rendered in the pair's format.
     """
+    if not py.exists():
+        return False
     saved = jupytext.read(notebook)
     fmt = {"extension": ".py", "format_name": format_name_for_ext(saved.metadata, ".py")}
-    return py.exists() and jupytext.writes(saved, fmt=fmt) == py.read_text(encoding="utf-8")
+    return jupytext.writes(saved, fmt=fmt) == py.read_text(encoding="utf-8")
 
 
 def _read_run(path: Path) -> dict[str, Any]:
