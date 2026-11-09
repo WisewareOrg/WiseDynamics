@@ -12,7 +12,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError, distribution, version
+from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import urlparse
@@ -31,6 +31,10 @@ _DEFAULT_ROOT = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
+_INSTALL_HINT = (
+    "Install a pinned release with `uv sync` against a git dependency, or a local checkout with\n"
+    "`uv pip install -e <checkout>`."
+)
 _DEFAULT_OUT = "monte_carlo"
 _CI_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
@@ -417,21 +421,8 @@ def _test_directory(node: pytest.Function, root: Path) -> Path:
     return root / file_part / Path(*classes) / node.originalname
 
 
-def _direct_url() -> dict[str, Any] | None:
-    """Read the `wise-dynamics` distribution's PEP 610 `direct_url.json`.
-
-    Returns:
-        The parsed file, or None when the distribution has none.
-    """
-    try:
-        text = distribution("wise-dynamics").read_text("direct_url.json")
-    except PackageNotFoundError:
-        return None
-    return None if text is None else json.loads(text)
-
-
 def _provenance() -> dict[str, str | bool]:
-    """Describe how `wise-dynamics` was installed.
+    """Describe how `wise-dynamics` was installed, from its PEP 610 `direct_url.json`.
 
     Returns:
         `install` (`pinned` or `local`), `commit`, `requested_revision` (empty for a local
@@ -441,7 +432,8 @@ def _provenance() -> dict[str, str | bool]:
         pytest.UsageError: The install is neither a git pin nor an editable local checkout, or
             `git` cannot describe the checkout.
     """
-    found = _direct_url()
+    text = distribution("wise-dynamics").read_text("direct_url.json")
+    found = json.loads(text) if text else None
     info = found or {}
     vcs_info = info.get("vcs_info", {})
     if vcs_info.get("vcs") == "git" and "commit_id" in vcs_info:
@@ -452,67 +444,29 @@ def _provenance() -> dict[str, str | bool]:
             "dirty": False,
         }
     url = info.get("url", "")
-    if info.get("dir_info", {}).get("editable") and url.startswith("file://"):
-        return _local_install(Path(url2pathname(urlparse(url).path)))
-    raise pytest.UsageError(
-        _install_message(
-            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}"
+    if not (info.get("dir_info", {}).get("editable") and url.startswith("file://")):
+        raise pytest.UsageError(
+            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
+            f"{_INSTALL_HINT}"
         )
-    )
-
-
-def _local_install(checkout: Path) -> dict[str, str | bool]:
-    """Describe an editable local checkout by asking `git`.
-
-    Args:
-        checkout: The checkout's directory.
-
-    Returns:
-        The `_provenance` mapping for a local install.
-
-    Raises:
-        pytest.UsageError: `git` cannot describe the checkout.
-    """
+    git = ["git", "-C", url2pathname(urlparse(url).path)]
     try:
-        commit = _git(checkout, "rev-parse", "HEAD").strip()
-        dirty = bool(_git(checkout, "status", "--porcelain").strip())
+        commit = subprocess.run(
+            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        )
+        status = subprocess.run(
+            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         raise pytest.UsageError(
-            _install_message(f"git could not describe the editable checkout {checkout}: {error}")
+            f"git could not describe the editable checkout {git[2]}: {error}\n{_INSTALL_HINT}"
         ) from None
-    return {"install": "local", "commit": commit, "requested_revision": "", "dirty": dirty}
-
-
-def _install_message(reason: str) -> str:
-    """Word the error for an install that cannot be described.
-
-    Args:
-        reason: What was found.
-
-    Returns:
-        `reason` followed by the two supported installs.
-    """
-    return (
-        f"{reason}\n"
-        "Install a pinned release with `uv sync` against a git dependency, or a local checkout "
-        "with\n"
-        "`uv pip install -e <checkout>`."
-    )
-
-
-def _git(directory: Path, *args: str) -> str:
-    """Run `git -C <directory> <args>`.
-
-    Args:
-        directory: The repository directory.
-        *args: The git subcommand and its arguments.
-
-    Returns:
-        The command's standard output.
-    """
-    return subprocess.run(
-        ["git", "-C", str(directory), *args], check=True, capture_output=True, text=True
-    ).stdout
+    return {
+        "install": "local",
+        "commit": commit.stdout.strip(),
+        "requested_revision": "",
+        "dirty": bool(status.stdout.strip()),
+    }
 
 
 def _run_files(count: int) -> str:

@@ -151,8 +151,9 @@ with `-n auto` (plus `--ci` when the `CI` environment variable is set); the cell
 test fails, so Run All stops before the plot cells. The notebook's path comes from the argument,
 else `JPY_SESSION_NAME`, else `__vsc_ipynb_file__`.
 
-Save the notebook before running the cell: a cell with unsaved changes, or a `.py` edited after the
-notebook was saved, is refused with a message saying what to do.
+Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
+may be the `.ipynb` or the paired `.py` opened as a notebook. Analysis and plot cells must be
+notebook-only (`active="ipynb"` in the `.py`), or every worker runs them when it imports the `.py`.
 
 `load_runs(test, notebook=None)` reads a test's run files back as one record per case, sorted by
 case: `attrs` holds the root attributes and `datasets` maps each dataset path to `(values, units)`.
