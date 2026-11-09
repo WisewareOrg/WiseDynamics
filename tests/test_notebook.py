@@ -206,7 +206,8 @@ def shell() -> Iterator[InteractiveShell]:
     """Provide a fresh in-process IPython shell with the magic loaded.
 
     Yields:
-        InteractiveShell: The shell; the singleton is cleared before and after, so no namespace leaks between tests.
+        InteractiveShell: The shell; the singleton is cleared before and after, so no namespace
+        leaks between tests.
     """
     InteractiveShell.clear_instance()
     instance = InteractiveShell.instance()
