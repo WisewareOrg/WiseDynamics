@@ -1,17 +1,20 @@
-"""The WiseDynamics pytest plugin: one scenario, with its vehicle, over `--sim-runs` cases.
+"""The WiseDynamics pytest plugin: each test that uses a `sim_` fixture is one Monte Carlo campaign.
 
-A pytest session runs the cases as one Monte Carlo run. Installing `wise-dynamics` registers this
-module through its `pytest11` entry point. `wise_dynamics/basilisk/README.md` documents its
-options and fixtures.
+A test configures its campaign with marks on the function, a class or the module, the closest
+winning. Installing `wise-dynamics` registers this module through its `pytest11` entry point.
+`wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
 """
 
+import numbers
+import os
+import re
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import pytest
@@ -22,86 +25,99 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _WORKER_OUT_DIR = "wise_dynamics_out_dir"
+_WORKER_DIRS = "wise_dynamics_dirs"
 _OUT_DIR = pytest.StashKey[Path]()
+_WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _SEED = 0
+_CI_RUNS = 2
+_DEFAULT_SCENARIO = "leo500"
+_DEFAULT_RUNS = 8
+_DEFAULT_FIDELITY = "lo"
+_DEFAULT_DURATION_S = 5700.0
+_FIDELITIES = ("hi", "med", "lo")
+_MARKS = (
+    (
+        "sim_scenario",
+        "name",
+        f"name of the scenario in wise_dynamics.basilisk.SCENARIOS; default {_DEFAULT_SCENARIO}",
+    ),
+    ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
+    (
+        "sim_fidelity",
+        "level",
+        "integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.05 s; "
+        f"default {_DEFAULT_FIDELITY}",
+    ),
+    (
+        "sim_duration_s",
+        "seconds",
+        f"simulated duration of each case, positive; default {_DEFAULT_DURATION_S:g}",
+    ),
+    (
+        "sim_out",
+        "path",
+        "directory the run files are written under, relative to the rootdir; default a new "
+        "directory under the system temporary directory",
+    ),
+)
+
+
+class _Settings(NamedTuple):
+    """One test's resolved configuration.
+
+    Attributes:
+        scenario: The scenario's name in `SCENARIOS`.
+        runs: The number of cases, after the `--ci` cap.
+        fidelity: The integration fidelity.
+        duration_s: Each case's simulated duration, in seconds.
+        directory: The directory the test's run files are written to.
+    """
+
+    scenario: str
+    runs: int
+    fidelity: str
+    duration_s: float
+    directory: Path
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the `--sim-*` options.
+    """Register the `--ci` option.
 
     Args:
         parser: The pytest command-line parser.
     """
     group = parser.getgroup("wise-dynamics", "WiseDynamics vehicle cases")
     group.addoption(
-        "--sim-runs", type=int, default=8, help="number of cases in the session (default: 8)"
-    )
-    group.addoption(
-        "--sim-out",
-        default=None,
-        help="directory the run files are written to (default: a new directory under the "
-        "system temporary directory)",
-    )
-    group.addoption(
-        "--sim-duration-s",
-        type=float,
-        default=5700.0,
-        help="simulated duration of each case, in seconds (default: 5700)",
-    )
-    group.addoption(
-        "--sim-fidelity",
-        choices=("hi", "med", "lo"),
-        default="lo",
-        help="integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.05 s "
-        "(default: lo)",
-    )
-    group.addoption(
-        "--sim-scenario",
-        default="leo500",
-        help="name of the scenario in wise_dynamics.basilisk.SCENARIOS (default: leo500)",
+        "--ci",
+        action="store_true",
+        default=False,
+        help=f"cap every test's case count at {_CI_RUNS}",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Check the `--sim-*` options once and resolve the session's output directory.
+    """Register the `sim_` marks and resolve the session's default output directory.
 
-    The controlling process resolves one absolute output directory, which every pytest-xdist
+    The controlling process resolves one absolute default directory, which every pytest-xdist
     worker receives; the first run file written creates it.
 
     Args:
-        config: The session's pytest configuration, which holds the options and the stash.
-
-    Raises:
-        pytest.UsageError: An option is out of range, or `--sim-out` already holds run files.
+        config: The session's pytest configuration, which holds the stash.
     """
+    for name, argument, description in _MARKS:
+        config.addinivalue_line("markers", f"{name}({argument}): {description}")
     workerinput = getattr(config, "workerinput", None)
     if workerinput is not None:
         out_dir = Path(workerinput[_WORKER_OUT_DIR])
-    elif config.getoption("--sim-out"):
-        out_dir = Path(config.getoption("--sim-out")).absolute()
-        stale = sorted(out_dir.glob("run_*.h5"))
-        if stale:
-            raise pytest.UsageError(
-                f"--sim-out {out_dir} already holds {_run_files(len(stale))}; "
-                "give each session a directory of its own"
-            )
     else:
         out_dir = Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
-
-    runs = config.getoption("--sim-runs")
-    duration_s = config.getoption("--sim-duration-s")
-    if runs < 1:
-        raise pytest.UsageError(f"wise-dynamics: --sim-runs must be at least 1, got {runs}")
-    if not duration_s > 0:
-        raise pytest.UsageError(
-            f"wise-dynamics: --sim-duration-s must be positive, got {duration_s}"
-        )
     config.stash[_OUT_DIR] = out_dir
+    config.stash[_WRITTEN_DIRS] = set()
 
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
-    """Hand a starting pytest-xdist worker the controller's output directory.
+    """Hand a starting pytest-xdist worker the controller's default output directory.
 
     Args:
         node: The pytest-xdist worker node being configured.
@@ -109,38 +125,68 @@ def pytest_configure_node(node: Any) -> None:
     node.workerinput[_WORKER_OUT_DIR] = str(node.config.stash[_OUT_DIR])
 
 
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: Any, error: object) -> None:
+    """Collect the directories a pytest-xdist worker wrote run files to.
+
+    Args:
+        node: The pytest-xdist worker node that finished.
+        error: The error that ended the worker, if any.
+    """
+    workeroutput = getattr(node, "workeroutput", None) or {}
+    node.config.stash[_WRITTEN_DIRS].update(
+        Path(path) for path in workeroutput.get(_WORKER_DIRS, ())
+    )
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parametrize every test that uses `sim_case_index` over the case numbers.
+    """Parametrize every test that uses `sim_case_index` over its case numbers.
+
+    A session that runs a test with a `sim_out` mark deletes the run files its directory holds
+    beyond the test's case count; a `--collect-only` session deletes nothing.
 
     Args:
         metafunc: The test function being collected.
-
-    Raises:
-        pytest.UsageError: `--sim-scenario` names nothing in `SCENARIOS`.
     """
     if "sim_case_index" not in metafunc.fixturenames:
         return
-    config = metafunc.config
+    node = metafunc.definition
     try:
-        _scenario_type(config.getoption("--sim-scenario"))
+        settings = _settings(node)
     except ValueError as error:
-        raise pytest.UsageError(f"wise-dynamics: --sim-scenario: {error}") from None
-    metafunc.parametrize("sim_case_index", range(config.getoption("--sim-runs")), indirect=True)
+        pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
+    if node.get_closest_marker("sim_out") is not None and not metafunc.config.option.collectonly:
+        for path in settings.directory.glob("run_*.h5"):
+            match = re.fullmatch(r"run_(\d+)\.h5", path.name)
+            if match and int(match[1]) >= settings.runs:
+                path.unlink(missing_ok=True)
+    metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Report a pytest-xdist worker's written directories to the controller.
+
+    Args:
+        session: The finishing session, whose config holds the stash and the worker output.
+    """
+    workeroutput = getattr(session.config, "workeroutput", None)
+    if workeroutput is not None:
+        written = session.config.stash[_WRITTEN_DIRS]
+        workeroutput[_WORKER_DIRS] = sorted(str(path) for path in written)
 
 
 def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> None:
-    """Report where the run files are, when the session wrote any.
+    """Report where the run files are, one line per directory that received any.
 
     Args:
-        terminalreporter: pytest's terminal reporter, which writes the summary line.
+        terminalreporter: pytest's terminal reporter, which writes the summary lines.
         config: The session's pytest configuration.
     """
     if hasattr(config, "workerinput"):
         return
-    out_dir = config.stash[_OUT_DIR]
-    if out_dir.is_dir():
-        count = len(list(out_dir.glob("run_*.h5")))
-        terminalreporter.write_line(f"wise-dynamics: {_run_files(count)} in {out_dir}")
+    for directory in sorted(config.stash[_WRITTEN_DIRS]):
+        count = len(list(directory.glob("run_*.h5")))
+        terminalreporter.write_line(f"wise-dynamics: {_run_files(count)} in {directory}")
 
 
 @pytest.fixture
@@ -153,7 +199,7 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
         request: The fixture request, whose `param` is the case number.
 
     Returns:
-        The case number, `0 <= index < --sim-runs`.
+        The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
     """
     return request.param
 
@@ -163,12 +209,12 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
     """Each case's simulated duration.
 
     Args:
-        request: The fixture request, whose config holds `--sim-duration-s`.
+        request: The fixture request, whose node carries the `sim_duration_s` mark.
 
     Returns:
-        `--sim-duration-s`, in seconds.
+        The test's `sim_duration_s`, in seconds.
     """
-    return request.config.getoption("--sim-duration-s")
+    return _settings(request.node).duration_s
 
 
 @pytest.fixture
@@ -176,17 +222,19 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     """This case's scenario, dispersed from the case's two random streams.
 
     Args:
-        request: The fixture request, whose config holds `--sim-scenario` and `--sim-fidelity`.
+        request: The fixture request, whose node carries the `sim_scenario` and `sim_fidelity`
+            marks.
         sim_case_index: The case number.
 
     Returns:
-        `--sim-scenario` at `--sim-fidelity`, dispersed from the case's first stream, with its
-        vehicle's sensor noise seeded from the case's second. Its vehicle is
+        The test's `sim_scenario` at its `sim_fidelity`, dispersed from the case's first stream,
+        with its vehicle's sensor noise seeded from the case's second. Its vehicle is
         `sim_scenario.vehicle`.
     """
+    settings = _settings(request.node)
     draws_stream, noise_stream = _streams(sim_case_index)
-    scenario = _scenario_type(request.config.getoption("--sim-scenario"))()
-    scenario.fidelity = request.config.getoption("--sim-fidelity")
+    scenario = _scenario_type(settings.scenario)()
+    scenario.fidelity = settings.fidelity
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
     )
@@ -199,14 +247,16 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, `<out_dir>/run_<NNNN>.h5`, through `sim_scenario.vehicle`.
+    """A writer of this case's run file, `<test directory>/run_<NNNN>.h5`.
 
-    The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the case's start,
-    ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and one `draw_<name>` per value the
-    scenario drew.
+    The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
+    basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
+    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
+    one `draw_<name>` per value the scenario drew.
 
     Args:
-        request: The fixture request, whose config stash holds the output directory.
+        request: The fixture request, whose node carries the marks and whose config stash records
+            the directories written to.
         sim_case_index: The case number.
         sim_scenario: The case's scenario, whose vehicle writes the file.
 
@@ -223,7 +273,9 @@ def sim_run_file(
     }
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
-    path = request.config.stash[_OUT_DIR] / f"run_{sim_case_index:04d}.h5"
+    directory = _settings(request.node).directory
+    path = directory / f"run_{sim_case_index:04d}.h5"
+    config = request.config
 
     def write(
         datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None
@@ -244,10 +296,104 @@ def sim_run_file(
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
+        if request.node.get_closest_marker("sim_out") is not None:
+            path.unlink(missing_ok=True)
         sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
+        config.stash[_WRITTEN_DIRS].add(directory)
         return path
 
     return write
+
+
+def _settings(node: pytest.Function) -> _Settings:
+    """Resolve a test's configuration from its marks, the defaults and `--ci`.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+
+    Returns:
+        The test's settings, its case count capped at two under `--ci`.
+
+    Raises:
+        ValueError: A mark's value is malformed; the message starts with the mark's name.
+    """
+    values = _marked_values(node)
+    scenario = values.get("sim_scenario", _DEFAULT_SCENARIO)
+    runs = values.get("sim_runs", _DEFAULT_RUNS)
+    fidelity = values.get("sim_fidelity", _DEFAULT_FIDELITY)
+    duration_s = values.get("sim_duration_s", _DEFAULT_DURATION_S)
+    if not isinstance(scenario, str):
+        raise ValueError(f"sim_scenario: expected a scenario name, got {scenario!r}")
+    try:
+        _scenario_type(scenario)
+    except ValueError as error:
+        raise ValueError(f"sim_scenario: {error}") from None
+    if not isinstance(runs, numbers.Integral) or isinstance(runs, bool) or runs < 1:
+        raise ValueError(f"sim_runs: expected an integer of at least 1, got {runs!r}")
+    if fidelity not in _FIDELITIES:
+        raise ValueError(f"sim_fidelity: expected one of {_FIDELITIES}, got {fidelity!r}")
+    if (
+        not isinstance(duration_s, numbers.Real)
+        or isinstance(duration_s, bool)
+        or not duration_s > 0
+    ):
+        raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
+    config = node.config
+    if "sim_out" in values:
+        out = values["sim_out"]
+        if not isinstance(out, str | os.PathLike):
+            raise ValueError(f"sim_out: expected a path, got {out!r}")
+        if not os.fspath(out):
+            raise ValueError("sim_out: expected a non-empty path")
+        root = config.rootpath / out
+    else:
+        root = config.stash[_OUT_DIR]
+    if config.getoption("ci"):
+        runs = min(runs, _CI_RUNS)
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), _test_directory(node, root))
+
+
+def _marked_values(node: pytest.Function) -> dict[str, Any]:
+    """Read each `sim_` mark's single argument from the closest mark of its name.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+
+    Returns:
+        Mark name to argument, for the marks the test carries.
+
+    Raises:
+        ValueError: A mark does not take exactly one positional argument and no keywords.
+    """
+    values: dict[str, Any] = {}
+    for name, _, _ in _MARKS:
+        mark = node.get_closest_marker(name)
+        if mark is None:
+            continue
+        if len(mark.args) != 1 or mark.kwargs:
+            raise ValueError(f"{name}: takes exactly one positional argument and no keywords")
+        values[name] = mark.args[0]
+    return values
+
+
+def _test_directory(node: pytest.Function, root: Path) -> Path:
+    """Build the directory a test's run files are written to.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+        root: The directory the test's campaigns are rooted at.
+
+    Returns:
+        `<root>/<test file>/<class>/.../<function>`, the test file being its path relative to
+        the rootdir without `.py`, or its stem when it is outside the rootdir.
+    """
+    try:
+        file_part = node.path.relative_to(node.config.rootpath).with_suffix("")
+    except ValueError:
+        # A test file outside the rootdir has no relative path; its stem stands in.
+        file_part = Path(node.path.stem)
+    classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
+    return root / file_part / Path(*classes) / node.originalname
 
 
 def _run_files(count: int) -> str:
