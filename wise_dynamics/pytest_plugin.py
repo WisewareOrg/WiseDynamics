@@ -7,6 +7,7 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 
 import numbers
 import os
+import re
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
@@ -141,8 +142,8 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over its case numbers.
 
-    A test with a `sim_out` mark starts from an empty directory: a session that runs cases deletes
-    the run files its directory holds, and a `--collect-only` session deletes nothing.
+    A session that runs a test with a `sim_out` mark deletes the run files its directory holds
+    beyond the test's case count; a `--collect-only` session deletes nothing.
 
     Args:
         metafunc: The test function being collected.
@@ -155,8 +156,10 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
     if node.get_closest_marker("sim_out") is not None and not metafunc.config.option.collectonly:
-        for stale in settings.directory.glob("run_*.h5"):
-            stale.unlink()
+        for path in settings.directory.glob("run_*.h5"):
+            match = re.fullmatch(r"run_(\d+)\.h5", path.name)
+            if match and int(match[1]) >= settings.runs:
+                path.unlink()
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
 
 
@@ -293,6 +296,8 @@ def sim_run_file(
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
+        if request.node.get_closest_marker("sim_out") is not None:
+            path.unlink(missing_ok=True)
         sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
         config.stash[_WRITTEN_DIRS].add(directory)
         return path
