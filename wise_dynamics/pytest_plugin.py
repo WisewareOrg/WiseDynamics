@@ -5,14 +5,18 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 `wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
 """
 
+import json
 import numbers
 import os
 import re
+import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import numpy as np
 import pytest
@@ -25,6 +29,7 @@ __all__: list[str] = []
 _WORKER_DIRS = "wise_dynamics_dirs"
 _DEFAULT_ROOT = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
+_PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
 _DEFAULT_OUT = "monte_carlo"
 _CI_RUNS = 2
@@ -111,7 +116,8 @@ def pytest_configure(config: pytest.Config) -> None:
         config: The session's pytest configuration, which holds the stash.
 
     Raises:
-        pytest.UsageError: The `sim_out` ini setting is empty.
+        pytest.UsageError: The `sim_out` ini setting is empty, or the `wise-dynamics` install is
+            neither a git pin nor an editable local checkout.
     """
     for name, argument, description in _MARKS:
         config.addinivalue_line("markers", f"{name}({argument}): {description}")
@@ -120,6 +126,7 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError("the sim_out ini setting must not be empty")
     config.stash[_DEFAULT_ROOT] = config.rootpath / out
     config.stash[_WRITTEN_DIRS] = set()
+    config.stash[_PROVENANCE] = _provenance()
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -248,8 +255,9 @@ def sim_run_file(
 
     The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
     basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
-    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
-    one `draw_<name>` per value the scenario drew.
+    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the
+    install's provenance (`versions_wise_dynamics_install`, `_commit`, `_requested_revision` and
+    `_dirty`) and one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -267,6 +275,10 @@ def sim_run_file(
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
+        **{
+            f"versions_wise_dynamics_{name}": value
+            for name, value in request.config.stash[_PROVENANCE].items()
+        },
     }
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
@@ -404,6 +416,74 @@ def _test_directory(node: pytest.Function, root: Path) -> Path:
         file_part = Path(node.path.stem)
     classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
     return root / file_part / Path(*classes) / node.originalname
+
+
+def _direct_url() -> dict[str, Any] | None:
+    """Read the `wise-dynamics` distribution's PEP 610 `direct_url.json`.
+
+    Returns:
+        The parsed file, or None when the distribution has none.
+    """
+    try:
+        text = distribution("wise-dynamics").read_text("direct_url.json")
+    except PackageNotFoundError:
+        return None
+    return None if text is None else json.loads(text)
+
+
+def _provenance() -> dict[str, str | bool]:
+    """Describe how `wise-dynamics` was installed.
+
+    Returns:
+        `install` (`pinned` or `local`), `commit`, `requested_revision` (empty for a local
+        install) and `dirty` (always False for a pinned install).
+
+    Raises:
+        pytest.UsageError: The install is neither a git pin nor an editable local checkout, or
+            `git` cannot describe the checkout.
+    """
+    found = _direct_url()
+    vcs_info = (found or {}).get("vcs_info", {})
+    if vcs_info.get("vcs") == "git" and "commit_id" in vcs_info:
+        return {
+            "install": "pinned",
+            "commit": vcs_info["commit_id"],
+            "requested_revision": vcs_info.get("requested_revision", ""),
+            "dirty": False,
+        }
+    url = (found or {}).get("url", "")
+    if (found or {}).get("dir_info", {}).get("editable") and url.startswith("file://"):
+        checkout = Path(url2pathname(urlparse(url).path))
+        try:
+            commit = _git(checkout, "rev-parse", "HEAD").strip()
+            dirty = bool(_git(checkout, "status", "--porcelain").strip())
+        except (OSError, subprocess.CalledProcessError) as error:
+            reason = f"git could not describe the editable checkout {checkout}: {error}"
+        else:
+            return {"install": "local", "commit": commit, "requested_revision": "", "dirty": dirty}
+    else:
+        reason = f"the install of wise-dynamics is not a git pin or an editable checkout: {found}"
+    raise pytest.UsageError(
+        f"{reason}\n"
+        "Install a pinned release with `uv sync` against a git dependency, or a local checkout "
+        "with\n"
+        "`uv pip install -e <checkout>`."
+    )
+
+
+def _git(directory: Path, *args: str) -> str:
+    """Run `git -C <directory> <args>`.
+
+    Args:
+        directory: The repository directory.
+        *args: The git subcommand and its arguments.
+
+    Returns:
+        The command's standard output.
+    """
+    return subprocess.run(
+        ["git", "-C", str(directory), *args], check=True, capture_output=True, text=True
+    ).stdout
 
 
 def _run_files(count: int) -> str:
