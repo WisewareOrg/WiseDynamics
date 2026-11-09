@@ -107,7 +107,7 @@ A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is 
 `sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
 class, outermost first, is a directory. An explicit `sim_out` is overwritten case by case:
 each case replaces its own file, and a session that runs cases removes the files beyond the run
-count, so under `--ci` only the 2 cases it runs remain; `--collect-only` removes nothing. The
+count, so under `--ci` only the cases it runs remain; `--collect-only` removes nothing. The
 terminal summary names each directory that received run files.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
