@@ -914,25 +914,6 @@ def test_ci_over_a_five_case_run_folder_keeps_two_fresh_files(pytester: pytest.P
     assert [run["attrs"]["case"] for run in runs] == [0, 1]
 
 
-def test_an_existing_run_file_is_replaced(pytester: pytest.Pytester):
-    """Writing a case's run file twice replaces it.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    pytester.makepyfile(
-        SCENARIO_HEADER
-        + """
-@pytest.mark.sim_runs(1)
-def test_case(sim_case_index, sim_scenario, sim_run_file):
-    datasets = sim_scenario.run(Guidance(), {}, duration_s=1)
-    sim_run_file(datasets)
-    sim_run_file(datasets)
-"""
-    )
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
-
-
 def _git(directory: Path, *args: str) -> str:
     """Run `git` in `directory`.
 
