@@ -954,34 +954,30 @@ def _make_repository(directory: Path, dirty: bool = False) -> str:
     return _git(directory, "rev-parse", "HEAD")
 
 
-def _editable_direct_url(repository: Path) -> dict:
-    """Build the `direct_url.json` of an editable install of `repository`.
-
-    Args:
-        repository: The checkout installed.
-
-    Returns:
-        The form uv writes for an editable install, naming `repository`.
-    """
-    return {"url": f"file://{repository}", "dir_info": {"editable": True}}
-
-
 def _provenance_session(
     pytester: pytest.Pytester, direct_url: dict | None, *args: str
 ) -> pytest.RunResult:
-    """Run the one-case scenario with the plugin's `_direct_url` patched to `direct_url`.
+    """Run the one-case scenario with the install's `direct_url.json` replaced by `direct_url`.
+
+    The plugin's `distribution` lookup returns a stand-in whose `read_text("direct_url.json")` is
+    the JSON, or `None` for an install that wrote none.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        direct_url: What `_direct_url` returns: the install's parsed `direct_url.json`, or `None`.
+        direct_url: The install's `direct_url.json` content, or `None` for none.
         *args: Further pytest arguments.
 
     Returns:
         The session's result.
     """
     pytester.makeconftest(
-        "import wise_dynamics.pytest_plugin as plugin\n\n"
-        f"plugin._direct_url = lambda: {direct_url!r}\n"
+        "import json\n\n"
+        "import wise_dynamics.pytest_plugin as plugin\n\n\n"
+        "class Distribution:\n"
+        "    def read_text(self, name):\n"
+        '        assert name == "direct_url.json"\n'
+        f"        return json.dumps({direct_url!r}) if {direct_url!r} is not None else None\n\n\n"
+        "plugin.distribution = lambda name: Distribution()\n"
     )
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     return pytester.runpytest_subprocess(*args)
@@ -1040,7 +1036,7 @@ def test_an_editable_install_records_its_checkouts_commit_and_dirt(
     """
     repository = tmp_path / "checkout"
     commit = _make_repository(repository, dirty=dirty)
-    direct_url = _editable_direct_url(repository)
+    direct_url = {"url": repository.as_uri(), "dir_info": {"editable": True}}
     _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=1)
 
     found = _provenance_attrs(pytester)
@@ -1082,7 +1078,7 @@ def test_an_install_that_cannot_be_described_stops_the_session(
     if case == "git-unavailable":
         (tmp_path / "no_git").mkdir()
         monkeypatch.setenv("PATH", str(tmp_path / "no_git"))
-        direct_url = _editable_direct_url(REPOSITORY)
+        direct_url = {"url": REPOSITORY.as_uri(), "dir_info": {"editable": True}}
     result = _provenance_session(pytester, direct_url, *SERIAL)
 
     assert result.ret == pytest.ExitCode.USAGE_ERROR

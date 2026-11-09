@@ -1,8 +1,8 @@
 """The `%%monte_carlo` magic and `load_runs`.
 
-The magic's mechanics are plain unit tests of `wise_dynamics.notebook`'s functions. One test runs
-the magic in a real Jupyter kernel, and one runs a real `leo500` campaign through it and reads it
-back from a second kernel.
+The magic's behaviours run in-process through an IPython shell against a temporary jupytext project.
+One test runs the magic in a real Jupyter kernel, and one runs a real `leo500` campaign through it
+and reads it back from a second kernel.
 """
 
 import copy
@@ -12,11 +12,13 @@ import re
 import subprocess
 import sys
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 
 import h5py
 import nbformat
 import pytest
+from IPython.core.interactiveshell import InteractiveShell
 from nbclient import NotebookClient
 from nbclient.exceptions import CellExecutionError
 
@@ -24,9 +26,6 @@ from wise_dynamics import notebook as wd_notebook
 
 LOAD = "%load_ext wise_dynamics.notebook"
 FORMATS = "ipynb,py:percent"
-PY_NEWER = (
-    "The .py was edited after the notebook was saved; reload the notebook from disk before running"
-)
 CAMPAIGN = """
 %%monte_carlo
 import os
@@ -176,17 +175,6 @@ def _sync(notebook: Path) -> Path:
     return notebook.with_suffix(".py")
 
 
-def _later(path: Path, seconds: int = 60) -> None:
-    """Make `path` newer than anything written so far.
-
-    Args:
-        path: The file whose modification time is set.
-        seconds: How far past now to set it.
-    """
-    stamp = path.stat().st_mtime + seconds
-    os.utime(path, (stamp, stamp))
-
-
 def _run(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str]) -> list[str]:
     """Run `cells` in order in a new kernel in `directory`, started with exactly `env`.
 
@@ -213,175 +201,189 @@ def _run(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str
     ]
 
 
-def test_a_cells_tests_are_its_top_level_test_functions_and_classes():
-    """Only top-level `test*` functions and `Test*` classes count, async ones too."""
-    source = textwrap.dedent(
-        """
-        def test_a():
-            def test_nested():
-                pass
+@pytest.fixture
+def shell() -> Iterator[InteractiveShell]:
+    """Provide a fresh in-process IPython shell with the magic loaded.
 
-        async def test_b():
-            pass
-
-        class TestC:
-            def test_method(self):
-                pass
-
-        class Helper:
-            pass
-
-        def helper():
-            pass
-        """
-    )
-    assert wd_notebook._test_names(source) == ["test_a", "test_b", "TestC"]
-
-
-def test_a_cell_with_no_test_names_none():
-    """A cell defining no test yields no names, which is what the magic refuses."""
-    assert wd_notebook._test_names("value = 1\n\ndef helper():\n    pass\n") == []
-
-
-def test_a_cell_differing_from_the_saved_one_only_in_whitespace_counts_as_saved(tmp_path: Path):
-    """An edited cell is not among the saved bodies; whitespace-only differences do not count.
-
-    Trailing whitespace and leading and trailing blank lines are ignored.
-
-    Args:
-        tmp_path: The test's own temporary directory.
+    Yields:
+        InteractiveShell: The shell; the singleton is cleared before and after, so no namespace leaks between tests.
     """
-    body = _marker_test("test_saved", tmp_path / "saved")
-    path = _write_notebook(tmp_path, [_code(LOAD), _magic(body)])
-    saved = wd_notebook._saved_magic_bodies(path)
-
-    padded = "\n\n" + "\n".join(line + "  " for line in body.split("\n")) + "\n\n\n"
-    edited = body.replace("test_saved", "test_edited")
-    assert padded != body
-    assert wd_notebook._normalized(body) in saved
-    assert wd_notebook._normalized(padded) in saved
-    assert wd_notebook._normalized(edited) not in saved
+    InteractiveShell.clear_instance()
+    instance = InteractiveShell.instance()
+    instance.run_line_magic("load_ext", "wise_dynamics.notebook")
+    yield instance
+    InteractiveShell.clear_instance()
 
 
-def test_a_saved_edit_not_yet_in_the_py_is_synced(tmp_path: Path):
-    """A saved notebook newer than its `.py` is written into it.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    path = _write_notebook(tmp_path, [_code(LOAD), _magic(_marker_test("test_first", tmp_path))])
-    py = _sync(path)
-    _write_notebook(tmp_path, [_code(LOAD), _magic(_marker_test("test_second", tmp_path))])
-    _later(path)
-
-    wd_notebook._sync_py(path, py)
-
-    assert "test_second" in py.read_text()
-    assert "test_first" not in py.read_text()
-
-
-def test_a_py_newer_than_the_notebook_with_other_content_is_refused(tmp_path: Path):
-    """A `.py` that differs from the notebook and was edited after it was saved is not overwritten.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    path = _write_notebook(tmp_path, [_code(LOAD), _magic(_marker_test("test_here", tmp_path))])
-    py = _sync(path)
-    py.write_text(py.read_text() + "\n# edited in the py\n")
-    _later(py)
-
-    with pytest.raises(RuntimeError, match=PY_NEWER):
-        wd_notebook._sync_py(path, py)
-
-    assert "# edited in the py" in py.read_text()
-
-
-def test_a_py_newer_than_the_notebook_with_the_same_content_is_in_sync(tmp_path: Path):
-    """A `.py` that is newer but renders the same as the notebook is accepted untouched.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    path = _write_notebook(tmp_path, [_code(LOAD), _magic(_marker_test("test_here", tmp_path))])
-    py = _sync(path)
-    _later(py)
-    before = py.read_text()
-
-    wd_notebook._sync_py(path, py)
-
-    assert py.read_text() == before
-
-
-def test_an_unpaired_notebook_is_refused_with_how_to_pair_it(tmp_path: Path):
-    """A notebook with no paired `.py` raises a message naming jupytext's pairing command.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    path = _write_notebook(tmp_path, [_code(LOAD)], paired=False)
-
-    with pytest.raises(RuntimeError, match="jupytext --set-formats ipynb,py:percent"):
-        wd_notebook._paired_py(path)
-
-
-@pytest.mark.parametrize(
-    ("line", "session", "vscode", "expected"),
-    [
-        (" arg.ipynb ", "session.ipynb", "vscode.ipynb", "arg.ipynb"),
-        ("", "session.ipynb", "vscode.ipynb", "session.ipynb"),
-        ("", None, "vscode.ipynb", "vscode.ipynb"),
-        ("", None, None, None),
-    ],
-    ids=["argument", "session-name", "vscode", "missing"],
-)
-def test_the_notebook_path_comes_from_the_argument_then_the_session_then_vscode(
-    monkeypatch: pytest.MonkeyPatch,
-    line: str,
-    session: str | None,
-    vscode: str | None,
-    expected: str | None,
-):
-    """The path is the line argument, else `JPY_SESSION_NAME`, else `__vsc_ipynb_file__`.
-
-    With none of them, the magic asks for a path.
+def _magic_env(monkeypatch: pytest.MonkeyPatch, session: Path | None = None, ci: bool = False):
+    """Set exactly the two variables the magic reads.
 
     Args:
         monkeypatch: pytest's fixture for setting the environment for this test only.
-        line: The magic's line argument.
-        session: The value of `JPY_SESSION_NAME`, or `None` to leave it unset.
-        vscode: The value of `__vsc_ipynb_file__` in the namespace, or `None` to leave it unset.
-        expected: The path found, or `None` when the call must raise.
-    """
-    monkeypatch.delenv("JPY_SESSION_NAME", raising=False)
-    if session:
-        monkeypatch.setenv("JPY_SESSION_NAME", session)
-    user_ns = {"__vsc_ipynb_file__": vscode} if vscode else {}
-
-    if expected is None:
-        with pytest.raises(RuntimeError, match="path"):
-            wd_notebook._notebook_path(line, user_ns)
-    else:
-        assert wd_notebook._notebook_path(line, user_ns) == Path(expected)
-
-
-@pytest.mark.parametrize("ci", [True, False], ids=["ci", "no-ci"])
-def test_the_ci_flag_is_passed_only_when_ci_is_set(monkeypatch: pytest.MonkeyPatch, ci: bool):
-    """The pytest arguments carry `--ci` exactly when `CI` is set, and run in xdist workers.
-
-    Args:
-        monkeypatch: pytest's fixture for setting the environment for this test only.
+        session: What `JPY_SESSION_NAME` names, or `None` to leave it unset.
         ci: Whether `CI` is set.
     """
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("JPY_SESSION_NAME", raising=False)
     if ci:
         monkeypatch.setenv("CI", "true")
+    if session:
+        monkeypatch.setenv("JPY_SESSION_NAME", str(session))
 
-    args = wd_notebook._pytest_args(Path("campaign.py"), ["test_a", "TestB"])
 
-    assert args[:2] == ["campaign.py::test_a", "campaign.py::TestB"]
-    assert args[2:4] == ["-n", "auto"]
-    assert ("--ci" in args) is ci
+def _body(cell: nbformat.NotebookNode) -> str:
+    """Return a `%%monte_carlo` cell's source after the magic line.
+
+    Args:
+        cell: A cell built by `_magic`.
+
+    Returns:
+        What IPython passes the magic as `cell`.
+    """
+    return cell.source.partition("\n")[2]
+
+
+def test_an_unsaved_cell_is_refused_and_nothing_runs(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A cell that differs from the saved notebook raises the unsaved message before running.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    saved = _magic(_marker_test("test_saved", tmp_path / "saved"))
+    path = _write_notebook(tmp_path, [_code(LOAD), saved])
+    _magic_env(monkeypatch, path)
+    edited = _body(saved) + f"\nPath({str(tmp_path / 'top_level')!r}).write_text('ran')\n"
+
+    with pytest.raises(RuntimeError, match="unsaved changes"):
+        shell.run_cell_magic("monte_carlo", "", edited)
+
+    assert not (tmp_path / "top_level").exists()
+    assert not (tmp_path / "saved").exists()
+
+
+def test_an_unpaired_notebook_is_refused_with_how_to_pair_it(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A notebook with neither metadata pairing nor `jupytext.toml` is refused; no `.py` appears.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    cell = _magic(_marker_test("test_here", tmp_path / "ran"))
+    path = _write_notebook(tmp_path, [_code(LOAD), cell], paired=False)
+    _magic_env(monkeypatch, path)
+
+    with pytest.raises(RuntimeError, match="jupytext --set-formats ipynb,py:percent"):
+        shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert not path.with_suffix(".py").exists()
+    assert not (tmp_path / "ran").exists()
+
+
+def test_a_notebook_paired_only_by_jupytext_toml_runs(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """With the pairing in `jupytext.toml` and none in the notebook, the cell's test runs.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    cell = _magic(_marker_test("test_here", tmp_path / "ran"))
+    path = _write_notebook(tmp_path, [_code(LOAD), cell], paired=False)
+    (tmp_path / "jupytext.toml").write_text(f'formats = "{FORMATS}"\n')
+    _magic_env(monkeypatch, path)
+
+    shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert (tmp_path / "ran").read_text() == "ran"
+
+
+def test_a_notebook_given_as_its_paired_py_runs(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A notebook opened as the Jupytext `.py` runs that `.py`'s test.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    cell = _magic(_marker_test("test_here", tmp_path / "ran"))
+    py = _sync(_write_notebook(tmp_path, [_code(LOAD), cell]))
+    _magic_env(monkeypatch, py)
+
+    shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert (tmp_path / "ran").read_text() == "ran"
+
+
+def test_a_cell_defining_no_test_is_refused(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A saved cell with no top-level test raises, and its code does not run.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    cell = _magic(f"from pathlib import Path\nPath({str(tmp_path / 'ran')!r}).write_text('ran')")
+    path = _write_notebook(tmp_path, [_code(LOAD), cell])
+    _magic_env(monkeypatch, path)
+
+    with pytest.raises(RuntimeError, match="defines no test"):
+        shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert not (tmp_path / "ran").exists()
+
+
+def test_no_path_source_is_refused_asking_for_the_path(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch
+):
+    """With no argument, no `JPY_SESSION_NAME` and no `__vsc_ipynb_file__`, the magic asks for one.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+    """
+    _magic_env(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="pass it as an argument"):
+        shell.run_cell_magic("monte_carlo", "", "def test_x():\n    pass\n")
+
+
+@pytest.mark.parametrize("ci", [True, False], ids=["ci", "no-ci"])
+def test_the_run_gets_the_ci_option_only_when_ci_is_set(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ci: bool
+):
+    """The cell's test sees `--ci` exactly when `CI` is set.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+        ci: Whether `CI` is set.
+    """
+    sentinel = tmp_path / "ci"
+    cell = _magic(
+        "from pathlib import Path\n\n\n"
+        "def test_records_ci(request):\n"
+        f"    Path({str(sentinel)!r}).write_text(repr(request.config.getoption('--ci')))\n"
+    )
+    path = _write_notebook(tmp_path, [_code(LOAD), cell])
+    _magic_env(monkeypatch, path, ci=ci)
+
+    shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert sentinel.read_text() == repr(ci)
 
 
 def test_the_magic_runs_only_its_cells_tests_in_workers_and_raises_on_failure(tmp_path: Path):
