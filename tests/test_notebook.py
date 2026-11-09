@@ -488,7 +488,8 @@ def _expected_runs(directory: Path) -> list[dict]:
 def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: Path):
     """A `leo500` campaign of four cases runs across workers; a fresh kernel loads every run.
 
-    The run prints no assert-rewrite warning, and its progress bar ends at four of four.
+    The run prints no assert-rewrite warning, and its progress is one display, updated in place
+    until it reads four of four.
 
     Args:
         tmp_path: The test's own temporary directory.
@@ -510,6 +511,7 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
 
     expected = _expected_runs(tmp_path / "monte_carlo" / "campaign" / "test_leo")
     assert "PytestAssertRewriteWarning" not in streams
+    assert len(meter) == 1
     assert "4/4" in meter[-1]
     assert re.search(r"\d{8}T\d{6}Z-[0-9a-f]{4}: 4 of 4 cases", output)
     assert loaded["cases"] == [0, 1, 2, 3]
