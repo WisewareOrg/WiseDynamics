@@ -24,7 +24,7 @@ try:
     import jupytext.cli
     from IPython import get_ipython
     from IPython.core.interactiveshell import InteractiveShell
-    from tqdm.auto import tqdm
+    from tqdm import tqdm
 except ImportError as error:
     raise ImportError(
         "wise_dynamics.notebook needs IPython, jupytext and tqdm; "
