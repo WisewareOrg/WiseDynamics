@@ -141,8 +141,8 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over its case numbers.
 
-    A test with a `sim_out` mark starts from an empty directory: collection deletes the run files
-    its directory holds.
+    A test with a `sim_out` mark starts from an empty directory: a session that runs cases deletes
+    the run files its directory holds, and a `--collect-only` session deletes nothing.
 
     Args:
         metafunc: The test function being collected.
@@ -154,7 +154,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
-    if node.get_closest_marker("sim_out") is not None:
+    if node.get_closest_marker("sim_out") is not None and not metafunc.config.option.collectonly:
         for stale in settings.directory.glob("run_*.h5"):
             stale.unlink()
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
