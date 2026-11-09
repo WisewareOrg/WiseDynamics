@@ -17,6 +17,13 @@ from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
+REPOSITORY = Path(__file__).parent.parent
+DATA = Path(__file__).parent / "data"
+SERIAL = ("-p", "no:xdist")
+XDIST = ("-n", "auto")
+
+# Each way a test names its run folder: a `sim_out` mark, the default, or the `sim_out` ini setting.
+ROOT_NAMES = {"mark": "out", "default": "monte_carlo", "ini": "ini_out"}
 
 SCENARIO_HEADER = """
 import numpy as np
@@ -329,29 +336,111 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
     assert not out_dir.exists()
 
 
-def test_workers_share_the_default_out_dir(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
-):
-    """pytest-xdist workers write to the one default root the controller chose.
-
-    `TMPDIR` points the default root into this test's own directory, where it can be found.
+def _default_session(
+    pytester: pytest.Pytester, *args: str, ini: str | None = None, runs: int = 2
+) -> pytest.RunResult:
+    """Run the one-test scenario with no `sim_out` mark, under an optional `sim_out` ini setting.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
-    """
-    monkeypatch.setenv("TMPDIR", str(pytester.path))
-    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    result = pytester.runpytest_subprocess("-n", "2")
+        *args: Further pytest arguments.
+        ini: The ini file's `sim_out` value, or `None` for no ini file.
+        runs: The `sim_runs` mark's case count.
 
-    result.assert_outcomes(passed=2)
-    files = list(pytester.path.rglob("run_*.h5"))
-    assert len(files) == 2
-    directory = files[0].parent
-    assert {path.parent for path in files} == {directory}
-    assert directory.relative_to(pytester.path).parts[1:] == ("test_scenario", "test_case")
-    assert directory.parent.parent.name.startswith("wise_dynamics_")
+    Returns:
+        The session's result, which must have passed every case.
+    """
+    if ini is not None:
+        pytester.makeini(f"[pytest]\nsim_out = {ini}\n")
+    pytester.makepyfile(
+        test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
+    )
+    result = pytester.runpytest_subprocess(*args)
+    result.assert_outcomes(passed=runs)
+    return result
+
+
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """Run files land in `<rootdir>/monte_carlo/<test file>/<test>/`, whatever the worker count.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    result = _default_session(pytester, *xdist)
+
+    directory = pytester.path / "monte_carlo" / "test_scenario" / "test_case"
+    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
+    assert len(list(pytester.path.rglob("run_*.h5"))) == 2
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {directory}"])
+
+
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """`sim_out = ini_out` puts the run folder at `<rootdir>/ini_out`, not `monte_carlo`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    _default_session(pytester, *xdist, ini="ini_out")
+
+    directory = pytester.path / "ini_out" / "test_scenario" / "test_case"
+    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+def test_an_absolute_sim_out_ini_setting_is_used_as_given(
+    pytester: pytest.Pytester, tmp_path: Path
+):
+    """An absolute `sim_out` ini value names the run folder, outside the rootdir.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        tmp_path: The test's own temporary directory, holding the run folder.
+    """
+    out = tmp_path / "absolute_out"
+    _default_session(pytester, *XDIST, ini=str(out))
+
+    assert [run["name"] for run in _read_runs(out / "test_scenario" / "test_case")] == [
+        "run_0000.h5",
+        "run_0001.h5",
+    ]
+    assert not list(pytester.path.rglob("run_*.h5"))
+
+
+def test_a_sim_out_mark_overrides_the_ini_setting(pytester: pytest.Pytester):
+    """A test with a `sim_out` mark writes there, and nothing goes to the ini setting's folder.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makeini("[pytest]\nsim_out = ini_out\n")
+    runs = _run_session(pytester, *SERIAL, runs=2, passed=2)
+
+    assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
+    assert not (pytester.path / "ini_out").exists()
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester):
+    """An empty `sim_out` ini value stops the session with a usage error naming the setting.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makeini("[pytest]\nsim_out =\n")
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    result = pytester.runpytest_subprocess(*SERIAL)
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "sim_out" in result.stderr.str()
+    assert not list(pytester.path.rglob("run_*.h5"))
 
 
 def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
@@ -523,25 +612,39 @@ def test_the_closest_mark_wins_over_class_and_module_marks(pytester: pytest.Pyte
     pytester.runpytest_subprocess().assert_outcomes(passed=7)
 
 
-def test_a_session_with_no_case_creates_nothing_in_the_temporary_directory(
-    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_session_creates_nothing_in_the_temporary_directory(
+    pytester: pytest.Pytester,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    xdist: tuple[str, ...],
 ):
-    """A session with no case leaves `TMPDIR` as it found it.
-
-    The default output directory sits under `TMPDIR`.
+    """A session that runs cases leaves an empty `TMPDIR` empty; its run files are in the rootdir.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         tmp_path: The test's own temporary directory, holding the `TMPDIR` used.
         monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
+        xdist: The arguments that run the session with pytest-xdist or without it.
     """
     temporary = tmp_path / "tmp"
     temporary.mkdir()
     monkeypatch.setenv("TMPDIR", str(temporary))
+    _default_session(pytester, f"--basetemp={tmp_path / 'basetemp'}", *xdist)
+
+    assert list(temporary.iterdir()) == []
+    assert len(list((pytester.path / "monte_carlo").rglob("run_*.h5"))) == 2
+
+
+def test_a_session_with_no_case_creates_no_run_folder(pytester: pytest.Pytester):
+    """A session that runs no case creates neither the default run folder nor any run file.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
     pytester.makepyfile("def test_nothing():\n    pass\n")
-    before = sorted(temporary.iterdir())
-    pytester.runpytest_subprocess(f"--basetemp={tmp_path / 'basetemp'}").assert_outcomes(passed=1)
-    assert sorted(temporary.iterdir()) == before
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    assert not (pytester.path / "monte_carlo").exists()
 
 
 def test_an_unmarked_test_gets_the_defaults(pytester: pytest.Pytester):
@@ -751,43 +854,47 @@ def _strict_session(pytester: pytest.Pytester, marks: list[str]) -> pytest.RunRe
     return pytester.runpytest_subprocess("-p", "no:xdist", "--strict-markers")
 
 
-def _populate_out(pytester: pytest.Pytester, runs: int) -> Path:
-    """Write a `sim_runs(runs)` test with an explicit `sim_out` holding 5 stale run files.
+def _populate_out(pytester: pytest.Pytester, runs: int, root: str = "mark") -> Path:
+    """Write a `sim_runs(runs)` test whose run folder holds 5 stale run files.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         runs: The test's `sim_runs` mark.
+        root: How the test names its run folder, a key of `ROOT_NAMES`: a `sim_out` mark, the
+            default folder, or the `sim_out` ini setting.
 
     Returns:
         The test's directory, holding `run_0000.h5` to `run_0004.h5` (dummy) and `notes.txt`.
     """
-    out_dir = pytester.path / "out"
+    out_dir = pytester.path / ROOT_NAMES[root]
     test_dir = out_dir / "test_scenario" / "test_case"
     test_dir.mkdir(parents=True)
     for index in range(5):
         (test_dir / f"run_{index:04d}.h5").write_bytes(b"stale")
     (test_dir / "notes.txt").write_text("kept")
-    pytester.makepyfile(
-        test_scenario=_source(
-            _case_test((f"sim_runs({runs})", _out_mark(out_dir), "sim_duration_s(3)"))
-        )
-    )
+    if root == "ini":
+        pytester.makeini(f"[pytest]\nsim_out = {ROOT_NAMES[root]}\n")
+    marks = (f"sim_runs({runs})", "sim_duration_s(3)", *([_out_mark(out_dir)] * (root == "mark")))
+    pytester.makepyfile(test_scenario=_source(_case_test(marks)))
     return test_dir
 
 
-@pytest.mark.parametrize("xdist", [("-p", "no:xdist"), ("-n", "2")], ids=["serial", "xdist"])
-def test_an_explicit_sim_out_is_overwritten_each_run(
-    pytester: pytest.Pytester, xdist: tuple[str, ...]
+@pytest.mark.parametrize("root", ROOT_NAMES)
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_run_folder_is_overwritten_each_run(
+    pytester: pytest.Pytester, xdist: tuple[str, ...], root: str
 ):
     """Each case replaces its own run file and run files beyond the case count are removed.
 
-    Other files in the directory stay.
+    Other files in the directory stay, whether the folder is a mark's, the default or the ini
+    setting's.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         xdist: The arguments that run the session with pytest-xdist or without it.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=2)
+    test_dir = _populate_out(pytester, runs=2, root=root)
     pytester.runpytest_subprocess(*xdist).assert_outcomes(passed=2)
 
     runs = _read_runs(test_dir)
@@ -796,13 +903,17 @@ def test_an_explicit_sim_out_is_overwritten_each_run(
     assert (test_dir / "notes.txt").read_text() == "kept"
 
 
-def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(pytester: pytest.Pytester):
+@pytest.mark.parametrize("root", ROOT_NAMES)
+def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(
+    pytester: pytest.Pytester, root: str
+):
     """Re-running `test_case[1]` after a full run rewrites `run_0001.h5` and no other.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=3)
+    test_dir = _populate_out(pytester, runs=3, root=root)
     pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=3)
     before = {path.name: path.stat().st_mtime_ns for path in test_dir.glob("run_*.h5")}
     assert sorted(before) == ["run_0000.h5", "run_0001.h5", "run_0002.h5"]
@@ -817,14 +928,20 @@ def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(pytester: pyte
     assert after["run_0002.h5"] == before["run_0002.h5"]
 
 
-def test_a_collect_only_session_removes_nothing(pytester: pytest.Pytester):
-    """`--collect-only` leaves every run file in an explicit `sim_out` directory.
+@pytest.mark.parametrize("root", ROOT_NAMES)
+@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
+def test_a_collect_only_session_removes_nothing(
+    pytester: pytest.Pytester, xdist: tuple[str, ...], root: str
+):
+    """`--collect-only` leaves every run file in the run folder, whoever named it.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=2)
-    result = pytester.runpytest_subprocess("-p", "no:xdist", "--collect-only", "-q")
+    test_dir = _populate_out(pytester, runs=2, root=root)
+    result = pytester.runpytest_subprocess(*xdist, "--collect-only", "-q")
     assert result.ret == pytest.ExitCode.OK
     assert sorted(path.name for path in test_dir.glob("run_*.h5")) == [
         f"run_{index:04d}.h5" for index in range(5)
@@ -832,48 +949,49 @@ def test_a_collect_only_session_removes_nothing(pytester: pytest.Pytester):
     assert {path.read_bytes() for path in test_dir.glob("run_*.h5")} == {b"stale"}
 
 
-def test_a_second_full_xdist_run_into_the_same_sim_out_completes(pytester: pytest.Pytester):
+@pytest.mark.parametrize("root", ROOT_NAMES)
+def test_a_second_full_xdist_run_into_the_same_run_folder_completes(
+    pytester: pytest.Pytester, root: str
+):
     """Workers overwriting each other's previous run files do not race.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=4)
+    test_dir = _populate_out(pytester, runs=4, root=root)
     for _ in range(2):
-        pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=4)
+        pytester.runpytest_subprocess(*XDIST).assert_outcomes(passed=4)
     runs = _read_runs(test_dir)
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2, 3]
 
 
-def test_ci_over_a_five_case_sim_out_keeps_two_fresh_files(pytester: pytest.Pytester):
+@pytest.mark.parametrize("root", ROOT_NAMES)
+def test_ci_over_a_five_case_run_folder_keeps_two_fresh_files(pytester: pytest.Pytester, root: str):
     """`--ci` caps the cases at 2, so `run_0002.h5` to `run_0004.h5` are removed.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=5)
+    test_dir = _populate_out(pytester, runs=5, root=root)
     pytester.runpytest_subprocess("-p", "no:xdist", "--ci").assert_outcomes(passed=2)
     runs = _read_runs(test_dir)
     assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
     assert [run["attrs"]["case"] for run in runs] == [0, 1]
 
 
-@pytest.mark.parametrize(
-    ("explicit_out", "outcome"),
-    [(False, {"failed": 1}), (True, {"passed": 1})],
-    ids=["default", "sim_out"],
-)
-def test_only_an_explicit_sim_out_replaces_an_existing_run_file(
-    pytester: pytest.Pytester, explicit_out: bool, outcome: dict[str, int]
-):
-    """Writing a case's run file twice is refused, unless the test has a `sim_out` mark.
+@pytest.mark.parametrize("root", ROOT_NAMES)
+def test_every_run_folder_replaces_an_existing_run_file(pytester: pytest.Pytester, root: str):
+    """Writing a case's run file twice replaces it, whoever named the run folder.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        explicit_out: Whether the test carries a `sim_out` mark.
-        outcome: The outcome the session must report.
+        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    mark = f"@pytest.mark.{_out_mark(pytester.path / 'out')}\n" if explicit_out else ""
+    mark = f"@pytest.mark.{_out_mark(pytester.path / ROOT_NAMES[root])}\n" * (root == "mark")
+    if root == "ini":
+        pytester.makeini(f"[pytest]\nsim_out = {ROOT_NAMES[root]}\n")
     mark += "@pytest.mark.sim_runs(1)\n"
     pytester.makepyfile(
         SCENARIO_HEADER
@@ -884,7 +1002,7 @@ def test_only_an_explicit_sim_out_replaces_an_existing_run_file(
     sim_run_file(datasets)
 """
     )
-    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(**outcome)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
 
 
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
