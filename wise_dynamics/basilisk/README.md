@@ -105,13 +105,15 @@ Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
 is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
 
-A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is the test's
-`sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
-class, outermost first, is a directory. Every root, the default included, is overwritten case by case:
-each case replaces its own file, and a session that runs cases removes the files beyond the run
-count; `--collect-only` removes nothing. A `--ci` session writes under `<root>/ci/` instead, so it
-never overwrites or removes a full campaign's files. The
-terminal summary names each directory that received run files. An install that is neither a git
+A test's run files are in `<root>/<test file>/<class>/<function>/<stamp>/`: the root is the test's
+`sim_out`, the test file is its path relative to the rootdir without `.py`, each enclosing class,
+outermost first, is a directory, and the stamp is the session's UTC start and four random hex
+digits, such as `20261109T075300Z-3fa9`. Every session that runs cases writes its own stamp folder
+and nothing is overwritten or removed; a `--ci` session's root is `<root>/ci/`. Before the first
+case runs, each worker writes `planned.json`, `{"runs": N}` for the cases the session runs, into
+the stamp folder, so a session interrupted partway leaves loadable run files and a count to compare
+with. `--collect-only` writes nothing. The terminal summary names each directory that received run
+files. An install that is neither a git
 pin (`uv sync` against a git dependency) nor an editable local checkout
 (`uv pip install -e <checkout>`) stops every session before collection.
 
@@ -156,7 +158,9 @@ Save the notebook first; a cell that differs from the notebook on disk is refuse
 may be the `.ipynb` or the paired `.py` opened as a notebook. Analysis and plot cells must be
 notebook-only (`active="ipynb"` in the `.py`), or every worker runs them when it imports the `.py`.
 
-`load_runs(test, notebook=None)` reads a test's run files back as one record per case, sorted by
-case: `attrs` holds the root attributes and `datasets` maps each dataset path to `(values, units)`.
+`load_runs(test, notebook=None)` reads the newest session's run files of a test back, finished or
+not, and prints `<stamp>: <found> of <planned> cases`. It returns one record per case, sorted by
+case: `attrs` holds the root attributes and `datasets` maps each dataset path to
+`(values, units)`.
 `test` is the test function or method, or its node path such as `"TestA::test_x"`. It works from a
-restarted kernel and raises `FileNotFoundError` naming the folder when there are no run files.
+restarted kernel and raises `FileNotFoundError` naming the folder when it holds no session folder.

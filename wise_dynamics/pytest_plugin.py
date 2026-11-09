@@ -8,7 +8,7 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 import json
 import numbers
 import os
-import re
+import secrets
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -27,7 +27,9 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _WORKER_DIRS = "wise_dynamics_dirs"
+_WORKER_STAMP = "wise_dynamics_stamp"
 _DEFAULT_ROOT = pytest.StashKey[Path]()
+_STAMP = pytest.StashKey[str]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
@@ -112,8 +114,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Register the `sim_` marks and resolve the session's default run directory.
 
-    The default directory is the `sim_out` ini setting, joined to the rootdir when relative; the
-    first run file written creates it.
+    The default directory is the `sim_out` ini setting, joined to the rootdir when relative. The
+    controlling process, or the only one, picks the session's stamp, a UTC time and four random
+    hex digits that name the session's folder under each test's directory; every pytest-xdist
+    worker receives it. The first file written creates the folder.
 
     Args:
         config: The session's pytest configuration, which holds the stash.
@@ -128,8 +132,24 @@ def pytest_configure(config: pytest.Config) -> None:
     if not out:
         raise pytest.UsageError("the sim_out ini setting must not be empty")
     config.stash[_DEFAULT_ROOT] = config.rootpath / out
+    workerinput = getattr(config, "workerinput", None)
+    config.stash[_STAMP] = (
+        workerinput[_WORKER_STAMP]
+        if workerinput is not None
+        else f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
+    )
     config.stash[_WRITTEN_DIRS] = set()
     config.stash[_PROVENANCE] = _provenance()
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node: Any) -> None:
+    """Hand a starting pytest-xdist worker the session's stamp.
+
+    Args:
+        node: The pytest-xdist worker node being configured.
+    """
+    node.workerinput[_WORKER_STAMP] = node.config.stash[_STAMP]
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -149,9 +169,6 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over its case numbers.
 
-    A session deletes the run files a test's directory holds beyond the test's case count; a
-    `--collect-only` session deletes nothing.
-
     Args:
         metafunc: The test function being collected.
     """
@@ -162,12 +179,28 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
-    if not metafunc.config.option.collectonly:
-        for path in settings.directory.glob("run_*.h5"):
-            match = re.fullmatch(r"run_(\d+)\.h5", path.name)
-            if match and int(match[1]) >= settings.runs:
-                path.unlink(missing_ok=True)
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Write each collected test's planned case count into the session's folder.
+
+    A `--collect-only` session writes nothing, and neither does a pytest-xdist controller, which
+    collects nothing; each worker writes the same content.
+
+    Args:
+        session: The finished collection session.
+    """
+    if session.config.option.collectonly:
+        return
+    planned: dict[Path, int] = {}
+    for item in session.items:
+        if "sim_case_index" in item.fixturenames:
+            directory = _settings(item).directory
+            planned[directory] = planned.get(directory, 0) + 1
+    for directory, runs in planned.items():
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "planned.json").write_text(json.dumps({"runs": runs}))
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
@@ -254,13 +287,13 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, `<test directory>/run_<NNNN>.h5`.
+    """A writer of this case's run file, `<session folder>/run_<NNNN>.h5`.
 
-    The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
-    basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
-    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the
-    install's provenance (`versions_wise_dynamics_*`, see the basilisk README) and one
-    `draw_<name>` per value the scenario drew.
+    The file is written through `sim_scenario.vehicle`, in the session's folder under the test's
+    directory, laid out as the basilisk README describes. The file's root attributes are `case`,
+    `seed`, `fidelity`, `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`,
+    `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_*`, see the basilisk
+    README) and one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -308,7 +341,6 @@ def sim_run_file(
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
-        path.unlink(missing_ok=True)
         sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
         config.stash[_WRITTEN_DIRS].add(directory)
         return path
@@ -351,7 +383,8 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
     if node.config.getoption("ci"):
         runs = min(runs, _CI_RUNS)
-    return _Settings(scenario, int(runs), fidelity, float(duration_s), _run_dir(node))
+    directory = _run_dir(node) / node.config.stash[_STAMP]
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
 
 
 def _run_dir(node: pytest.Function) -> Path:

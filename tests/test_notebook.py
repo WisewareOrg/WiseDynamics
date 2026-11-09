@@ -466,7 +466,8 @@ def _expected_runs(directory: Path) -> list[dict]:
         One mapping per file: its `case`, and the `units` and `sums` of every dataset by path.
     """
     runs = []
-    for path in sorted(directory.glob("run_*.h5")):
+    newest = sorted(path for path in directory.glob("*") if path.is_dir())[-1]
+    for path in sorted(newest.glob("run_*.h5")):
         datasets: dict[str, h5py.Dataset] = {}
         with h5py.File(path, "r") as run_file:
             run_file.visititems(
@@ -503,18 +504,14 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
         if out.output_type == "display_data"
     ]
 
-    (line,) = [
-        line
-        for line in _run(tmp_path, [_code(LOAD), _code(SUMMARY, active="ipynb")], env)[
-            1
-        ].splitlines()
-        if line.startswith("SUMMARY ")
-    ]
+    output = _run(tmp_path, [_code(LOAD), _code(SUMMARY, active="ipynb")], env)[1]
+    (line,) = [line for line in output.splitlines() if line.startswith("SUMMARY ")]
     loaded = json.loads(line.removeprefix("SUMMARY "))
 
     expected = _expected_runs(tmp_path / "monte_carlo" / "campaign" / "test_leo")
     assert "PytestAssertRewriteWarning" not in streams
     assert "4/4" in meter[-1]
+    assert re.search(r"\d{8}T\d{6}Z-[0-9a-f]{4}: 4 of 4 cases", output)
     assert loaded["cases"] == [0, 1, 2, 3]
     assert len(set(loaded["worker_pids"])) > 1
     assert loaded["kernel_pid"] not in loaded["worker_pids"]
@@ -554,6 +551,35 @@ def test_load_runs_with_no_run_files_names_the_expected_folder(sim_notebook: Pat
 
     with pytest.raises(FileNotFoundError, match=re.escape(str(folder))):
         wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+
+def test_load_runs_reads_the_newest_session_and_reports_found_of_planned(
+    sim_notebook: Path, capsys: pytest.CaptureFixture[str]
+):
+    """The newest stamp folder wins, even unfinished: its found and planned counts are printed.
+
+    The older session ran one case of one; the newer one was interrupted after two of three.
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+        capsys: pytest's fixture for capturing what `load_runs` prints.
+    """
+    test_dir = sim_notebook.parent / "monte_carlo" / "campaign" / "TestA" / "test_x"
+    for stamp, cases, planned in [
+        ("20260101T000000Z-aaaa", [0], 1),
+        ("20260102T000000Z-bbbb", [0, 1], 3),
+    ]:
+        (test_dir / stamp).mkdir(parents=True)
+        (test_dir / stamp / "planned.json").write_text(json.dumps({"runs": planned}))
+        for case in cases:
+            with h5py.File(test_dir / stamp / f"run_{case:04d}.h5", "w") as run_file:
+                run_file.attrs["case"] = case
+                run_file.create_dataset("t_s", data=[0.0]).attrs["units"] = "s"
+
+    runs = wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+    assert [int(run["attrs"]["case"]) for run in runs] == [0, 1]
+    assert capsys.readouterr().out == "20260102T000000Z-bbbb: 2 of 3 cases\n"
 
 
 def test_load_runs_turns_a_methods_qualified_name_into_its_node_path(sim_notebook: Path):

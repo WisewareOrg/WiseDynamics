@@ -106,7 +106,9 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 def load_runs(
     test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Read back the run files a notebook test wrote.
+    """Read back the run files of a notebook test's newest session, finished or not.
+
+    It prints one line, `<stamp>: <found> of <planned> cases`.
 
     Args:
         test: The test function or method defined in the notebook, or its node path in the paired
@@ -120,7 +122,7 @@ def load_runs(
     Raises:
         RuntimeError: The test does not collect from the notebook's `.py`, or the node collects
             tests of more than one function.
-        FileNotFoundError: The test's run directory holds no run file.
+        FileNotFoundError: The test's run directory holds no session folder.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
     py = _notebook_py(_notebook_path(os.fspath(notebook) if notebook is not None else ""))
@@ -144,9 +146,17 @@ def load_runs(
             f"{py}::{node} collects tests in {len(directories)} run directories; it must name a "
             "single test function or method"
         )
-    files = sorted(Path(directories[0]).glob("run_*.h5"))
-    if not files:
-        raise FileNotFoundError(f"no run files in {directories[0]}")
+    stamps = sorted(path for path in Path(directories[0]).glob("*") if path.is_dir())
+    if not stamps:
+        raise FileNotFoundError(f"no run folders in {directories[0]}")
+    newest = stamps[-1]
+    files = sorted(newest.glob("run_*.h5"))
+    planned = (
+        json.loads((newest / "planned.json").read_text())["runs"]
+        if (newest / "planned.json").exists()
+        else "?"
+    )
+    print(f"{newest.name}: {len(files)} of {planned} cases")
     runs = []
     for file in files:
         with h5py.File(file, "r") as run_file:
