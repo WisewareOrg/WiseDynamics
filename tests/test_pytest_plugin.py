@@ -751,31 +751,140 @@ def _strict_session(pytester: pytest.Pytester, marks: list[str]) -> pytest.RunRe
     return pytester.runpytest_subprocess("-p", "no:xdist", "--strict-markers")
 
 
-def test_a_test_directory_holding_run_files_fails_that_tests_collection(
-    pytester: pytest.Pytester,
-):
-    """A test directory already holding run files fails the test's collection, naming it.
+def _populate_out(pytester: pytest.Pytester, runs: int) -> Path:
+    """Write a `sim_runs(runs)` test with an explicit `sim_out` holding 5 stale run files.
 
-    Run files in the output root itself, which is no test's directory, do not.
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        runs: The test's `sim_runs` mark.
+
+    Returns:
+        The test's directory, holding `run_0000.h5` to `run_0004.h5` (dummy) and `notes.txt`.
+    """
+    out_dir = pytester.path / "out"
+    test_dir = out_dir / "test_scenario" / "test_case"
+    test_dir.mkdir(parents=True)
+    for index in range(5):
+        (test_dir / f"run_{index:04d}.h5").write_bytes(b"stale")
+    (test_dir / "notes.txt").write_text("kept")
+    pytester.makepyfile(
+        test_scenario=_source(
+            _case_test((f"sim_runs({runs})", _out_mark(out_dir), "sim_duration_s(3)"))
+        )
+    )
+    return test_dir
+
+
+@pytest.mark.parametrize("xdist", [("-p", "no:xdist"), ("-n", "2")], ids=["serial", "xdist"])
+def test_an_explicit_sim_out_is_overwritten_each_run(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """Each case replaces its own run file and run files beyond the case count are removed.
+
+    Other files in the directory stay.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    test_dir = _populate_out(pytester, runs=2)
+    pytester.runpytest_subprocess(*xdist).assert_outcomes(passed=2)
+
+    runs = _read_runs(test_dir)
+    assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
+    assert [run["attrs"]["case"] for run in runs] == [0, 1]
+    assert (test_dir / "notes.txt").read_text() == "kept"
+
+
+def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(pytester: pytest.Pytester):
+    """Re-running `test_case[1]` after a full run rewrites `run_0001.h5` and no other.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    out_dir = pytester.path / "out"
-    stale_dir = out_dir / "test_scenario" / "test_case"
-    stale_dir.mkdir(parents=True)
-    (stale_dir / "run_0000.h5").write_bytes(b"")
-    pytester.makepyfile(
-        test_scenario=_source(_case_test(("sim_runs(1)", _out_mark(out_dir), "sim_duration_s(3)")))
-    )
-    result = pytester.runpytest_subprocess("-p", "no:xdist")
-    assert result.ret == pytest.ExitCode.INTERRUPTED
-    result.assert_outcomes(errors=1)
-    result.stdout.fnmatch_lines([f"*test_scenario.py::test_case: {stale_dir} already holds*"])
+    test_dir = _populate_out(pytester, runs=3)
+    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=3)
+    before = {path.name: path.stat().st_mtime_ns for path in test_dir.glob("run_*.h5")}
+    assert sorted(before) == ["run_0000.h5", "run_0001.h5", "run_0002.h5"]
 
-    (stale_dir / "run_0000.h5").unlink()
-    (out_dir / "run_0000.h5").write_bytes(b"")
-    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=1)
+    result = pytester.runpytest_subprocess("-p", "no:xdist", "test_scenario.py::test_case[1]")
+    result.assert_outcomes(passed=1)
+
+    after = {path.name: path.stat().st_mtime_ns for path in test_dir.glob("run_*.h5")}
+    assert sorted(after) == sorted(before)
+    assert after["run_0001.h5"] > before["run_0001.h5"]
+    assert after["run_0000.h5"] == before["run_0000.h5"]
+    assert after["run_0002.h5"] == before["run_0002.h5"]
+
+
+def test_a_collect_only_session_removes_nothing(pytester: pytest.Pytester):
+    """`--collect-only` leaves every run file in an explicit `sim_out` directory.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    test_dir = _populate_out(pytester, runs=2)
+    result = pytester.runpytest_subprocess("-p", "no:xdist", "--collect-only", "-q")
+    assert result.ret == pytest.ExitCode.OK
+    assert sorted(path.name for path in test_dir.glob("run_*.h5")) == [
+        f"run_{index:04d}.h5" for index in range(5)
+    ]
+    assert {path.read_bytes() for path in test_dir.glob("run_*.h5")} == {b"stale"}
+
+
+def test_a_second_full_xdist_run_into_the_same_sim_out_completes(pytester: pytest.Pytester):
+    """Workers overwriting each other's previous run files do not race.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    test_dir = _populate_out(pytester, runs=4)
+    for _ in range(2):
+        pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=4)
+    runs = _read_runs(test_dir)
+    assert [run["attrs"]["case"] for run in runs] == [0, 1, 2, 3]
+
+
+def test_ci_over_a_five_case_sim_out_keeps_two_fresh_files(pytester: pytest.Pytester):
+    """`--ci` caps the cases at 2, so `run_0002.h5` to `run_0004.h5` are removed.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    test_dir = _populate_out(pytester, runs=5)
+    pytester.runpytest_subprocess("-p", "no:xdist", "--ci").assert_outcomes(passed=2)
+    runs = _read_runs(test_dir)
+    assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
+    assert [run["attrs"]["case"] for run in runs] == [0, 1]
+
+
+@pytest.mark.parametrize(
+    ("explicit_out", "outcome"),
+    [(False, {"failed": 1}), (True, {"passed": 1})],
+    ids=["default", "sim_out"],
+)
+def test_only_an_explicit_sim_out_replaces_an_existing_run_file(
+    pytester: pytest.Pytester, explicit_out: bool, outcome: dict[str, int]
+):
+    """Writing a case's run file twice is refused, unless the test has a `sim_out` mark.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        explicit_out: Whether the test carries a `sim_out` mark.
+        outcome: The outcome the session must report.
+    """
+    mark = f"@pytest.mark.{_out_mark(pytester.path / 'out')}\n" if explicit_out else ""
+    mark += "@pytest.mark.sim_runs(1)\n"
+    pytester.makepyfile(
+        SCENARIO_HEADER
+        + f"""
+{mark}def test_case(sim_case_index, sim_scenario, sim_run_file):
+    datasets = sim_scenario.run(Guidance(), {{}}, duration_s=1)
+    sim_run_file(datasets)
+    sim_run_file(datasets)
+"""
+    )
+    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(**outcome)
 
 
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
