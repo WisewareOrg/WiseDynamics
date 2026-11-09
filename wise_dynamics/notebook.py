@@ -248,8 +248,10 @@ class _Progress:
         Args:
             report: One phase's report of a test.
         """
-        self.failed += report.failed
-        self.done += report.when == "teardown"
+        if report.failed:
+            self.failed += 1
+        if report.when == "teardown":
+            self.done += 1
         self.update()
 
 

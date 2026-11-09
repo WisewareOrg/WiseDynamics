@@ -99,7 +99,7 @@ not empty, is the root of every test without a `sim_out` mark.
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | the test's `sim_duration_s` |
 | `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the session's stamp folder under the test's directory through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
@@ -162,5 +162,6 @@ notebook-only (`active="ipynb"` in the `.py`), or every worker runs them when it
 not, and prints `<stamp>: <found> of <planned> cases`. It returns one record per case, sorted by
 case: `attrs` holds the root attributes and `datasets` maps each dataset path to
 `(values, units)`.
-`test` is the test function or method, or its node path such as `"TestA::test_x"`. It works from a
+`test` is the test function or method, or its node path such as `"TestA::test_x"`. With `CI` set it
+adds `--ci`, so it reads `<root>/ci/`, where the magic's runs write. It works from a
 restarted kernel and raises `FileNotFoundError` naming the folder when it holds no session folder.
