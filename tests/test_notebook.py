@@ -347,7 +347,26 @@ def test_a_saved_edit_not_yet_in_the_py_is_synced_and_run(tmp_path: Path):
 
 
 def test_a_py_newer_than_the_notebook_is_refused(tmp_path: Path):
-    """A `.py` edited after the notebook was saved is refused, and nothing runs.
+    """A `.py` whose content differs and was edited after the notebook was saved is refused.
+
+    Nothing runs.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
+    cells = [_code(LOAD), _magic(_marker_test("test_here", tmp_path / "here"))]
+    path = _write_notebook(tmp_path, cells)
+    py = _sync(path)
+    py.write_text(py.read_text() + "\n# edited in the py\n")
+    _later(py)
+    error = _raised(tmp_path, cells, _env(session=path))
+
+    assert PY_NEWER in error.evalue
+    assert not (tmp_path / "here").exists()
+
+
+def test_a_py_newer_than_the_notebook_with_the_same_content_runs(tmp_path: Path):
+    """A `.py` that is newer but renders the same as the notebook is in sync, and the tests run.
 
     Args:
         tmp_path: The test's own temporary directory.
@@ -355,10 +374,9 @@ def test_a_py_newer_than_the_notebook_is_refused(tmp_path: Path):
     cells = [_code(LOAD), _magic(_marker_test("test_here", tmp_path / "here"))]
     path = _write_notebook(tmp_path, cells)
     _later(_sync(path))
-    error = _raised(tmp_path, cells, _env(session=path))
+    _run(tmp_path, cells, _env(session=path))
 
-    assert PY_NEWER in error.evalue
-    assert not (tmp_path / "here").exists()
+    assert (tmp_path / "here").read_text() == "ran"
 
 
 def test_an_unpaired_notebook_is_refused_with_how_to_pair_it(tmp_path: Path):
