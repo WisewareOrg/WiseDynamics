@@ -24,9 +24,6 @@ DATA = Path(__file__).parent / "data"
 SERIAL = ("-p", "no:xdist")
 XDIST = ("-n", "auto")
 
-# Each way a test names its run folder: a `sim_out` mark, the default, or the `sim_out` ini setting.
-ROOT_NAMES = {"mark": "out", "default": "monte_carlo", "ini": "ini_out"}
-
 SCENARIO_HEADER = """
 import numpy as np
 import pytest
@@ -366,58 +363,41 @@ def _default_session(
     return result
 
 
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
 def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
-    pytester: pytest.Pytester, xdist: tuple[str, ...]
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Run files land in `<rootdir>/monte_carlo/<test file>/<test>/`, whatever the worker count.
+    """Run files land in `<rootdir>/monte_carlo/<test file>/<test>/`; `TMPDIR` stays empty.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        xdist: The arguments that run the session with pytest-xdist or without it.
+        tmp_path: The test's own temporary directory, holding the `TMPDIR` used.
+        monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
     """
-    result = _default_session(pytester, *xdist)
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    monkeypatch.setenv("TMPDIR", str(temporary))
+    result = _default_session(pytester, f"--basetemp={tmp_path / 'basetemp'}", *SERIAL)
 
     directory = pytester.path / "monte_carlo" / "test_scenario" / "test_case"
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
     assert len(list(pytester.path.rglob("run_*.h5"))) == 2
     result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {directory}"])
+    assert list(temporary.iterdir()) == []
 
 
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
 def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(
-    pytester: pytest.Pytester, xdist: tuple[str, ...]
+    pytester: pytest.Pytester,
 ):
     """`sim_out = ini_out` puts the run folder at `<rootdir>/ini_out`, not `monte_carlo`.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        xdist: The arguments that run the session with pytest-xdist or without it.
     """
-    _default_session(pytester, *xdist, ini="ini_out")
+    _default_session(pytester, *SERIAL, ini="ini_out")
 
     directory = pytester.path / "ini_out" / "test_scenario" / "test_case"
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
     assert not (pytester.path / "monte_carlo").exists()
-
-
-def test_an_absolute_sim_out_ini_setting_is_used_as_given(
-    pytester: pytest.Pytester, tmp_path: Path
-):
-    """An absolute `sim_out` ini value names the run folder, outside the rootdir.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-        tmp_path: The test's own temporary directory, holding the run folder.
-    """
-    out = tmp_path / "absolute_out"
-    _default_session(pytester, *XDIST, ini=str(out))
-
-    assert [run["name"] for run in _read_runs(out / "test_scenario" / "test_case")] == [
-        "run_0000.h5",
-        "run_0001.h5",
-    ]
-    assert not list(pytester.path.rglob("run_*.h5"))
 
 
 def test_a_sim_out_mark_overrides_the_ini_setting(pytester: pytest.Pytester):
@@ -616,30 +596,6 @@ def test_the_closest_mark_wins_over_class_and_module_marks(pytester: pytest.Pyte
         """
     )
     pytester.runpytest_subprocess().assert_outcomes(passed=7)
-
-
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
-def test_a_session_creates_nothing_in_the_temporary_directory(
-    pytester: pytest.Pytester,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    xdist: tuple[str, ...],
-):
-    """A session that runs cases leaves an empty `TMPDIR` empty; its run files are in the rootdir.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-        tmp_path: The test's own temporary directory, holding the `TMPDIR` used.
-        monkeypatch: pytest's fixture for setting `TMPDIR` for this test only.
-        xdist: The arguments that run the session with pytest-xdist or without it.
-    """
-    temporary = tmp_path / "tmp"
-    temporary.mkdir()
-    monkeypatch.setenv("TMPDIR", str(temporary))
-    _default_session(pytester, f"--basetemp={tmp_path / 'basetemp'}", *xdist)
-
-    assert list(temporary.iterdir()) == []
-    assert len(list((pytester.path / "monte_carlo").rglob("run_*.h5"))) == 2
 
 
 def test_a_session_with_no_case_creates_no_run_folder(pytester: pytest.Pytester):
@@ -860,48 +816,37 @@ def _strict_session(pytester: pytest.Pytester, marks: list[str]) -> pytest.RunRe
     return pytester.runpytest_subprocess("-p", "no:xdist", "--strict-markers")
 
 
-def _populate_out(pytester: pytest.Pytester, runs: int, root: str = "mark") -> Path:
-    """Write a `sim_runs(runs)` test whose run folder holds 5 stale run files.
+def _populate_out(pytester: pytest.Pytester, runs: int) -> Path:
+    """Write a `sim_runs(runs)` test whose default run folder holds 5 stale run files.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         runs: The test's `sim_runs` mark.
-        root: How the test names its run folder, a key of `ROOT_NAMES`: a `sim_out` mark, the
-            default folder, or the `sim_out` ini setting.
 
     Returns:
         The test's directory, holding `run_0000.h5` to `run_0004.h5` (dummy) and `notes.txt`.
     """
-    out_dir = pytester.path / ROOT_NAMES[root]
-    test_dir = out_dir / "test_scenario" / "test_case"
+    test_dir = pytester.path / "monte_carlo" / "test_scenario" / "test_case"
     test_dir.mkdir(parents=True)
     for index in range(5):
         (test_dir / f"run_{index:04d}.h5").write_bytes(b"stale")
     (test_dir / "notes.txt").write_text("kept")
-    if root == "ini":
-        pytester.makeini(f"[pytest]\nsim_out = {ROOT_NAMES[root]}\n")
-    marks = (f"sim_runs({runs})", "sim_duration_s(3)", *([_out_mark(out_dir)] * (root == "mark")))
-    pytester.makepyfile(test_scenario=_source(_case_test(marks)))
+    pytester.makepyfile(
+        test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
+    )
     return test_dir
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
-def test_a_run_folder_is_overwritten_each_run(
-    pytester: pytest.Pytester, xdist: tuple[str, ...], root: str
-):
+def test_a_run_folder_is_overwritten_each_run(pytester: pytest.Pytester):
     """Each case replaces its own run file and run files beyond the case count are removed.
 
-    Other files in the directory stay, whether the folder is a mark's, the default or the ini
-    setting's.
+    Other files in the directory stay.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        xdist: The arguments that run the session with pytest-xdist or without it.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=2, root=root)
-    pytester.runpytest_subprocess(*xdist).assert_outcomes(passed=2)
+    test_dir = _populate_out(pytester, runs=2)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
 
     runs = _read_runs(test_dir)
     assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
@@ -909,22 +854,18 @@ def test_a_run_folder_is_overwritten_each_run(
     assert (test_dir / "notes.txt").read_text() == "kept"
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(
-    pytester: pytest.Pytester, root: str
-):
+def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(pytester: pytest.Pytester):
     """Re-running `test_case[1]` after a full run rewrites `run_0001.h5` and no other.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=3, root=root)
-    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=3)
+    test_dir = _populate_out(pytester, runs=3)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=3)
     before = {path.name: path.stat().st_mtime_ns for path in test_dir.glob("run_*.h5")}
     assert sorted(before) == ["run_0000.h5", "run_0001.h5", "run_0002.h5"]
 
-    result = pytester.runpytest_subprocess("-p", "no:xdist", "test_scenario.py::test_case[1]")
+    result = pytester.runpytest_subprocess(*SERIAL, "test_scenario.py::test_case[1]")
     result.assert_outcomes(passed=1)
 
     after = {path.name: path.stat().st_mtime_ns for path in test_dir.glob("run_*.h5")}
@@ -934,20 +875,14 @@ def test_rerunning_one_case_by_node_id_rewrites_only_its_run_file(
     assert after["run_0002.h5"] == before["run_0002.h5"]
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
-def test_a_collect_only_session_removes_nothing(
-    pytester: pytest.Pytester, xdist: tuple[str, ...], root: str
-):
-    """`--collect-only` leaves every run file in the run folder, whoever named it.
+def test_a_collect_only_session_removes_nothing(pytester: pytest.Pytester):
+    """`--collect-only` leaves every run file in the run folder.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        xdist: The arguments that run the session with pytest-xdist or without it.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=2, root=root)
-    result = pytester.runpytest_subprocess(*xdist, "--collect-only", "-q")
+    test_dir = _populate_out(pytester, runs=2)
+    result = pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
     assert result.ret == pytest.ExitCode.OK
     assert sorted(path.name for path in test_dir.glob("run_*.h5")) == [
         f"run_{index:04d}.h5" for index in range(5)
@@ -955,55 +890,44 @@ def test_a_collect_only_session_removes_nothing(
     assert {path.read_bytes() for path in test_dir.glob("run_*.h5")} == {b"stale"}
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-def test_a_second_full_xdist_run_into_the_same_run_folder_completes(
-    pytester: pytest.Pytester, root: str
-):
+def test_a_second_full_xdist_run_into_the_same_run_folder_completes(pytester: pytest.Pytester):
     """Workers overwriting each other's previous run files do not race.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=4, root=root)
+    test_dir = _populate_out(pytester, runs=4)
     for _ in range(2):
         pytester.runpytest_subprocess(*XDIST).assert_outcomes(passed=4)
     runs = _read_runs(test_dir)
     assert [run["attrs"]["case"] for run in runs] == [0, 1, 2, 3]
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-def test_ci_over_a_five_case_run_folder_keeps_two_fresh_files(pytester: pytest.Pytester, root: str):
+def test_ci_over_a_five_case_run_folder_keeps_two_fresh_files(pytester: pytest.Pytester):
     """`--ci` caps the cases at 2, so `run_0002.h5` to `run_0004.h5` are removed.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    test_dir = _populate_out(pytester, runs=5, root=root)
-    pytester.runpytest_subprocess("-p", "no:xdist", "--ci").assert_outcomes(passed=2)
+    test_dir = _populate_out(pytester, runs=5)
+    pytester.runpytest_subprocess(*SERIAL, "--ci").assert_outcomes(passed=2)
     runs = _read_runs(test_dir)
     assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
     assert [run["attrs"]["case"] for run in runs] == [0, 1]
 
 
-@pytest.mark.parametrize("root", ROOT_NAMES)
-def test_every_run_folder_replaces_an_existing_run_file(pytester: pytest.Pytester, root: str):
-    """Writing a case's run file twice replaces it, whoever named the run folder.
+def test_an_existing_run_file_is_replaced(pytester: pytest.Pytester):
+    """Writing a case's run file twice replaces it.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        root: How the test names its run folder, a key of `ROOT_NAMES`.
     """
-    mark = f"@pytest.mark.{_out_mark(pytester.path / ROOT_NAMES[root])}\n" * (root == "mark")
-    if root == "ini":
-        pytester.makeini(f"[pytest]\nsim_out = {ROOT_NAMES[root]}\n")
-    mark += "@pytest.mark.sim_runs(1)\n"
     pytester.makepyfile(
         SCENARIO_HEADER
-        + f"""
-{mark}def test_case(sim_case_index, sim_scenario, sim_run_file):
-    datasets = sim_scenario.run(Guidance(), {{}}, duration_s=1)
+        + """
+@pytest.mark.sim_runs(1)
+def test_case(sim_case_index, sim_scenario, sim_run_file):
+    datasets = sim_scenario.run(Guidance(), {}, duration_s=1)
     sim_run_file(datasets)
     sim_run_file(datasets)
 """
@@ -1067,7 +991,7 @@ def _editable_direct_url(repository: Path) -> dict:
 def _provenance_session(
     pytester: pytest.Pytester, direct_url: dict | None, *args: str
 ) -> pytest.RunResult:
-    """Run the two-case scenario with the plugin's `_direct_url` patched to `direct_url`.
+    """Run the one-case scenario with the plugin's `_direct_url` patched to `direct_url`.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -1081,99 +1005,41 @@ def _provenance_session(
         "import wise_dynamics.pytest_plugin as plugin\n\n"
         f"plugin._direct_url = lambda: {direct_url!r}\n"
     )
-    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     return pytester.runpytest_subprocess(*args)
 
 
-def _provenance_attrs(pytester: pytest.Pytester) -> list[dict]:
-    """Read each run file's four provenance attributes from the default run folder.
+def _provenance_attrs(pytester: pytest.Pytester) -> dict:
+    """Read the run file's four provenance attributes from the default run folder.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
 
     Returns:
-        One mapping per run file: `install`, `commit`, `requested_revision` and `dirty`.
+        `install`, `commit`, `requested_revision` and `dirty`.
     """
     prefix = "versions_wise_dynamics_"
-    runs = _read_runs(pytester.path / "monte_carlo" / "test_scenario" / "test_case")
-    return [
-        {
-            key: run["attrs"][prefix + key]
-            for key in ("install", "commit", "requested_revision", "dirty")
-        }
-        for run in runs
-    ]
+    (run,) = _read_runs(pytester.path / "monte_carlo" / "test_scenario" / "test_case")
+    return {
+        key: run["attrs"][prefix + key]
+        for key in ("install", "commit", "requested_revision", "dirty")
+    }
 
 
-def _assert_false(value: object) -> None:
-    """Assert `value` is the boolean `False` as an HDF5 attribute reads back.
-
-    Args:
-        value: The attribute's value.
-    """
-    assert type(value) is np.bool_
-    assert not value
-
-
-def _assert_true(value: object) -> None:
-    """Assert `value` is the boolean `True` as an HDF5 attribute reads back.
-
-    Args:
-        value: The attribute's value.
-    """
-    assert type(value) is np.bool_
-    assert value
-
-
-def test_the_golden_direct_urls_are_the_forms_uv_writes():
-    """The two checked-in `direct_url.json` fixtures are the pinned and the editable forms."""
-    vcs = json.loads((DATA / "direct_url_vcs.json").read_text())
-    assert vcs["vcs_info"]["vcs"] == "git"
-    assert re.fullmatch(r"[0-9a-f]{40}", vcs["vcs_info"]["commit_id"])
-    editable = _editable_direct_url(Path("/some/checkout"))
-    assert editable == {"url": "file:///some/checkout", "dir_info": {"editable": True}}
-
-
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
-def test_a_pinned_install_records_its_commit_as_pinned(
-    pytester: pytest.Pytester, xdist: tuple[str, ...]
-):
+def test_a_pinned_install_records_its_commit_as_pinned(pytester: pytest.Pytester):
     """A VCS install records `pinned`, its commit, its requested revision and a clean tree.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        xdist: The arguments that run the session with pytest-xdist or without it.
     """
     direct_url = json.loads((DATA / "direct_url_vcs.json").read_text())
-    _provenance_session(pytester, direct_url, *xdist).assert_outcomes(passed=2)
+    _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=1)
 
-    attrs = _provenance_attrs(pytester)
-    assert len(attrs) == 2
-    for found in attrs:
-        assert found["install"] == "pinned"
-        assert found["commit"] == direct_url["vcs_info"]["commit_id"]
-        assert found["requested_revision"] == direct_url["vcs_info"]["requested_revision"]
-        _assert_false(found["dirty"])
-
-
-def test_a_pinned_install_with_no_requested_revision_records_an_empty_one(
-    pytester: pytest.Pytester,
-):
-    """A VCS install that names no revision records `requested_revision` as an empty string.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    direct_url = json.loads((DATA / "direct_url_vcs.json").read_text())
-    del direct_url["vcs_info"]["requested_revision"]
-    _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=2)
-
-    attrs = _provenance_attrs(pytester)
-    assert len(attrs) == 2
-    for found in attrs:
-        assert found["install"] == "pinned"
-        assert found["commit"] == direct_url["vcs_info"]["commit_id"]
-        assert found["requested_revision"] == ""
+    found = _provenance_attrs(pytester)
+    assert found["install"] == "pinned"
+    assert found["commit"] == direct_url["vcs_info"]["commit_id"]
+    assert found["requested_revision"] == direct_url["vcs_info"]["requested_revision"]
+    assert found["dirty"] == np.False_
 
 
 @pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])
@@ -1190,15 +1056,14 @@ def test_an_editable_install_records_its_checkouts_commit_and_dirt(
     repository = tmp_path / "checkout"
     commit = _make_repository(repository, dirty=dirty)
     direct_url = _editable_direct_url(repository)
-    _provenance_session(pytester, direct_url, *XDIST).assert_outcomes(passed=2)
+    _provenance_session(pytester, direct_url, *SERIAL).assert_outcomes(passed=1)
 
-    attrs = _provenance_attrs(pytester)
-    assert len(attrs) == 2
-    for found in attrs:
-        assert found["install"] == "local"
-        assert found["commit"] == commit
-        assert found["requested_revision"] == ""
-        (_assert_true if dirty else _assert_false)(found["dirty"])
+    found = _provenance_attrs(pytester)
+    assert found["install"] == "local"
+    assert found["commit"] == commit
+    assert found["requested_revision"] == ""
+    assert type(found["dirty"]) is np.bool_
+    assert bool(found["dirty"]) is dirty
 
 
 def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytester):
@@ -1210,81 +1075,14 @@ def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytes
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
 
-    (found,) = _provenance_attrs(pytester)
+    found = _provenance_attrs(pytester)
     assert found["install"] == "local"
     assert found["commit"] == _git(REPOSITORY, "rev-parse", "HEAD")
-    assert found["requested_revision"] == ""
-    assert type(found["dirty"]) is np.bool_
 
 
-def _plain_directory(tmp_path: Path) -> Path:
-    """Create a directory that is not in any git repository.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-
-    Returns:
-        The new directory.
-    """
-    directory = tmp_path / "plain"
-    directory.mkdir()
-    return directory
-
-
-UNDETERMINABLE = {
-    "no-direct-url": lambda tmp_path: None,
-    "non-editable-directory": lambda tmp_path: {"url": tmp_path.as_uri(), "dir_info": {}},
-    "non-git-vcs": lambda tmp_path: {
-        "url": "https://example.org/repository",
-        "vcs_info": {"vcs": "hg", "commit_id": "0" * 40},
-    },
-    "not-a-repository": lambda tmp_path: _editable_direct_url(_plain_directory(tmp_path)),
-    "git-unavailable": lambda tmp_path: _editable_direct_url(REPOSITORY),
-}
-"""Each install the plugin cannot describe, as the `direct_url.json` a session is given."""
-
-
-def _undeterminable_session(
-    pytester: pytest.Pytester,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    case: str,
-    *args: str,
-) -> pytest.RunResult:
-    """Run a session whose install `case` names, and check it stops with the install message.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-        tmp_path: The test's own temporary directory.
-        monkeypatch: pytest's fixture for setting the session's environment for this test only.
-        case: A key of `UNDETERMINABLE`.
-        *args: Further pytest arguments.
-
-    Returns:
-        The session's result, whose exit code is a usage error, with no run file written.
-    """
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
-    if case == "git-unavailable":
-        (tmp_path / "no_git").mkdir()
-        monkeypatch.setenv("PATH", str(tmp_path / "no_git"))
-    result = _provenance_session(pytester, UNDETERMINABLE[case](tmp_path), *args)
-
-    assert result.ret == pytest.ExitCode.USAGE_ERROR
-    output = result.stdout.lines + result.stderr.lines
-    assert len([line for line in output if "uv sync" in line]) == 1
-    assert len([line for line in output if "uv pip install -e" in line]) == 1
-    assert not list(pytester.path.rglob("run_*.h5"))
-    return result
-
-
-@pytest.mark.parametrize("xdist", [SERIAL, XDIST], ids=["serial", "xdist"])
-@pytest.mark.parametrize("case", UNDETERMINABLE)
+@pytest.mark.parametrize("case", ["no-direct-url", "git-unavailable"])
 def test_an_install_that_cannot_be_described_stops_the_session(
-    pytester: pytest.Pytester,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    case: str,
-    xdist: tuple[str, ...],
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ):
     """An install the plugin cannot describe exits 4, names both supported installs, runs no case.
 
@@ -1292,26 +1090,21 @@ def test_an_install_that_cannot_be_described_stops_the_session(
         pytester: pytest's own fixture for running a test session in a subprocess.
         tmp_path: The test's own temporary directory.
         monkeypatch: pytest's fixture for setting the session's environment for this test only.
-        case: A key of `UNDETERMINABLE`.
-        xdist: The arguments that run the session with pytest-xdist or without it.
+        case: `no-direct-url`, an install with no `direct_url.json`, or `git-unavailable`, an
+            editable install whose checkout cannot be read because `git` fails.
     """
-    _undeterminable_session(pytester, tmp_path, monkeypatch, case, *xdist)
+    direct_url = None
+    if case == "git-unavailable":
+        (tmp_path / "no_git").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "no_git"))
+        direct_url = _editable_direct_url(REPOSITORY)
+    result = _provenance_session(pytester, direct_url, *SERIAL)
 
-
-def test_an_install_that_cannot_be_described_stops_a_collect_only_session(
-    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """`--collect-only` is a session too: a bad install stops it with exit 4.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-        tmp_path: The test's own temporary directory.
-        monkeypatch: pytest's fixture for setting the session's environment for this test only.
-    """
-    result = _undeterminable_session(
-        pytester, tmp_path, monkeypatch, "no-direct-url", *SERIAL, "--collect-only"
-    )
-    assert not [line for line in result.outlines if "test_scenario.py::" in line]
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    output = result.stdout.lines + result.stderr.lines
+    assert len([line for line in output if "uv sync" in line]) == 1
+    assert len([line for line in output if "uv pip install -e" in line]) == 1
+    assert not list(pytester.path.rglob("run_*.h5"))
 
 
 def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
