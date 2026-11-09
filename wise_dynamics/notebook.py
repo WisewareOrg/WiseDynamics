@@ -24,6 +24,7 @@ try:
     import jupytext.cli
     from IPython import get_ipython
     from IPython.core.interactiveshell import InteractiveShell
+    from tqdm.auto import tqdm
 except ImportError as error:
     raise ImportError(
         "wise_dynamics.notebook needs IPython and jupytext; "
@@ -81,7 +82,19 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
             raise RuntimeError("This cell defines no test.")
         ipython.run_cell(cell).raise_error()
         ci = ["--ci"] if os.environ.get("CI") else []
-        exit_code = pytest.main([*(f"{py}::{name}" for name in tests), "-n", "auto", *ci])
+        bar = tqdm(unit="test")
+        exit_code = pytest.main(
+            [
+                *(f"{py}::{name}" for name in tests),
+                "-n",
+                "auto",
+                "-W",
+                "ignore::pytest.PytestAssertRewriteWarning",
+                *ci,
+            ],
+            plugins=[_Progress(bar)],
+        )
+        bar.close()
         if exit_code != pytest.ExitCode.OK:
             raise RuntimeError(f"pytest exited with {exit_code!r}")
 
@@ -155,6 +168,55 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     report = os.environ.get(_REPORT)
     if report and session.items:
         Path(report).write_text(json.dumps(sorted({str(_run_dir(item)) for item in session.items})))
+
+
+class _Progress:
+    """A pytest plugin that counts finished tests on a progress bar.
+
+    The bar's total is the number of collected tests, and its postfix the number of failed
+    reports in any phase.
+    """
+
+    def __init__(self, bar: Any) -> None:
+        """Hold the bar.
+
+        Args:
+            bar: A `tqdm` bar with no total yet.
+        """
+        self.bar = bar
+        self.failed = 0
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        """Set the total from the collected items when pytest-xdist is off.
+
+        Args:
+            session: The finished collection session.
+        """
+        if session.items:
+            self.bar.reset(total=len(session.items))
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node: Any, ids: list[str]) -> None:
+        """Set the total from the first worker's collected ids.
+
+        Args:
+            node: The pytest-xdist worker node that finished collecting.
+            ids: The node ids it collected.
+        """
+        if self.bar.total is None:
+            self.bar.reset(total=len(ids))
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """Advance the bar at each test's teardown and show the failed count.
+
+        Args:
+            report: One phase's report of a test.
+        """
+        if report.failed:
+            self.failed += 1
+            self.bar.set_postfix(failed=self.failed)
+        if report.when == "teardown":
+            self.bar.update()
 
 
 def _notebook_path(line: str) -> Path:

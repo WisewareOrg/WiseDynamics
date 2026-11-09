@@ -465,13 +465,26 @@ def _expected_runs(directory: Path) -> list[dict]:
 def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: Path):
     """A `leo500` campaign of four cases runs across workers; a fresh kernel loads every run.
 
+    The run prints no assert-rewrite warning, and its progress bar ends at four of four.
+
     Args:
         tmp_path: The test's own temporary directory.
     """
     campaign = [_code(LOAD), nbformat.v4.new_code_cell(CAMPAIGN.strip("\n"))]
     path = _write_notebook(tmp_path, campaign)
     env = _env(path)
-    _run(tmp_path, campaign, env)
+    notebook = nbformat.v4.new_notebook(cells=copy.deepcopy(campaign))
+    NotebookClient(
+        notebook,
+        kernel_name="python3",
+        timeout=900,
+        resources={"metadata": {"path": str(tmp_path)}},
+    ).execute(env=env)
+    streams = "".join(out.text for out in notebook.cells[1].outputs if out.output_type == "stream")
+    widgets = notebook.metadata.widgets["application/vnd.jupyter.widget-state+json"]["state"]
+    (bar,) = [
+        model["state"] for model in widgets.values() if model["model_name"] == "FloatProgressModel"
+    ]
 
     (line,) = [
         line
@@ -483,6 +496,8 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     loaded = json.loads(line.removeprefix("SUMMARY "))
 
     expected = _expected_runs(tmp_path / "monte_carlo" / "campaign" / "test_leo")
+    assert "PytestAssertRewriteWarning" not in streams
+    assert (bar["value"], bar["max"]) == (4, 4)
     assert loaded["cases"] == [0, 1, 2, 3]
     assert len(set(loaded["worker_pids"])) > 1
     assert loaded["kernel_pid"] not in loaded["worker_pids"]
