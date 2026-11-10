@@ -15,9 +15,12 @@ __all__ = ["TestResults", "read_test_results", "session_directory"]
 
 POINTER = "SESSION"
 PLANNED = "planned.json"
-RUN_GLOB = "run_*.h5"
 NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+class NoSessionError(pytest.UsageError):
+    """No Monte Carlo session is active."""
 
 
 class TestResults(NamedTuple):
@@ -77,6 +80,30 @@ def check_name(name: str, source: str) -> str:
     return name
 
 
+def read_pointer(root: Path) -> str:
+    """Read the active session's name from the pointer.
+
+    Args:
+        root: The `sim_out` root.
+
+    Returns:
+        The pointer's stripped content, empty when the pointer is missing or empty.
+    """
+    pointer = root / POINTER
+    return pointer.read_text().strip() if pointer.is_file() else ""
+
+
+def write_pointer(root: Path, name: str) -> None:
+    """Make `name` the active session, creating the root if needed.
+
+    Args:
+        root: The `sim_out` root.
+        name: A valid session name.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / POINTER).write_text(f"{name}\n")
+
+
 def session_directory(config: pytest.Config) -> Path:
     """Find the active session's directory.
 
@@ -88,14 +115,14 @@ def session_directory(config: pytest.Config) -> Path:
         not exist yet.
 
     Raises:
-        pytest.UsageError: The pointer is missing or empty, or the name it holds is invalid.
+        NoSessionError: The pointer is missing or empty. A subclass of `pytest.UsageError`, which
+            is also raised when the name the pointer holds is invalid.
     """
     root = sim_root(config)
-    pointer = root / POINTER
-    name = pointer.read_text().strip() if pointer.is_file() else ""
+    name = read_pointer(root)
     if not name:
-        raise pytest.UsageError(NO_SESSION)
-    return root / check_name(name, str(pointer))
+        raise NoSessionError(NO_SESSION)
+    return root / check_name(name, str(root / POINTER))
 
 
 def run_path(directory: Path, case: int) -> Path:

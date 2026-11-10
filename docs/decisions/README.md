@@ -1,6 +1,6 @@
 # Architecture decision records
 
-**Rev:** 2
+**Rev:** 1
 
 An ADR records a choice that took a **trade study**: real alternatives, analysed against each other.
 A decision that did not need that analysis is a convention, and belongs in the document that governs
@@ -42,5 +42,4 @@ decision and its reasoning, not who ruled it.
 
 ## Revisions
 
-- **rev 2** — 2026-11-09 — ADR 0002 added to the index.
 - **rev 1** — 2026-10-31 — first written (stand-up).

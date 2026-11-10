@@ -8,7 +8,7 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 import json
 import numbers
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from importlib.metadata import distribution, version
 from pathlib import Path
@@ -62,6 +62,16 @@ _MARKS = (
         f"simulated duration of each case, positive; default {_DEFAULT_DURATION_S:g}",
     ),
 )
+
+
+class _NoSession(NamedTuple):
+    """The case parameter of a Monte Carlo test that has no usable session.
+
+    Attributes:
+        reason: Why there is none, shown as the test's setup error.
+    """
+
+    reason: str
 
 
 class _Settings(NamedTuple):
@@ -133,12 +143,10 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     root = sessions.sim_root(config)
     if name:
         sessions.check_name(name, "--sim-session")
-        root.mkdir(parents=True, exist_ok=True)
-        (root / sessions.POINTER).write_text(f"{name}\n")
+        sessions.write_pointer(root, name)
         print(f"session: {name}")
         return int(pytest.ExitCode.OK)
-    pointer = root / sessions.POINTER
-    active = pointer.read_text().strip() if pointer.is_file() else ""
+    active = sessions.read_pointer(root)
     print(f"active: {active or 'none'}")
     others = sorted(path.name for path in root.iterdir() if path.is_dir()) if root.is_dir() else []
     for other in others:
@@ -152,8 +160,8 @@ def pytest_configure(config: pytest.Config) -> None:
 
     The active session is resolved when a test first needs it, not here.
 
-    A usage error stops the session when the `sim_out` ini setting is empty or the `wise-dynamics`
-    install is neither a git pin nor an editable local checkout.
+    A usage error stops the pytest run when the `sim_out` ini setting is empty or the
+    `wise-dynamics` install is neither a git pin nor an editable local checkout.
 
     Args:
         config: The session's pytest configuration, which holds the stash.
@@ -211,7 +219,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
     except pytest.UsageError as error:
         metafunc.parametrize(
-            "sim_case_index", [pytest.param(str(error), id="no-session")], indirect=True
+            "sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True
         )
         return
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
@@ -222,9 +230,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 
     The count is the test's `sim_runs` after the `--ci` cap, not the number of cases selected.
 
-    A `--collect-only` session writes nothing, and neither does a pytest-xdist controller, which
-    collects nothing; each worker writes the same content. A test with no active session has no
-    folder to write to.
+    A `--collect-only` run writes nothing, and neither does a pytest-xdist controller, which
+    collects nothing; each worker writes the same content. A test with no active Monte Carlo
+    session has no folder to write to.
 
     Args:
         session: The finished collection session.
@@ -233,7 +241,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         return
     planned: dict[Path, int] = {}
     for item in session.items:
-        if "sim_case_index" in item.fixturenames and not _is_no_session(item):
+        if "sim_case_index" in item.fixturenames and _case_of(item) is not None:
             settings = _settings(item)
             planned[settings.directory] = settings.runs
     for directory, runs in planned.items():
@@ -268,7 +276,12 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     """
     report = yield
     case = _case_of(item)
-    if case is not None and report.when in ("setup", "call") and report.failed:
+    if (
+        case is not None
+        and report.when in ("setup", "call")
+        and report.failed
+        and call.excinfo is not None
+    ):
         directory = _run_dir(item)
         if not sessions.run_path(directory, case).is_file():
             _write_crash(directory, case, call.excinfo.exconly(), str(report.longrepr))
@@ -285,14 +298,15 @@ def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched: Any
         sched: The pytest-xdist scheduler, which holds the configuration.
     """
     located = _locate(crashitem)
-    if located is not None:
-        directory, case = located
-        _write_crash(
-            _active_session(sched.config) / directory,
-            case,
-            str(report.longrepr),
-            str(report.longrepr),
-        )
+    if located is None or _SESSION not in sched.config.stash:
+        return
+    directory, case = located
+    directory = sched.config.stash[_SESSION] / directory
+    if not (directory / sessions.PLANNED).is_file():
+        return
+    sessions.run_path(directory, case).unlink(missing_ok=True)
+    crash = str(report.longrepr)
+    _write_crash(directory, case, (crash.splitlines() or [""])[0], crash)
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
@@ -317,7 +331,7 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     if hasattr(config, "workerinput"):
         return
     for directory in sorted(config.stash[_WRITTEN_DIRS]):
-        count = len(list(directory.glob(sessions.RUN_GLOB)))
+        count = len(sessions.read_test_results(directory).runs)
         terminalreporter.write_line(f"wise-dynamics: {_run_files(count)} in {directory}")
 
 
@@ -333,8 +347,8 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
     Returns:
         The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
     """
-    if isinstance(request.param, str):
-        pytest.fail(request.param, pytrace=False)
+    if isinstance(request.param, _NoSession):
+        pytest.fail(request.param.reason, pytrace=False)
     return request.param
 
 
@@ -549,10 +563,7 @@ def _locate(nodeid: str) -> tuple[Path, int] | None:
     case = parameter.removesuffix("]")
     if not case.isdigit():
         return None
-    file_part = Path(file).with_suffix("")
-    if ".." in file_part.parts:
-        file_part = Path(file_part.name)
-    return file_part / Path(*names) / function, int(case)
+    return _directory_in_session(Path(file), names, function), int(case)
 
 
 def _write_crash(directory: Path, case: int, exception: str, traceback: str) -> None:
@@ -568,18 +579,6 @@ def _write_crash(directory: Path, case: int, exception: str, traceback: str) -> 
     sessions.crash_path(directory, case).write_text(
         json.dumps({"exception": exception, "traceback": traceback})
     )
-
-
-def _is_no_session(item: pytest.Function) -> bool:
-    """Tell whether an item is the `no-session` case of a Monte Carlo test.
-
-    Args:
-        item: A collected test item that uses `sim_case_index`.
-
-    Returns:
-        Whether its case parameter is the reason text rather than a case number.
-    """
-    return isinstance(item.callspec.params["sim_case_index"], str)
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:
@@ -617,12 +616,29 @@ def _test_directory(node: pytest.Function, root: Path) -> Path:
         the rootdir without `.py`, or its stem when it is outside the rootdir.
     """
     try:
-        file_part = node.path.relative_to(node.config.rootpath).with_suffix("")
+        file = node.path.relative_to(node.config.rootpath)
     except ValueError:
-        # A test file outside the rootdir has no relative path; its stem stands in.
-        file_part = Path(node.path.stem)
+        file = node.path
     classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
-    return root / file_part / Path(*classes) / node.originalname
+    return root / _directory_in_session(file, classes, node.originalname)
+
+
+def _directory_in_session(file: Path, classes: Sequence[str], function: str) -> Path:
+    """Build a test's directory within a session; the one place that layout is defined.
+
+    Args:
+        file: The test file, relative to the rootdir, or absolute or starting `..` when outside it.
+        classes: The enclosing classes, outermost first.
+        function: The test function's name.
+
+    Returns:
+        `<test file>/<class>/.../<function>`, the test file being its path without `.py`, or its
+        stem when it is outside the rootdir.
+    """
+    file_part = file.with_suffix("")
+    if file_part.is_absolute() or ".." in file_part.parts:
+        file_part = Path(file_part.name)
+    return file_part / Path(*classes) / function
 
 
 def _provenance() -> dict[str, str | bool]:

@@ -128,11 +128,12 @@ segfault. A case that wrote its run file and then failed keeps the run file.
 `wise_dynamics.sessions.read_test_results(directory)` returns `planned`, the `runs` and the
 `crashes` of cases `0` to `planned-1`, ignoring any higher-numbered file left after `sim_runs`
 dropped. Edge outcomes: Ctrl-C leaves no record, so the case is missing; a skipped case keeps its
-previous result; an xfail-marked case that raises leaves no record.
+previous result; an xfail-marked case that raises leaves no record; a worker that dies in a case
+whose parameter id is not a plain case number leaves no record.
 
 `--collect-only` writes nothing. The terminal summary names each directory that received run
 files. An install that is neither a git pin (`uv sync` against a git dependency) nor an editable
-local checkout (`uv pip install -e <checkout>`) stops every session before collection.
+local checkout (`uv pip install -e <checkout>`) stops the pytest run before collection.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares

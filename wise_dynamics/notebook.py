@@ -34,7 +34,8 @@ except ImportError as error:
     ) from error
 
 from wise_dynamics import sessions
-from wise_dynamics.pytest_plugin import _run_dir
+from wise_dynamics.pytest_plugin import _active_session, _run_dir
+from wise_dynamics.sessions import NoSessionError
 
 __all__ = ["load_ipython_extension", "load_runs"]
 
@@ -186,19 +187,16 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     The file is the one `WISE_DYNAMICS_RUN_DIR_REPORT` names; its JSON is `{"session": <name or
     null>, "directories": [...]}`, with no directories when there is no active session.
 
+    An invalid name in the session pointer stops the collection with a usage error.
+
     Args:
         session: The finished collection session.
-
-    Raises:
-        pytest.UsageError: The session pointer holds an invalid name.
     """
     report = os.environ.get(_REPORT)
     if report and session.items:
         try:
-            name: str | None = sessions.session_directory(session.config).name
-        except pytest.UsageError as error:
-            if str(error) != sessions.NO_SESSION:
-                raise
+            name: str | None = _active_session(session.config).name
+        except NoSessionError:
             name = None
         directories = (
             [] if name is None else sorted({str(_run_dir(item)) for item in session.items})
