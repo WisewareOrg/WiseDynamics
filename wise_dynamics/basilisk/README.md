@@ -117,9 +117,9 @@ cases agrees on where runs are, and a running notebook kernel follows a switch. 
 the session once, so switching it midway does not split the run. A test's run files are in
 `<root>/<session>/<test file>/<class>/<function>/`: the test file is its path relative to the
 rootdir without `.py`, and each enclosing class, outermost first, is a directory. Before the first
-case runs, each worker writes `planned.json`, `{"runs": N, "nodeid": "<test file>.py::<class>::<function>"}`,
-into that directory: the test's case count after the `--ci` cap, and its node id without
-parameters. `wise_dynamics.sessions.recorded_tests(session)` lists a session's test folders with
+case runs, each worker writes `planned.json` into that directory,
+`{"runs": N, "nodeid": "<test file>.py::<class>::<function>"}`: the test's case count after the
+`--ci` cap, and its node id without parameters. `wise_dynamics.sessions.recorded_tests(session)` lists a session's test folders with
 their node ids, so a consumer finds a test's folder by its node id instead of parsing the path.
 
 A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.crash.json`, and
