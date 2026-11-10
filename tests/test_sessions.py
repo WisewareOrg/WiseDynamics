@@ -367,7 +367,7 @@ def test_a_worker_that_dies_in_a_fixture_replaces_the_cases_earlier_run_file(
     assert not (directory / "run_0001.h5").exists()
 
 
-def test_test_directories_lists_each_tests_folder_with_its_recorded_node_path(
+def test_recorded_tests_lists_each_tests_folder_with_its_recorded_node_path(
     pytester: pytest.Pytester,
 ):
     """A session the plugin wrote lists exactly its tests' folders with the node paths recorded.
@@ -389,7 +389,7 @@ def test_test_directories_lists_each_tests_folder_with_its_recorded_node_path(
     pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
     (session / "test_a" / "stray").mkdir()
 
-    folders = _sessions().test_directories(session)
+    folders = _sessions().recorded_tests(session)
 
     assert [(folder.directory, folder.nodeid) for folder in folders] == [
         (session / "test_a" / "TestA" / "test_case", "test_a.py::TestA::test_case"),
