@@ -12,11 +12,11 @@ from typing import Any, NamedTuple
 import pytest
 
 __all__ = [
-    "TestFolder",
-    "TestResults",
+    "CaseResults",
+    "RecordedTest",
     "read_test_results",
+    "recorded_tests",
     "session_directory",
-    "test_directories",
 ]
 
 POINTER = "SESSION"
@@ -29,7 +29,7 @@ class NoSessionError(pytest.UsageError):
     """No Monte Carlo session is active."""
 
 
-class TestFolder(NamedTuple):
+class RecordedTest(NamedTuple):
     """A test's results folder in a session.
 
     Attributes:
@@ -38,13 +38,11 @@ class TestFolder(NamedTuple):
             without parameters.
     """
 
-    __test__ = False
-
     directory: Path
     nodeid: str
 
 
-class TestResults(NamedTuple):
+class CaseResults(NamedTuple):
     """What a Monte Carlo test left in its session directory.
 
     Attributes:
@@ -53,8 +51,6 @@ class TestResults(NamedTuple):
         crashes: Case number to the case's crash record, for the cases below `planned` that have
             one.
     """
-
-    __test__ = False
 
     planned: int
     runs: dict[int, Path]
@@ -184,7 +180,7 @@ def write_planned(directory: Path, runs: int, nodeid: str) -> None:
     (directory / PLANNED).write_text(json.dumps({"runs": runs, "nodeid": nodeid}))
 
 
-def test_directories(session: Path) -> list[TestFolder]:
+def recorded_tests(session: Path) -> list[RecordedTest]:
     """List the test folders of a session that hold results.
 
     Args:
@@ -197,14 +193,11 @@ def test_directories(session: Path) -> list[TestFolder]:
     for record in session.rglob(PLANNED):
         nodeid = json.loads(record.read_text()).get("nodeid")
         if nodeid is not None:
-            found.append(TestFolder(record.parent, nodeid))
+            found.append(RecordedTest(record.parent, nodeid))
     return sorted(found)
 
 
-test_directories.__test__ = False
-
-
-def read_test_results(directory: Path) -> TestResults:
+def read_test_results(directory: Path) -> CaseResults:
     """Read what a Monte Carlo test left in its session directory.
 
     Args:
@@ -217,7 +210,7 @@ def read_test_results(directory: Path) -> TestResults:
     planned = json.loads((directory / PLANNED).read_text())["runs"]
     runs = {case: run_path(directory, case) for case in range(planned)}
     crashes = {case: crash_path(directory, case) for case in range(planned)}
-    return TestResults(
+    return CaseResults(
         planned,
         {case: path for case, path in runs.items() if path.is_file()},
         {case: json.loads(path.read_text()) for case, path in crashes.items() if path.is_file()},
