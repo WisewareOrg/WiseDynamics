@@ -352,6 +352,68 @@ def test_a_notebook_given_as_its_paired_py_runs(
     assert py.stat().st_mtime_ns == mtime
 
 
+@pytest.mark.parametrize("run", ["first", "last"])
+def test_cells_after_the_last_campaign_are_marked_notebook_only_before_the_run(
+    run: str, shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Unmarked code cells after the last `%%monte_carlo` cell are marked and skipped on import.
+
+    Whichever campaign runs, a cell between the two, and a later cell already carrying `active`,
+    keep their metadata; the run's workers import the re-synced `.py` without the marked cells.
+
+    Args:
+        run: Which of the two campaigns the magic runs.
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    first = _magic(_marker_test("test_first", tmp_path / "first"))
+    last = _magic(_marker_test("test_last", tmp_path / "last"))
+    imported = f"Path({str(tmp_path / 'imported')!r}).write_text('ran')"
+    cells = [
+        _code(LOAD),
+        first,
+        _code("between = 1"),
+        last,
+        _code(f"from pathlib import Path\n{imported}"),
+        nbformat.v4.new_markdown_cell("Plots"),
+        _code("kept = 1", active="ipynb,py"),
+        _code("analysis = 1"),
+    ]
+    path = _write_notebook(tmp_path, cells)
+    _magic_env(monkeypatch, path)
+
+    shell.run_cell_magic("monte_carlo", "", _body({"first": first, "last": last}[run]))
+
+    actives = [each.metadata.get("active") for each in nbformat.read(path, as_version=4).cells]
+    assert actives == [None, None, None, None, "ipynb", None, "ipynb,py", "ipynb"]
+    assert (tmp_path / run).read_text() == "ran"
+    assert not (tmp_path / "imported").exists()
+
+
+def test_a_notebook_with_nothing_to_mark_is_not_rewritten(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """With every cell after the campaign already marked, the saved `.ipynb` is left untouched.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    cell = _magic(_marker_test("test_here", tmp_path / "ran"))
+    path = _write_notebook(tmp_path, [_code(LOAD), cell, _code("analysis = 1", active="ipynb")])
+    _sync(path)
+    _sync(path)  # jupytext's second sync rewrites both files; the third leaves them alone
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    _magic_env(monkeypatch, path)
+
+    shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert (tmp_path / "ran").read_text() == "ran"
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
 def test_a_cell_defining_no_test_is_refused(
     shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

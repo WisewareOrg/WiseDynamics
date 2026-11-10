@@ -50,6 +50,9 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
     def monte_carlo(line: str, cell: str) -> None:
         """Sync the notebook's pair, run the cell, then run its top-level tests with `-n auto`.
 
+        Before running, an `.ipynb`'s code cells after its last `%%monte_carlo` cell are marked
+        notebook-only and the pair re-synced, so the workers importing the `.py` skip them.
+
         Args:
             line: The rest of the magic line, optionally the notebook's path.
             cell: The cell's source after the magic line.
@@ -60,12 +63,12 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         """
         notebook = _notebook_path(line)
         py = _notebook_py(notebook)
-        if py != notebook and jupytext.cli.jupytext(["--sync", "--quiet", str(notebook)]):
-            raise RuntimeError(f"jupytext could not sync {notebook}")
+        if py != notebook:
+            _sync(notebook)
         saved = {
             "\n".join(map(str.rstrip, each.source.partition("\n")[2].splitlines())).strip("\n")
             for each in jupytext.read(notebook).cells
-            if each.cell_type == "code" and each.source.startswith("%%monte_carlo")
+            if _is_campaign(each)
         }
         if "\n".join(map(str.rstrip, cell.splitlines())).strip("\n") not in saved:
             raise RuntimeError(
@@ -82,6 +85,8 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         ]
         if not tests:
             raise RuntimeError("This cell defines no test.")
+        if notebook.suffix == ".ipynb":
+            _mark_notebook_only(notebook)
         ipython.run_cell(cell).raise_error()
         ci = ["--ci"] if os.environ.get("CI") else []
         progress = _Progress()
@@ -275,6 +280,55 @@ def _notebook_path(line: str) -> Path:
             "`%%monte_carlo path/to/notebook.ipynb`."
         )
     return Path(found)
+
+
+def _sync(notebook: Path) -> None:
+    """Sync a notebook with its pair through jupytext's CLI, the newer file's inputs winning.
+
+    Args:
+        notebook: The paired notebook.
+
+    Raises:
+        RuntimeError: jupytext could not sync it.
+    """
+    if jupytext.cli.jupytext(["--sync", "--quiet", str(notebook)]):
+        raise RuntimeError(f"jupytext could not sync {notebook}")
+
+
+def _is_campaign(cell: Any) -> bool:
+    """Tell whether a notebook cell is a `%%monte_carlo` cell.
+
+    Args:
+        cell: A cell of a notebook jupytext read.
+
+    Returns:
+        Whether it is a code cell whose first line is the magic.
+    """
+    return cell.cell_type == "code" and cell.source.startswith("%%monte_carlo")
+
+
+def _mark_notebook_only(notebook: Path) -> None:
+    """Mark each code cell after the last `%%monte_carlo` cell `active="ipynb"`, then re-sync.
+
+    A cell that already has `active` metadata keeps it, and a notebook with no cell to mark is not
+    rewritten.
+
+    Args:
+        notebook: The saved, synced `.ipynb`, holding at least one `%%monte_carlo` cell.
+    """
+    saved = jupytext.read(notebook)
+    last = max(i for i, each in enumerate(saved.cells) if _is_campaign(each))
+    unmarked = [
+        each
+        for each in saved.cells[last + 1 :]
+        if each.cell_type == "code" and "active" not in each.metadata
+    ]
+    if not unmarked:
+        return
+    for each in unmarked:
+        each.metadata["active"] = "ipynb"
+    jupytext.write(saved, notebook)
+    _sync(notebook)
 
 
 def _notebook_py(notebook: Path) -> Path:

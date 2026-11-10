@@ -155,8 +155,11 @@ test fails, so Run All stops before the plot cells. The notebook's path comes fr
 else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
 
 Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
-may be the `.ipynb` or the paired `.py` opened as a notebook. Analysis and plot cells must be
-notebook-only (`active="ipynb"` in the `.py`), or every worker runs them when it imports the `.py`.
+may be the `.ipynb` or the paired `.py` opened as a notebook. Every worker imports the `.py`, so
+analysis and plot cells must be notebook-only (`active="ipynb"`). In an `.ipynb` the magic marks
+each code cell after the last `%%monte_carlo` cell that has no `active` metadata, saves the
+notebook and re-syncs before running. Mark a cell above the last `%%monte_carlo` cell, such as the
+plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yourself.
 
 `load_runs(test, notebook=None)` reads the newest session's run files of a test back, finished or
 not, and prints `<stamp>: <found> of <planned> cases`. It returns one record per case, sorted by
