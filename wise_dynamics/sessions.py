@@ -11,7 +11,13 @@ from typing import Any, NamedTuple
 
 import pytest
 
-__all__ = ["TestResults", "read_test_results", "session_directory"]
+__all__ = [
+    "TestFolder",
+    "TestResults",
+    "read_test_results",
+    "session_directory",
+    "test_directories",
+]
 
 POINTER = "SESSION"
 PLANNED = "planned.json"
@@ -21,6 +27,21 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 class NoSessionError(pytest.UsageError):
     """No Monte Carlo session is active."""
+
+
+class TestFolder(NamedTuple):
+    """A test's results folder in a session.
+
+    Attributes:
+        directory: The test's directory, `<session>/<file>/<class>/<function>`.
+        nodeid: The test's node path relative to the rootdir, `<file>.py::<Class>::<function>`,
+            without parameters.
+    """
+
+    __test__ = False
+
+    directory: Path
+    nodeid: str
 
 
 class TestResults(NamedTuple):
@@ -149,6 +170,35 @@ def crash_path(directory: Path, case: int) -> Path:
         The case's crash record path.
     """
     return directory / f"run_{case:04d}.crash.json"
+
+
+def write_planned(directory: Path, runs: int, nodeid: str) -> None:
+    """Record a test's planned case count and node path, creating its directory if needed.
+
+    Args:
+        directory: The test's directory in a session.
+        runs: The test's case count after the `--ci` cap.
+        nodeid: The test's node path relative to the rootdir, without parameters.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / PLANNED).write_text(json.dumps({"runs": runs, "nodeid": nodeid}))
+
+
+def test_directories(session: Path) -> list[TestFolder]:
+    """List the test folders of a session that hold results.
+
+    Args:
+        session: A session's directory.
+
+    Returns:
+        Each folder under `session` whose record names its test, sorted by directory.
+    """
+    found = []
+    for record in session.rglob(PLANNED):
+        nodeid = json.loads(record.read_text()).get("nodeid")
+        if nodeid is not None:
+            found.append(TestFolder(record.parent, nodeid))
+    return sorted(found)
 
 
 def read_test_results(directory: Path) -> TestResults:

@@ -226,7 +226,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
-    """Write each collected test's planned case count into the session's folder.
+    """Write each collected test's planned case count and node path into the session's folder.
 
     The count is the test's `sim_runs` after the `--ci` cap, not the number of cases selected.
 
@@ -239,14 +239,13 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     """
     if session.config.option.collectonly:
         return
-    planned: dict[Path, int] = {}
+    planned: dict[Path, tuple[int, str]] = {}
     for item in session.items:
         if "sim_case_index" in item.fixturenames and _case_of(item) is not None:
             settings = _settings(item)
-            planned[settings.directory] = settings.runs
-    for directory, runs in planned.items():
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / sessions.PLANNED).write_text(json.dumps({"runs": runs}))
+            planned[settings.directory] = (settings.runs, item.nodeid.partition("[")[0])
+    for directory, (runs, nodeid) in planned.items():
+        sessions.write_planned(directory, runs, nodeid)
 
 
 @pytest.hookimpl(tryfirst=True)
