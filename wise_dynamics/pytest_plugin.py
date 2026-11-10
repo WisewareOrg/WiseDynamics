@@ -220,6 +220,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count into the session's folder.
 
+    The count is the test's `sim_runs` after the `--ci` cap, not the number of cases selected.
+
     A `--collect-only` session writes nothing, and neither does a pytest-xdist controller, which
     collects nothing; each worker writes the same content. A test with no active session has no
     folder to write to.
@@ -232,11 +234,65 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     planned: dict[Path, int] = {}
     for item in session.items:
         if "sim_case_index" in item.fixturenames and not _is_no_session(item):
-            directory = _settings(item).directory
-            planned[directory] = planned.get(directory, 0) + 1
+            settings = _settings(item)
+            planned[settings.directory] = settings.runs
     for directory, runs in planned.items():
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "planned.json").write_text(json.dumps({"runs": runs}))
+        (directory / sessions.PLANNED).write_text(json.dumps({"runs": runs}))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Delete a Monte Carlo case's earlier run file and crash record before it runs.
+
+    Args:
+        item: The test item about to be set up.
+    """
+    case = _case_of(item)
+    if case is not None:
+        directory = _run_dir(item)
+        sessions.run_path(directory, case).unlink(missing_ok=True)
+        sessions.crash_path(directory, case).unlink(missing_ok=True)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
+    """Record a crash for a Monte Carlo case that failed in setup or call without a run file.
+
+    Args:
+        item: The test item that ran.
+        call: The setup, call or teardown phase that finished.
+
+    Returns:
+        The phase's report, unchanged.
+    """
+    report = yield
+    case = _case_of(item)
+    if case is not None and report.when in ("setup", "call") and report.failed:
+        directory = _run_dir(item)
+        if not sessions.run_path(directory, case).is_file():
+            _write_crash(directory, case, call.excinfo.exconly(), str(report.longrepr))
+    return report
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched: Any) -> None:
+    """Record a crash for the Monte Carlo case a pytest-xdist worker died in.
+
+    Args:
+        crashitem: The node id of the test the worker was running.
+        report: The failure report pytest-xdist made for it.
+        sched: The pytest-xdist scheduler, which holds the configuration.
+    """
+    located = _locate(crashitem)
+    if located is not None:
+        directory, case = located
+        _write_crash(
+            _active_session(sched.config) / directory,
+            case,
+            str(report.longrepr),
+            str(report.longrepr),
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
@@ -261,7 +317,7 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     if hasattr(config, "workerinput"):
         return
     for directory in sorted(config.stash[_WRITTEN_DIRS]):
-        count = len(list(directory.glob("run_*.h5")))
+        count = len(list(directory.glob(sessions.RUN_GLOB)))
         terminalreporter.write_line(f"wise-dynamics: {_run_files(count)} in {directory}")
 
 
@@ -357,7 +413,7 @@ def sim_run_file(
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
     directory = _settings(request.node).directory
-    path = directory / f"run_{sim_case_index:04d}.h5"
+    path = sessions.run_path(directory, sim_case_index)
     config = request.config
 
     def write(
@@ -461,6 +517,57 @@ def _active_session(config: pytest.Config) -> Path:
                 raise pytest.UsageError(handed["error"])
             config.stash[_SESSION] = Path(handed["directory"])
     return config.stash[_SESSION]
+
+
+def _case_of(item: pytest.Item) -> int | None:
+    """Find the case number of a Monte Carlo item that has a session.
+
+    Args:
+        item: Any collected test item.
+
+    Returns:
+        The case number, or None for an item with no `sim_case_index` or no active session.
+    """
+    callspec = getattr(item, "callspec", None)
+    case = callspec.params.get("sim_case_index") if callspec else None
+    return case if isinstance(case, int) else None
+
+
+def _locate(nodeid: str) -> tuple[Path, int] | None:
+    """Find where a Monte Carlo case lives from its node id, without collecting anything.
+
+    Args:
+        nodeid: A test's node id, such as `tests/test_x.py::TestA::test_f[3]`.
+
+    Returns:
+        The test's directory relative to the session, as `_test_directory` builds it, and the case
+        number; None when the node id does not end in a case number.
+    """
+    file, _, rest = nodeid.partition("::")
+    *names, last = rest.split("::")
+    function, _, parameter = last.partition("[")
+    case = parameter.removesuffix("]")
+    if not case.isdigit():
+        return None
+    file_part = Path(file).with_suffix("")
+    if ".." in file_part.parts:
+        file_part = Path(file_part.name)
+    return file_part / Path(*names) / function, int(case)
+
+
+def _write_crash(directory: Path, case: int, exception: str, traceback: str) -> None:
+    """Write a case's crash record.
+
+    Args:
+        directory: The test's directory in the session.
+        case: The case number.
+        exception: The exception, as one line.
+        traceback: The failure's full report.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    sessions.crash_path(directory, case).write_text(
+        json.dumps({"exception": exception, "traceback": traceback})
+    )
 
 
 def _is_no_session(item: pytest.Function) -> bool:
