@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 basilisk-src/
 .cache/
+monte_carlo/

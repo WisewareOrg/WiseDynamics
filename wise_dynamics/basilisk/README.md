@@ -12,6 +12,7 @@ raises.
 | module | holds |
 |---|---|
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's marks, `--ci` and `sim_*` fixtures |
+| `wise_dynamics/notebook.py` | the `%%monte_carlo` notebook magic and `load_runs` (the `notebook` extra) |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
@@ -84,31 +85,37 @@ bad one fails collection of the test, naming its node id and the mark.
 | mark | argument | default |
 |---|---|---|
 | `sim_runs(n)` | cases in the campaign, an integer of at least 1 | 8 |
-| `sim_out(path)` | where run files go, relative to the rootdir | a new directory under the system temporary directory for each session |
+| `sim_out(path)` | where run files go, relative to the rootdir | the `sim_out` ini setting, default `monte_carlo` |
 | `sim_duration_s(seconds)` | simulated seconds per case, positive | 5700 |
 | `sim_scenario(name)` | the scenario's name in `SCENARIOS` | `leo500` |
 | `sim_fidelity(level)` | `hi`, `med` or `lo`, as the Scenarios section defines them | `lo` |
 
 `--ci` is the plugin's only option: it caps every test's case count at 2, and a test marked for
-fewer runs its own.
+fewer runs its own. The `sim_out` ini setting, a path relative to the rootdir or an absolute one and
+not empty, is the root of every test without a `sim_out` mark.
 
 | fixture | gives |
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | the test's `sim_duration_s` |
 | `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics` and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the session's stamp folder under the test's directory through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
 is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
 
-A test's run files are in `<root>/<test file>/<class>/<function>/`: the root is the test's
-`sim_out`, the test file is its path relative to the rootdir without `.py`, and each enclosing
-class, outermost first, is a directory. An explicit `sim_out` is overwritten case by case:
-each case replaces its own file, and a session that runs cases removes the files beyond the run
-count, so under `--ci` only the cases it runs remain; `--collect-only` removes nothing. The
-terminal summary names each directory that received run files.
+A test's run files are in `<root>/<test file>/<class>/<function>/<stamp>/`: the root is the test's
+`sim_out`, the test file is its path relative to the rootdir without `.py`, each enclosing class,
+outermost first, is a directory, and the stamp is the session's UTC start and four random hex
+digits, such as `20261109T075300Z-3fa9`. Every session that runs cases writes its own stamp folder
+and nothing is overwritten or removed; a `--ci` session's root is `<root>/ci/`. Before the first
+case runs, each worker writes `planned.json`, `{"runs": N}` for the cases the session runs, into
+the stamp folder, so a session interrupted partway leaves loadable run files and a count to compare
+with. `--collect-only` writes nothing. The terminal summary names each directory that received run
+files. An install that is neither a git
+pin (`uv sync` against a git dependency) nor an editable local checkout
+(`uv pip install -e <checkout>`) stops every session before collection.
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
@@ -136,3 +143,28 @@ def test_case(sim_scenario, sim_duration_s, sim_run_file):
     datasets = sim_scenario.run(guidance, fsw_fields, duration_s=sim_duration_s)
     sim_run_file(datasets, {"versions_guidance": "1.0"})
 ```
+
+## Notebooks
+
+A jupytext-paired notebook (`jupytext --set-formats ipynb,py:percent <notebook>`) runs a campaign
+from a cell. Install the `notebook` extra, `wise-dynamics[notebook]`, and load the extension with
+`%load_ext wise_dynamics.notebook`. `%%monte_carlo [notebook path]` as a cell's first line syncs the
+paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest
+with `-n auto` (plus `--ci` when the `CI` environment variable is set); the cell then raises if any
+test fails, so Run All stops before the plot cells. The notebook's path comes from the argument,
+else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
+
+Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
+may be the `.ipynb` or the paired `.py` opened as a notebook. Every worker imports the `.py`, so
+analysis and plot cells must be notebook-only (`active="ipynb"`). In an `.ipynb` the magic marks
+each code cell after the last `%%monte_carlo` cell that has no `active` metadata, saves the
+notebook and re-syncs before running. Mark a cell above the last `%%monte_carlo` cell, such as the
+plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yourself.
+
+`load_runs(test, notebook=None)` reads the newest session's run files of a test back, finished or
+not, and prints `<stamp>: <found> of <planned> cases`. It returns one record per case, sorted by
+case: `attrs` holds the root attributes and `datasets` maps each dataset path to
+`(values, units)`.
+`test` is the test function or method, or its node path such as `"TestA::test_x"`. With `CI` set it
+adds `--ci`, so it reads `<root>/ci/`, where the magic's runs write. It works from a
+restarted kernel and raises `FileNotFoundError` naming the folder when it holds no session folder.

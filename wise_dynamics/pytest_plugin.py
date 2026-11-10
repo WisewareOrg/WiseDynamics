@@ -5,16 +5,18 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 `wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
 """
 
+import json
 import numbers
 import os
-import re
 import secrets
-import tempfile
+import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from importlib.metadata import version
+from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import numpy as np
 import pytest
@@ -24,11 +26,18 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-_WORKER_OUT_DIR = "wise_dynamics_out_dir"
 _WORKER_DIRS = "wise_dynamics_dirs"
-_OUT_DIR = pytest.StashKey[Path]()
+_WORKER_STAMP = "wise_dynamics_stamp"
+_DEFAULT_ROOT = pytest.StashKey[Path]()
+_STAMP = pytest.StashKey[str]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
+_PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
+_INSTALL_HINT = (
+    "Install a pinned release with `uv sync` against a git dependency, or a local checkout with\n"
+    "`uv pip install -e <checkout>`."
+)
+_DEFAULT_OUT = "monte_carlo"
 _CI_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
 _DEFAULT_RUNS = 8
@@ -56,8 +65,8 @@ _MARKS = (
     (
         "sim_out",
         "path",
-        "directory the run files are written under, relative to the rootdir; default a new "
-        "directory under the system temporary directory",
+        "directory the run files are written under, relative to the rootdir; default the "
+        "`sim_out` ini setting",
     ),
 )
 
@@ -93,36 +102,54 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help=f"cap every test's case count at {_CI_RUNS}",
     )
+    parser.addini(
+        "sim_out",
+        type="string",
+        default=_DEFAULT_OUT,
+        help="directory the run files of a test without a `sim_out` mark are written under, "
+        f"relative to the rootdir; default {_DEFAULT_OUT}",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the `sim_` marks and resolve the session's default output directory.
+    """Register the `sim_` marks and resolve the session's default run directory.
 
-    The controlling process resolves one absolute default directory, which every pytest-xdist
-    worker receives; the first run file written creates it.
+    The default directory is the `sim_out` ini setting, joined to the rootdir when relative. The
+    controlling process, or the only one, picks the session's stamp, a UTC time and four random
+    hex digits that name the session's folder under each test's directory; every pytest-xdist
+    worker receives it. The first file written creates the folder.
 
     Args:
         config: The session's pytest configuration, which holds the stash.
+
+    Raises:
+        pytest.UsageError: The `sim_out` ini setting is empty, or the `wise-dynamics` install is
+            neither a git pin nor an editable local checkout.
     """
     for name, argument, description in _MARKS:
         config.addinivalue_line("markers", f"{name}({argument}): {description}")
+    out = config.getini("sim_out")
+    if not out:
+        raise pytest.UsageError("the sim_out ini setting must not be empty")
+    config.stash[_DEFAULT_ROOT] = config.rootpath / out
     workerinput = getattr(config, "workerinput", None)
-    if workerinput is not None:
-        out_dir = Path(workerinput[_WORKER_OUT_DIR])
-    else:
-        out_dir = Path(tempfile.gettempdir()) / f"wise_dynamics_{secrets.token_hex(8)}"
-    config.stash[_OUT_DIR] = out_dir
+    config.stash[_STAMP] = (
+        workerinput[_WORKER_STAMP]
+        if workerinput is not None
+        else f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
+    )
     config.stash[_WRITTEN_DIRS] = set()
+    config.stash[_PROVENANCE] = _provenance()
 
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
-    """Hand a starting pytest-xdist worker the controller's default output directory.
+    """Hand a starting pytest-xdist worker the session's stamp.
 
     Args:
         node: The pytest-xdist worker node being configured.
     """
-    node.workerinput[_WORKER_OUT_DIR] = str(node.config.stash[_OUT_DIR])
+    node.workerinput[_WORKER_STAMP] = node.config.stash[_STAMP]
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -142,9 +169,6 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over its case numbers.
 
-    A session that runs a test with a `sim_out` mark deletes the run files its directory holds
-    beyond the test's case count; a `--collect-only` session deletes nothing.
-
     Args:
         metafunc: The test function being collected.
     """
@@ -155,12 +179,28 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
-    if node.get_closest_marker("sim_out") is not None and not metafunc.config.option.collectonly:
-        for path in settings.directory.glob("run_*.h5"):
-            match = re.fullmatch(r"run_(\d+)\.h5", path.name)
-            if match and int(match[1]) >= settings.runs:
-                path.unlink(missing_ok=True)
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Write each collected test's planned case count into the session's folder.
+
+    A `--collect-only` session writes nothing, and neither does a pytest-xdist controller, which
+    collects nothing; each worker writes the same content.
+
+    Args:
+        session: The finished collection session.
+    """
+    if session.config.option.collectonly:
+        return
+    planned: dict[Path, int] = {}
+    for item in session.items:
+        if "sim_case_index" in item.fixturenames:
+            directory = _settings(item).directory
+            planned[directory] = planned.get(directory, 0) + 1
+    for directory, runs in planned.items():
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "planned.json").write_text(json.dumps({"runs": runs}))
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
@@ -247,12 +287,13 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, `<test directory>/run_<NNNN>.h5`.
+    """A writer of this case's run file, `<session folder>/run_<NNNN>.h5`.
 
-    The file is written through `sim_scenario.vehicle`, in the test's directory, laid out as the
-    basilisk README describes. The file's root attributes are `case`, `seed`, `fidelity`,
-    `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics` and
-    one `draw_<name>` per value the scenario drew.
+    The file is written through `sim_scenario.vehicle`, in the session's folder under the test's
+    directory, laid out as the basilisk README describes. The file's root attributes are `case`,
+    `seed`, `fidelity`, `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`,
+    `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_*`, see the basilisk
+    README) and one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -270,6 +311,10 @@ def sim_run_file(
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
+        **{
+            f"versions_wise_dynamics_{name}": value
+            for name, value in request.config.stash[_PROVENANCE].items()
+        },
     }
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
@@ -296,8 +341,6 @@ def sim_run_file(
         replaced = sorted(set(own) & set(extras))
         if replaced:
             raise ValueError(f"attrs may not replace the run file's own attrs {replaced}")
-        if request.node.get_closest_marker("sim_out") is not None:
-            path.unlink(missing_ok=True)
         sim_scenario.vehicle.write_run_file(path, datasets, {**own, **extras})
         config.stash[_WRITTEN_DIRS].add(directory)
         return path
@@ -338,19 +381,36 @@ def _settings(node: pytest.Function) -> _Settings:
         or not duration_s > 0
     ):
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
-    config = node.config
+    if node.config.getoption("ci"):
+        runs = min(runs, _CI_RUNS)
+    directory = _run_dir(node) / node.config.stash[_STAMP]
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
+
+
+def _run_dir(node: pytest.Function) -> Path:
+    """Build a test's run directory without resolving its scenario.
+
+    Args:
+        node: The test function, or one of its parametrized items.
+
+    Returns:
+        `_test_directory` under the test's `sim_out` mark, resolved against the rootdir, else
+        under the session's default root; under `--ci`, under that root's `ci` directory.
+
+    Raises:
+        ValueError: A mark is malformed; the message starts with the mark's name.
+    """
+    values = _marked_values(node)
     if "sim_out" in values:
         out = values["sim_out"]
         if not isinstance(out, str | os.PathLike):
             raise ValueError(f"sim_out: expected a path, got {out!r}")
         if not os.fspath(out):
             raise ValueError("sim_out: expected a non-empty path")
-        root = config.rootpath / out
+        root = node.config.rootpath / out
     else:
-        root = config.stash[_OUT_DIR]
-    if config.getoption("ci"):
-        runs = min(runs, _CI_RUNS)
-    return _Settings(scenario, int(runs), fidelity, float(duration_s), _test_directory(node, root))
+        root = node.config.stash[_DEFAULT_ROOT]
+    return _test_directory(node, root / "ci" if node.config.getoption("ci") else root)
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:
@@ -394,6 +454,54 @@ def _test_directory(node: pytest.Function, root: Path) -> Path:
         file_part = Path(node.path.stem)
     classes = [item.name for item in node.listchain() if isinstance(item, pytest.Class)]
     return root / file_part / Path(*classes) / node.originalname
+
+
+def _provenance() -> dict[str, str | bool]:
+    """Describe how `wise-dynamics` was installed, from its PEP 610 `direct_url.json`.
+
+    Returns:
+        `install` (`pinned` or `local`), `commit`, `requested_revision` (empty for a local
+        install) and `dirty` (always False for a pinned install).
+
+    Raises:
+        pytest.UsageError: The install is neither a git pin nor an editable local checkout, or
+            `git` cannot describe the checkout.
+    """
+    text = distribution("wise-dynamics").read_text("direct_url.json")
+    found = json.loads(text) if text else None
+    info = found or {}
+    vcs_info = info.get("vcs_info", {})
+    if vcs_info.get("vcs") == "git" and "commit_id" in vcs_info:
+        return {
+            "install": "pinned",
+            "commit": vcs_info["commit_id"],
+            "requested_revision": vcs_info.get("requested_revision", ""),
+            "dirty": False,
+        }
+    url = info.get("url", "")
+    if not (info.get("dir_info", {}).get("editable") and url.startswith("file://")):
+        raise pytest.UsageError(
+            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
+            f"{_INSTALL_HINT}"
+        )
+    git = ["git", "-C", url2pathname(urlparse(url).path)]
+    try:
+        commit = subprocess.run(
+            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        )
+        status = subprocess.run(
+            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise pytest.UsageError(
+            f"git could not describe the editable checkout {git[2]}: {error}\n{_INSTALL_HINT}"
+        ) from None
+    return {
+        "install": "local",
+        "commit": commit.stdout.strip(),
+        "requested_revision": "",
+        "dirty": bool(status.stdout.strip()),
+    }
 
 
 def _run_files(count: int) -> str:
