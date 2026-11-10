@@ -592,7 +592,7 @@ def test_a_class_and_a_nested_class_qualify_the_directory(pytester: pytest.Pytes
     pytester.runpytest_subprocess().assert_outcomes(passed=2)
 
     base = out_dir / "tests" / "sim" / "test_nested"
-    found = sorted(path.relative_to(out_dir).parent.parent for path in out_dir.rglob("run_*.h5"))
+    found = sorted(path.relative_to(out_dir).parent for path in out_dir.rglob("run_*.h5"))
     assert found == [
         base.relative_to(out_dir) / "TestOuter" / "TestInner" / "test_inner",
         base.relative_to(out_dir) / "TestOuter" / "test_outer",
