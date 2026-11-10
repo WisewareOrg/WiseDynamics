@@ -367,23 +367,34 @@ def test_a_worker_that_dies_in_a_fixture_replaces_the_cases_earlier_run_file(
     assert not (directory / "run_0001.h5").exists()
 
 
-def test_test_directories_lists_each_folder_holding_results_sorted(tmp_path: Path):
-    """Exactly the folders holding a test's results are listed, in sorted order.
+def test_test_directories_lists_each_tests_folder_with_its_recorded_node_path(
+    pytester: pytest.Pytester,
+):
+    """A session the plugin wrote lists exactly its tests' folders with the node paths recorded.
 
-    One test is a plain function, one a method of a class; a sibling folder holds nothing.
+    One test is a plain function in a subdirectory, one a method of a class; a folder without
+    results beside them is not listed.
 
     Args:
-        tmp_path: The test's own temporary directory, holding a hand-built session.
+        pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    plain = tmp_path / "test_b" / "test_plain"
-    method = tmp_path / "test_a" / "TestA" / "test_method"
-    for directory in (plain, method):
-        directory.mkdir(parents=True)
-        (directory / "planned.json").write_text(json.dumps({"runs": 1}))
-        (directory / "run_0000.h5").write_bytes(b"")
-    (tmp_path / "test_a" / "empty").mkdir()
+    session = _point(pytester, SESSION + "\n")
+    (pytester.path / "tests").mkdir()
+    (pytester.path / "tests" / "test_b.py").write_text(CASE_TEST.replace("RUNS", "1"))
+    method = CASE_TEST.replace("RUNS", "1").replace("def test_case(", "def test_case(self, ")
+    head, body = method.split("@pytest.mark.sim_runs", 1)
+    (pytester.path / "test_a.py").write_text(
+        head + "class TestA:\n" + textwrap.indent("@pytest.mark.sim_runs" + body, "    ")
+    )
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+    (session / "test_a" / "stray").mkdir()
 
-    assert _sessions().test_directories(tmp_path) == [method, plain]
+    folders = _sessions().test_directories(session)
+
+    assert [(folder.directory, folder.nodeid) for folder in folders] == [
+        (session / "test_a" / "TestA" / "test_case", "test_a.py::TestA::test_case"),
+        (session / "tests" / "test_b" / "test_case", "tests/test_b.py::test_case"),
+    ]
 
 
 PLAIN_ABORT = """

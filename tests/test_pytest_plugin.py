@@ -402,7 +402,10 @@ def test_ci_writes_under_the_session_and_plans_the_capped_count(pytester: pytest
 
     directory = pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case"
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
-    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    assert json.loads((directory / "planned.json").read_text()) == {
+        "runs": 2,
+        "nodeid": "test_scenario.py::test_case",
+    }
     assert not (pytester.path / "monte_carlo" / "ci").exists()
 
 
@@ -845,7 +848,10 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     )
     directory = session / "test_scenario" / "test_case"
     assert sorted(path.name for path in directory.iterdir()) == ["planned.json", "run_0000.h5"]
-    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    assert json.loads((directory / "planned.json").read_text()) == {
+        "runs": 2,
+        "nodeid": "test_scenario.py::test_case",
+    }
     before = (directory / "run_0000.h5").stat().st_mtime_ns
 
     pytester.runpytest_subprocess(*SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
@@ -857,7 +863,10 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
         "run_0000.h5",
         "run_0001.h5",
     ]
-    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    assert json.loads((directory / "planned.json").read_text()) == {
+        "runs": 2,
+        "nodeid": "test_scenario.py::test_case",
+    }
     assert (directory / "run_0000.h5").stat().st_mtime_ns == before
     assert [path.name for path in session.iterdir()] == ["test_scenario"]
 
