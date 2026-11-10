@@ -718,6 +718,20 @@ def test_load_runs_with_no_active_session_names_how_to_pick_one(sim_notebook: Pa
         wd_notebook.load_runs("TestA::test_x", sim_notebook)
 
 
+def test_load_runs_with_an_invalid_name_in_the_pointer_raises_that_error(sim_notebook: Path):
+    """A corrupt pointer is reported as such, not as "no session is active".
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+    """
+    _activate(sim_notebook.parent, "..")
+
+    with pytest.raises(RuntimeError, match="invalid Monte Carlo session name") as raised:
+        wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+    assert NO_SESSION not in str(raised.value)
+
+
 def test_load_runs_turns_a_methods_qualified_name_into_its_node_path(sim_notebook: Path):
     """A method object is looked up as `Class::method`, so a class the `.py` lacks is named so.
 

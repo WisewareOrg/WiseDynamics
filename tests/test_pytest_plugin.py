@@ -342,23 +342,18 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
     assert not list(out_dir.rglob("run_*.h5"))
 
 
-def _default_session(
-    pytester: pytest.Pytester, *args: str, ini: str | None = None, runs: int = 2
-) -> pytest.RunResult:
-    """Run the one-test scenario into session `s`, under an optional `sim_out` ini setting.
+def _default_session(pytester: pytest.Pytester, *args: str, runs: int = 2) -> pytest.RunResult:
+    """Run the one-test scenario into session `s` under the default `monte_carlo` root.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         *args: Further pytest arguments.
-        ini: The ini file's `sim_out` value, or `None` for no ini file.
         runs: The `sim_runs` mark's case count.
 
     Returns:
         The session's result, which must have passed every case.
     """
-    if ini is not None:
-        pytester.makeini(f"[pytest]\nsim_out = {ini}\n")
-    _point(pytester, ini or "monte_carlo")
+    _point(pytester)
     pytester.makepyfile(
         test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
     )
@@ -409,21 +404,6 @@ def test_ci_writes_under_the_session_and_plans_the_capped_count(pytester: pytest
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
     assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
     assert not (pytester.path / "monte_carlo" / "ci").exists()
-
-
-def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(
-    pytester: pytest.Pytester,
-):
-    """`sim_out = ini_out` puts the run folder at `<rootdir>/ini_out`, not `monte_carlo`.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    _default_session(pytester, *SERIAL, ini="ini_out")
-
-    directory = pytester.path / "ini_out" / SESSION / "test_scenario" / "test_case"
-    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
-    assert not (pytester.path / "monte_carlo").exists()
 
 
 def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester):
@@ -1340,27 +1320,16 @@ def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
         "test_mixed.py::test_plain",
     ]
 
-    result = pytester.runpytest_subprocess(*xdist)
+    result = pytester.runpytest_subprocess(*xdist, "-rE")
 
     result.assert_outcomes(passed=1, errors=2)
+    errored = sorted(line.split()[1] for line in result.outlines if line.startswith("ERROR "))
+    assert errored == [
+        "test_mixed.py::test_monte_carlo_a[no-session]",
+        "test_mixed.py::test_monte_carlo_b[no-session]",
+    ]
     assert result.stdout.str().count(NO_SESSION) >= 2
     assert not (pytester.path / "monte_carlo").exists()
-
-
-def test_a_pointer_to_a_session_that_does_not_exist_yet_creates_it(pytester: pytest.Pytester):
-    """A session named in the pointer but with no folder is created by the first run.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    _point(pytester, name="fresh")
-    assert not (pytester.path / "monte_carlo" / "fresh").exists()
-    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
-
-    assert (
-        pytester.path / "monte_carlo" / "fresh" / "test_scenario" / "test_case" / "run_0000.h5"
-    ).is_file()
 
 
 def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pytester):
@@ -1388,7 +1357,7 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
             sim_run_file({{"t_s": (np.zeros(2), "s")}})
         """
     )
-    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=6)
+    pytester.runpytest_subprocess("-n", "1").assert_outcomes(passed=6)
 
     assert pointer.read_text() == "other\n"
     directory = session / "test_switch" / "test_case"

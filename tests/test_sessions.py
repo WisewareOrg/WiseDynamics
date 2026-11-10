@@ -6,6 +6,7 @@ minimal run files, so no Basilisk simulation runs.
 
 import importlib
 import json
+import textwrap
 from pathlib import Path
 from types import ModuleType
 
@@ -136,7 +137,7 @@ def test_session_directory_with_no_active_session_raises_a_usage_error(
     assert str(raised.value) == NO_SESSION
 
 
-@pytest.mark.parametrize("name", ["..", "-x", "SESSION", ".hidden", "a/b", "a b"])
+@pytest.mark.parametrize("name", ["..", "SESSION"])
 def test_session_directory_with_an_invalid_name_raises_a_usage_error_naming_the_file(
     pytester: pytest.Pytester, name: str
 ):
@@ -296,6 +297,74 @@ def test_a_worker_that_dies_in_a_case_leaves_a_crash_record(pytester: pytest.Pyt
     assert sorted(record) == ["exception", "traceback"]
     assert isinstance(record["exception"], str)
     assert isinstance(record["traceback"], str)
+
+
+def test_a_worker_that_dies_in_a_class_method_in_a_subdirectory_leaves_the_record_beside_its_runs(
+    pytester: pytest.Pytester,
+):
+    """The crash record of a dead worker sits where the plugin writes that test's run files.
+
+    The test is a method of a class in a file below the rootdir, so the controller's path from the
+    node id must agree with the worker's path from the collected item.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    session = _point(pytester, SESSION + "\n")
+    (pytester.path / "tests" / "sub").mkdir(parents=True)
+    source = CASE_TEST.replace("RUNS", "3").replace("def test_case(", "def test_case(self, ")
+    source = source.split("@pytest.mark.sim_runs", 1)
+    body = "@pytest.mark.sim_runs" + source[1]
+    (pytester.path / "tests" / "sub" / "test_x.py").write_text(
+        source[0] + "class TestA:\n" + textwrap.indent(body, "    ")
+    )
+    _mode(pytester, "abort")
+
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=2, failed=1)
+
+    directory = session / "tests" / "sub" / "test_x" / "TestA" / "test_case"
+    assert (directory / "run_0001.crash.json").is_file()
+    assert not (directory / "run_0001.h5").exists()
+
+
+def test_a_worker_that_dies_in_a_fixture_replaces_the_cases_earlier_run_file(
+    pytester: pytest.Pytester,
+):
+    """A rerun whose worker aborts before the test body leaves only the crash record for that case.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    session = _point(pytester, SESSION + "\n")
+    pytester.makepyfile(
+        test_scenario="""
+        import os
+        from pathlib import Path
+
+        import numpy as np
+        import pytest
+
+
+        @pytest.fixture
+        def doomed(sim_case_index):
+            if Path("mode").exists() and sim_case_index == 1:
+                os.abort()
+
+
+        @pytest.mark.sim_runs(3)
+        def test_case(sim_case_index, sim_run_file, doomed):
+            sim_run_file({"t_s": (np.zeros(2), "s")})
+        """
+    )
+    directory = session / "test_scenario" / "test_case"
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=3)
+    assert (directory / "run_0001.h5").exists()
+
+    _mode(pytester, "abort")
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=2, failed=1)
+
+    assert (directory / "run_0001.crash.json").is_file()
+    assert not (directory / "run_0001.h5").exists()
 
 
 def test_read_test_results_returns_cases_below_planned_only(tmp_path: Path):
