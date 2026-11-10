@@ -34,9 +34,8 @@ pytest --sim-session first
 pytest tests/sim -n 8
 ```
 
-A session is a named working set of run files, and `pytest --sim-session <name>` picks the active
-one; `just session [name]` does the same from this repository, and a consumer adds the same
-one-line recipe. A Monte Carlo test with no active session refuses and names that option.
+Run files are kept in named sessions, which the basilisk README documents; a consumer adds the
+one-line `just session [name]` recipe that this repository's `justfile` has.
 
 The `notebook` extra adds a `%%monte_carlo` magic and `load_runs`; see the basilisk README.
 

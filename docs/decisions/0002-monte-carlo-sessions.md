@@ -26,8 +26,7 @@ agrees on where runs are. There is no environment variable.
 A case replaces its own result, and nothing else is cleared: a case that starts deletes its own
 earlier run file and crash record. A case that fails without having written its run file leaves a
 crash record. Every case in a session is therefore a run, a crash record or missing, and missing
-means only that it never ran. A test's planned case count is its configured count, not the number
-of cases a run selected, and readers consider only the cases below it.
+means only that it never ran.
 
 ## Alternatives considered
 
@@ -48,13 +47,11 @@ of cases a run selected, and readers consider only the cases below it.
 - **A standalone session command.** A second entry point that has to resolve the root the way the
   pytest ini lookup does, and can drift from it.
 - **No crash record.** A crash then reads as a case that never ran, and with replacement a case
-  that passed earlier and crashes now would still show its old passing run.
+  that passed once and then crashes would still show its old passing run.
 
 ## Consequences
 
 - A rerun of one case by its node id changes that case's files and nothing else.
 - Deleting a session is removing its folder.
-- A case interrupted by Ctrl-C leaves no record and reads as missing; a skipped case keeps its
-  previous result; an xfail-marked case that raises leaves no record.
 - A consumer that judges a session reads it through the plugin's own reader rather than the file
   layout.

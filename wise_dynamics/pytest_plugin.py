@@ -381,13 +381,13 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, `<session folder>/run_<NNNN>.h5`.
+    """A writer of this case's run file, in the test's directory of the active session.
 
-    The file is written through `sim_scenario.vehicle`, in the session's folder under the test's
-    directory, laid out as the basilisk README describes. The file's root attributes are `case`,
-    `seed`, `fidelity`, `created_utc` (the case's start, ISO 8601 UTC), `versions_bsk`,
-    `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_*`, see the basilisk
-    README) and one `draw_<name>` per value the scenario drew.
+    The file is `run_<NNNN>.h5`, written through `sim_scenario.vehicle` and laid out as the basilisk
+    README describes. The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the
+    case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the install's provenance
+    (`versions_wise_dynamics_*`, see the basilisk README) and one `draw_<name>` per value the
+    scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -494,7 +494,7 @@ def _run_dir(node: pytest.Function) -> Path:
 
 
 def _active_session(config: pytest.Config) -> Path:
-    """Resolve the run's session directory once, so a later switch of the pointer cannot split it.
+    """Resolve the run's session directory once and cache it in the stash.
 
     A pytest-xdist worker uses the session its controller handed it.
 
