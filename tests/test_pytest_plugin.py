@@ -469,7 +469,7 @@ def test_each_case_runs_for_sim_duration_s(pytester: pytest.Pytester):
     assert run["t_s"].tolist() == [0.0, 10.0, 20.0]
 
 
-def test_a_session_runs_without_xdist(pytester: pytest.Pytester):
+def test_a_pytest_run_without_xdist_works(pytester: pytest.Pytester):
     """A session runs with pytest-xdist disabled.
 
     Args:
@@ -614,7 +614,7 @@ def test_the_closest_mark_wins_over_class_and_module_marks(pytester: pytest.Pyte
     pytester.runpytest_subprocess().assert_outcomes(passed=7)
 
 
-def test_a_session_with_no_case_creates_no_run_folder(pytester: pytest.Pytester):
+def test_a_pytest_run_with_no_case_creates_no_run_folder(pytester: pytest.Pytester):
     """A session that runs no case creates neither the default run folder nor any run file.
 
     Args:
@@ -872,7 +872,7 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     assert [path.name for path in session.iterdir()] == ["test_scenario"]
 
 
-def test_a_collect_only_session_creates_nothing(pytester: pytest.Pytester):
+def test_a_collect_only_pytest_run_creates_nothing(pytester: pytest.Pytester):
     """`--collect-only` creates no run folder and no `planned.json`.
 
     Args:
@@ -1038,7 +1038,7 @@ def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytes
 
 
 @pytest.mark.parametrize("case", ["no-direct-url", "git-unavailable"])
-def test_an_install_that_cannot_be_described_stops_the_session(
+def test_an_install_that_cannot_be_described_stops_the_pytest_run(
     pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ):
     """An install the plugin cannot describe exits 4, names both supported installs, runs no case.
@@ -1096,7 +1096,7 @@ def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
     assert len(list((pytester.path / "monte_carlo" / SESSION).rglob("run_*.h5"))) == 1
 
 
-def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
+def test_a_pytest_run_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
     """The plugin loads into every session without importing Basilisk.
 
     Args:
@@ -1114,7 +1114,7 @@ def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pyt
     pytester.runpytest_subprocess().assert_outcomes(passed=1)
 
 
-def test_the_readme_scenario_runs_as_a_session(pytester: pytest.Pytester):
+def test_the_readme_scenario_runs_as_a_pytest_run(pytester: pytest.Pytester):
     """The README's worked example, marks included, runs in the active session and writes its files.
 
     Args:
