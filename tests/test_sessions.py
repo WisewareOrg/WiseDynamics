@@ -386,6 +386,73 @@ def test_test_directories_lists_each_folder_holding_results_sorted(tmp_path: Pat
     assert _sessions().test_directories(tmp_path) == [method, plain]
 
 
+PLAIN_ABORT = """
+import os
+
+import pytest
+
+
+@pytest.mark.parametrize("x", [1])
+def test_plain(x):
+    os.abort()
+"""
+
+
+@pytest.mark.parametrize("pointer", [False, True], ids=["no-pointer", "pointer"])
+def test_a_worker_that_dies_in_a_test_that_is_not_a_case_leaves_no_crash_record(
+    pytester: pytest.Pytester, pointer: bool
+):
+    """A crash in a test with no Monte Carlo case writes no record and creates no folder.
+
+    The run's failure is the crash itself, never a "no session" error.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        pointer: Whether a session is active.
+    """
+    session = _point(pytester, SESSION + "\n") if pointer else None
+    pytester.makepyfile(test_plain=PLAIN_ABORT)
+
+    result = pytester.runpytest_subprocess("-n", "2")
+
+    assert result.ret != pytest.ExitCode.OK
+    assert "crashed" in result.stdout.str()
+    assert NO_SESSION not in result.stdout.str() + result.stderr.str()
+    assert not list(pytester.path.rglob("*.crash.json"))
+    if session is None:
+        assert not (pytester.path / "monte_carlo").exists()
+    else:
+        assert not session.exists()
+
+
+def test_a_strict_xfail_case_that_passes_without_a_run_file_is_no_internal_error(
+    pytester: pytest.Pytester,
+):
+    """A Monte Carlo case that passes under a strict xfail fails normally; the run does not crash.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    _point(pytester, SESSION + "\n")
+    pytester.makepyfile(
+        test_xfail="""
+        import pytest
+
+
+        @pytest.mark.xfail(strict=True)
+        @pytest.mark.sim_runs(1)
+        def test_case(sim_case_index):
+            pass
+        """
+    )
+
+    result = pytester.runpytest_subprocess("-n", "2")
+
+    output = result.stdout.str() + result.stderr.str()
+    assert "INTERNALERROR" not in output
+    result.assert_outcomes(failed=1)
+
+
 def test_read_test_results_returns_cases_below_planned_only(tmp_path: Path):
     """Runs and crashes for cases `0..planned-1` are returned; a stale higher file is ignored.
 
