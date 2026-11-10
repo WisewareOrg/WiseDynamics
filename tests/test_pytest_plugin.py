@@ -15,7 +15,7 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
@@ -695,7 +695,8 @@ def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
     result = _bad_mark_session(pytester, mark)
     result.stdout.fnmatch_lines([f"*.py::test_case: {name}: *"])
     if name == "sim_scenario":
-        result.stdout.fnmatch_lines(["*unknown scenario 'bogus'; known scenarios: leo500*"])
+        known = ", ".join(sorted(SCENARIOS))
+        result.stdout.fnmatch_lines([f"*unknown scenario 'bogus'; known scenarios: {known}"])
     assert not list(pytester.path.rglob("run_*.h5"))
 
 
