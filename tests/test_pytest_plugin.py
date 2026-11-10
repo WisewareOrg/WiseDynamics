@@ -799,7 +799,7 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
 
 
 def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
-    """`--strict-markers` accepts the four marks and rejects `sim_out`, which no longer exists.
+    """`--strict-markers` accepts the four marks and rejects `sim_out`, which is not a mark.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -1345,29 +1345,37 @@ def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
 def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pytester):
     """Workers use the session the controller handed them, whatever the pointer says later.
 
-    Each case rewrites the pointer to `other` before it writes its run file; every file still lands
-    in the session the run started in, and `other` is never created.
+    Each worker rewrites the pointer to `other` as it configures, after the controller resolved the
+    session and before the worker collects; every file still lands in the session the run started
+    in, and `other` is never created.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     session = _point(pytester)
     pointer = pytester.path / "monte_carlo" / "SESSION"
-    pytester.makepyfile(
-        test_switch=f"""
+    pytester.makeconftest(
+        f"""
         from pathlib import Path
 
+
+        def pytest_configure(config):
+            if hasattr(config, "workerinput"):
+                Path({str(pointer)!r}).write_text("other\\n")
+        """
+    )
+    pytester.makepyfile(
+        test_switch="""
         import numpy as np
         import pytest
 
 
         @pytest.mark.sim_runs(6)
         def test_case(sim_case_index, sim_run_file):
-            Path({str(pointer)!r}).write_text("other\\n")
-            sim_run_file({{"t_s": (np.zeros(2), "s")}})
+            sim_run_file({"t_s": (np.zeros(2), "s")})
         """
     )
-    pytester.runpytest_subprocess("-n", "1").assert_outcomes(passed=6)
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=6)
 
     assert pointer.read_text() == "other\n"
     directory = session / "test_switch" / "test_case"

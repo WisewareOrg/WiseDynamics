@@ -126,7 +126,8 @@ A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.cras
 nothing else is cleared, so rerunning one case by its node id replaces only its result. A case
 that fails in setup or call without having written its run file leaves `run_<NNNN>.crash.json`,
 `{"exception": ..., "traceback": ...}`; so does a case whose pytest-xdist worker dies, such as a
-segfault. A case that wrote its run file and then failed keeps the run file.
+segfault. A case that wrote its run file and then failed keeps the run file, unless its worker
+died: then the crash record replaces the run file.
 `wise_dynamics.sessions.read_test_results(directory)` returns `planned`, the `runs` and the
 `crashes` of cases `0` to `planned-1`, ignoring any higher-numbered file left after `sim_runs`
 dropped. Edge outcomes: Ctrl-C leaves no record, so the case is missing; a skipped case keeps its

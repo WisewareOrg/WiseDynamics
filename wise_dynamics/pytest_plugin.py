@@ -466,6 +466,7 @@ def _settings(node: pytest.Function) -> _Settings:
 
     Raises:
         ValueError: A mark's value is malformed; the message starts with the mark's name.
+        pytest.UsageError: No session is active, as `_run_dir` raises it.
     """
     values = _marked_values(node)
     scenario = values.get("sim_scenario", _DEFAULT_SCENARIO)
@@ -502,6 +503,9 @@ def _run_dir(node: pytest.Function) -> Path:
 
     Returns:
         `_test_directory` under the active session's directory.
+
+    Raises:
+        pytest.UsageError: No session is active, as `_active_session` raises it.
     """
     return _test_directory(node, _active_session(node.config))
 

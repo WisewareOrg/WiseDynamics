@@ -13,10 +13,14 @@ import pytest
 
 __all__ = [
     "CaseResults",
+    "NoSessionError",
     "RecordedTest",
+    "crash_path",
     "read_test_results",
     "recorded_tests",
+    "run_path",
     "session_directory",
+    "write_planned",
 ]
 
 POINTER = "SESSION"
