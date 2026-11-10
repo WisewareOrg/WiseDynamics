@@ -20,6 +20,7 @@ from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
 REPOSITORY = Path(__file__).parent.parent
+SESSION = "s"
 SERIAL = ("-p", "no:xdist")
 XDIST = ("-n", "auto")
 
@@ -87,43 +88,34 @@ def _source(*tests: str) -> str:
     return SCENARIO_HEADER + "\n".join(tests)
 
 
-def _out_mark(path: Path) -> str:
-    """Say a `sim_out` mark for `path`.
+def _point(pytester: pytest.Pytester, root: str = "monte_carlo", name: str = SESSION) -> Path:
+    """Write the session pointer `<root>/SESSION` and return the session's folder.
 
     Args:
-        path: The output directory.
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        root: The `sim_out` root, relative to the rootdir.
+        name: The active session's name.
 
     Returns:
-        The mark's call, without `pytest.mark.`.
+        `<rootdir>/<root>/<name>`, which the pointer makes the session's folder.
     """
-    return f"sim_out({str(path)!r})"
-
-
-def _newest_session(directory: Path) -> Path:
-    """Find the newest session folder under a test directory.
-
-    Args:
-        directory: The test directory holding the session folders.
-
-    Returns:
-        The folder whose stamp sorts last, or `directory` itself when it holds no folder.
-    """
-    sessions = sorted(path for path in directory.glob("*") if path.is_dir())
-    return sessions[-1] if sessions else directory
+    (pytester.path / root).mkdir(parents=True, exist_ok=True)
+    (pytester.path / root / "SESSION").write_text(f"{name}\n")
+    return pytester.path / root / name
 
 
 def _read_runs(directory: Path) -> list[dict]:
-    """Read back each run file in the newest session folder under `directory`.
+    """Read back each run file in a test's directory.
 
     Args:
-        directory: The test directory holding the session folders.
+        directory: The test's directory within the session.
 
     Returns:
         One mapping per run file, in name order: its `name`, root `attrs`, `t_s` (s), `sigma_BN`
         (MRP) and `omega_BN_B` (rad/s).
     """
     runs = []
-    for path in sorted(_newest_session(directory).glob("run_*.h5")):
+    for path in sorted(directory.glob("run_*.h5")):
         with h5py.File(path, "r") as run_file:
             runs.append(
                 {
@@ -146,30 +138,28 @@ def _run_session(
     duration_s: float = 3,
     marks: tuple[str, ...] = (),
 ) -> list[dict]:
-    """Run the one-test scenario, marked as given, into `out` and read back each run file.
+    """Run the one-test scenario, marked as given, into session `s` under `out` and read it back.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         *args: Further pytest arguments.
         runs: The `sim_runs` mark's case count.
         passed: The number of tests the session must pass.
-        out: The `sim_out` mark's directory, a name under `pytester`.
+        out: The `sim_out` ini setting, a name under `pytester`; the active session is `s`.
         duration_s: The `sim_duration_s` mark's seconds.
         marks: Further marks' calls.
 
     Returns:
         One mapping per run file in the test's directory, as `_read_runs` returns them.
     """
-    out_dir = pytester.path / out
+    session = _point(pytester, out)
     pytester.makepyfile(
         test_scenario=_source(
-            _case_test(
-                (f"sim_runs({runs})", _out_mark(out_dir), f"sim_duration_s({duration_s})", *marks),
-            )
+            _case_test((f"sim_runs({runs})", f"sim_duration_s({duration_s})", *marks))
         )
     )
-    pytester.runpytest_subprocess(*args).assert_outcomes(passed=passed)
-    return _read_runs(out_dir / "test_scenario" / "test_case")
+    pytester.runpytest_subprocess("-o", f"sim_out={out}", *args).assert_outcomes(passed=passed)
+    return _read_runs(session / "test_scenario" / "test_case")
 
 
 def _draws_of(run: dict) -> dict[str, np.ndarray]:
@@ -335,10 +325,11 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     out_dir = pytester.path / "out"
+    _point(pytester, "out")
     pytester.makepyfile(
         "import numpy as np\n"
         "import pytest\n\n\n"
-        f"@pytest.mark.sim_runs(1)\n@pytest.mark.{_out_mark(out_dir)}\n"
+        "@pytest.mark.sim_runs(1)\n"
         + textwrap.dedent(
             """
             def test_case(sim_run_file):
@@ -347,14 +338,14 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
             """
         )
     )
-    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+    pytester.runpytest_subprocess("-o", "sim_out=out").assert_outcomes(passed=1)
     assert not list(out_dir.rglob("run_*.h5"))
 
 
 def _default_session(
     pytester: pytest.Pytester, *args: str, ini: str | None = None, runs: int = 2
 ) -> pytest.RunResult:
-    """Run the one-test scenario with no `sim_out` mark, under an optional `sim_out` ini setting.
+    """Run the one-test scenario into session `s`, under an optional `sim_out` ini setting.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -367,6 +358,7 @@ def _default_session(
     """
     if ini is not None:
         pytester.makeini(f"[pytest]\nsim_out = {ini}\n")
+    _point(pytester, ini or "monte_carlo")
     pytester.makepyfile(
         test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
     )
@@ -378,9 +370,9 @@ def _default_session(
 def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Run files land in `<rootdir>/monte_carlo/<test file>/<test>/<stamp>/`; `TMPDIR` stays empty.
+    """Run files land in `<rootdir>/monte_carlo/<session>/<test file>/<test>/`; `TMPDIR` is empty.
 
-    A `--ci` session then writes under `monte_carlo/ci/`.
+    The test's directory holds the run files and `planned.json` and no stamp folder.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -392,17 +384,31 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     monkeypatch.setenv("TMPDIR", str(temporary))
     result = _default_session(pytester, f"--basetemp={tmp_path / 'basetemp'}", *SERIAL)
 
-    directory = pytester.path / "monte_carlo" / "test_scenario" / "test_case"
-    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
+    directory = pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case"
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "planned.json",
+        "run_0000.h5",
+        "run_0001.h5",
+    ]
     assert len(list(pytester.path.rglob("run_*.h5"))) == 2
-    session = _newest_session(directory)
-    assert session.parent == directory
-    result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {session}"])
+    result.stdout.fnmatch_lines([f"wise-dynamics: 2 run files in {directory}"])
     assert list(temporary.iterdir()) == []
 
+
+def test_ci_writes_under_the_session_and_plans_the_capped_count(pytester: pytest.Pytester):
+    """`--ci` caps the cases and writes into the session, not a `ci` folder.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    _point(pytester)
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(5)", "sim_duration_s(3)"))))
     pytester.runpytest_subprocess(*SERIAL, "--ci").assert_outcomes(passed=2)
-    ci_directory = pytester.path / "monte_carlo" / "ci" / "test_scenario" / "test_case"
-    assert [run["name"] for run in _read_runs(ci_directory)] == ["run_0000.h5", "run_0001.h5"]
+
+    directory = pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case"
+    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
+    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    assert not (pytester.path / "monte_carlo" / "ci").exists()
 
 
 def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(
@@ -415,22 +421,8 @@ def test_a_relative_sim_out_ini_setting_is_resolved_against_the_rootdir(
     """
     _default_session(pytester, *SERIAL, ini="ini_out")
 
-    directory = pytester.path / "ini_out" / "test_scenario" / "test_case"
+    directory = pytester.path / "ini_out" / SESSION / "test_scenario" / "test_case"
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
-    assert not (pytester.path / "monte_carlo").exists()
-
-
-def test_a_sim_out_mark_overrides_the_ini_setting(pytester: pytest.Pytester):
-    """A test with a `sim_out` mark writes there, and nothing goes to the ini setting's folder.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    pytester.makeini("[pytest]\nsim_out = ini_out\n")
-    runs = _run_session(pytester, *SERIAL, runs=2, passed=2)
-
-    assert [run["name"] for run in runs] == ["run_0000.h5", "run_0001.h5"]
-    assert not (pytester.path / "ini_out").exists()
     assert not (pytester.path / "monte_carlo").exists()
 
 
@@ -454,8 +446,8 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
 ):
     """A relative `sim_out` resolves against rootdir, whatever directory a worker is in.
 
-    Each worker changes directory before the plugin configures it, and the run files still land
-    under the rootdir's `out`.
+    Each worker changes directory before the plugin configures it, and the session pointer and run
+    files are still found under the rootdir's `out`.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -473,12 +465,13 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
                 os.chdir(worker_dir)
         """
     )
-    pytester.makepyfile(
-        test_scenario=_source(_case_test(("sim_runs(2)", 'sim_out("out")', "sim_duration_s(3)")))
-    )
-    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=2)
+    _point(pytester, "out")
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
+    pytester.runpytest_subprocess("-o", "sim_out=out", "-n", "2").assert_outcomes(passed=2)
 
-    in_out_dir = sorted((pytester.path / "out" / "test_scenario" / "test_case").glob("*/run_*.h5"))
+    in_out_dir = sorted(
+        (pytester.path / "out" / SESSION / "test_scenario" / "test_case").glob("run_*.h5")
+    )
     assert len(in_out_dir) == 2
     assert sorted(pytester.path.rglob("run_*.h5")) == in_out_dir
 
@@ -507,35 +500,50 @@ def test_a_session_runs_without_xdist(pytester: pytest.Pytester):
 def test_two_campaigns_in_one_session_each_run_in_their_own_directory(
     pytester: pytest.Pytester, xdist: tuple[str, ...]
 ):
-    """Two tests differing in case count and output directory are two campaigns.
+    """Two tests differing in case count are two campaigns in one session's folder.
 
-    Each test's run files are in its own directory, nothing is in either root, and the summary
-    reports each directory.
+    Each test's run files are in its own directory, nothing is in the session's root, and the
+    summary reports each directory.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
         xdist: The arguments that run the session with pytest-xdist or without it.
     """
-    out_a, out_b = pytester.path / "out_a", pytester.path / "out_b"
+    session = _point(pytester)
     pytester.makepyfile(
         test_two=_source(
-            _case_test(name="test_a", marks=("sim_runs(3)", _out_mark(out_a), "sim_duration_s(3)")),
-            _case_test(name="test_b", marks=("sim_runs(2)", _out_mark(out_b), "sim_duration_s(3)")),
+            _case_test(name="test_a", marks=("sim_runs(3)", "sim_duration_s(3)")),
+            _case_test(name="test_b", marks=("sim_runs(2)", "sim_duration_s(3)")),
         )
     )
     result = pytester.runpytest_subprocess(*xdist)
 
     result.assert_outcomes(passed=5)
-    dir_a, dir_b = out_a / "test_two" / "test_a", out_b / "test_two" / "test_b"
+    dir_a, dir_b = session / "test_two" / "test_a", session / "test_two" / "test_b"
     assert [run["name"] for run in _read_runs(dir_a)] == [f"run_000{i}.h5" for i in range(3)]
     assert [run["name"] for run in _read_runs(dir_b)] == [f"run_000{i}.h5" for i in range(2)]
     assert len(list(pytester.path.rglob("run_*.h5"))) == 5
     result.stdout.fnmatch_lines(
-        [
-            f"wise-dynamics: 3 run files in {_newest_session(dir_a)}",
-            f"wise-dynamics: 2 run files in {_newest_session(dir_b)}",
-        ]
+        [f"wise-dynamics: 3 run files in {dir_a}", f"wise-dynamics: 2 run files in {dir_b}"]
     )
+
+
+def test_each_session_holds_its_own_run_files(pytester: pytest.Pytester):
+    """Pointing at another session between two runs leaves the first session's files in place.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    first = _point(pytester, name="first")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    second = _point(pytester, name="second")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+    for session in (first, second):
+        assert [run["name"] for run in _read_runs(session / "test_scenario" / "test_case")] == [
+            "run_0000.h5"
+        ]
 
 
 def test_test_files_outside_the_rootdir_are_named_by_their_stem(
@@ -548,18 +556,19 @@ def test_test_files_outside_the_rootdir_are_named_by_their_stem(
         tmp_path_factory: pytest's factory for directories outside the rootdir.
     """
     out = pytester.path / "out"
-    source = _source(_case_test(("sim_runs(1)", _out_mark(out), "sim_duration_s(3)")))
+    session = _point(pytester, "out")
+    source = _source(_case_test(("sim_runs(1)", "sim_duration_s(3)")))
     files = []
     for stem in ("test_one", "test_two"):
         files.append(tmp_path_factory.mktemp(stem) / f"{stem}.py")
         files[-1].write_text(source)
     result = pytester.runpytest_subprocess(
-        "-p", "no:xdist", "--rootdir", str(pytester.path), *map(str, files)
+        "-p", "no:xdist", "--rootdir", str(pytester.path), "-o", "sim_out=out", *map(str, files)
     )
 
     result.assert_outcomes(passed=2)
     for stem in ("test_one", "test_two"):
-        assert [run["name"] for run in _read_runs(out / stem / "test_case")] == ["run_0000.h5"]
+        assert [run["name"] for run in _read_runs(session / stem / "test_case")] == ["run_0000.h5"]
     assert len(list(out.rglob("run_*.h5"))) == 2
     assert not [path for file in files for path in file.parent.rglob("run_*.h5")]
 
@@ -570,13 +579,12 @@ def test_a_class_and_a_nested_class_qualify_the_directory(pytester: pytest.Pytes
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    out_dir = pytester.path / "out"
+    out_dir = _point(pytester)
     inner = textwrap.indent(_case_test(name="test_inner", method=True), "        ")
     outer = textwrap.indent(_case_test(name="test_outer", method=True), "    ")
     source = (
         SCENARIO_HEADER
-        + f"\npytestmark = [pytest.mark.sim_runs(1), pytest.mark.{_out_mark(out_dir)},"
-        " pytest.mark.sim_duration_s(3)]\n\n\n"
+        + "\npytestmark = [pytest.mark.sim_runs(1), pytest.mark.sim_duration_s(3)]\n\n\n"
         + f"class TestOuter:{outer}\n    class TestInner:{inner}"
     )
     (pytester.path / "tests" / "sim").mkdir(parents=True)
@@ -597,6 +605,7 @@ def test_the_closest_mark_wins_over_class_and_module_marks(pytester: pytest.Pyte
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    _point(pytester)
     pytester.makepyfile(
         """
         import pytest
@@ -641,6 +650,7 @@ def test_an_unmarked_test_gets_the_defaults(pytester: pytest.Pytester):
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    _point(pytester)
     pytester.makepyfile(
         """
         from wise_dynamics.basilisk.scenarios import SCENARIOS
@@ -666,6 +676,7 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
     Returns:
         The session's result, which must have collected nothing.
     """
+    _point(pytester)
     pytester.makepyfile(
         f"import pytest\n\n\n@pytest.mark.{mark}\ndef test_case(sim_case_index):\n    pass\n"
     )
@@ -686,7 +697,6 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         ("sim_runs()", "sim_runs"),
         ("sim_runs(1, 2)", "sim_runs"),
         ("sim_runs(3, n=3)", "sim_runs"),
-        ('sim_out("")', "sim_out"),
     ],
 )
 def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
@@ -724,6 +734,7 @@ def test_ci_caps_every_tests_case_count_at_two(
         ci: Whether the session passes `--ci`.
         expected: Test name to the number of cases it collects.
     """
+    _point(pytester)
     pytester.makepyfile(
         test_cap="""
         import pytest
@@ -755,6 +766,7 @@ def test_ci_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester)
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    _point(pytester)
     pytester.makepyfile(
         """
         import pytest
@@ -802,24 +814,18 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         assert option in unrecognized[0]
 
 
-def test_the_five_marks_are_registered(pytester: pytest.Pytester):
-    """`--strict-markers` accepts the five marks and rejects one the plugin does not register.
+def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
+    """`--strict-markers` accepts the four marks and rejects `sim_out`, which no longer exists.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    result = _strict_session(pytester, ["sim_bogus(1)"])
+    result = _strict_session(pytester, ['sim_out("out")'])
     assert result.ret == pytest.ExitCode.INTERRUPTED
     result.assert_outcomes(errors=1)
-    result.stdout.fnmatch_lines(["*'sim_bogus' not found in `markers` configuration option*"])
+    result.stdout.fnmatch_lines(["*'sim_out' not found in `markers` configuration option*"])
 
-    marks = [
-        'sim_scenario("leo500")',
-        "sim_runs(1)",
-        'sim_fidelity("lo")',
-        "sim_duration_s(3)",
-        _out_mark(pytester.path / "out"),
-    ]
+    marks = ['sim_scenario("leo500")', "sim_runs(1)", 'sim_fidelity("lo")', "sim_duration_s(3)"]
     _strict_session(pytester, marks).assert_outcomes(passed=1)
 
 
@@ -834,40 +840,46 @@ def _strict_session(pytester: pytest.Pytester, marks: list[str]) -> pytest.RunRe
         The session's result.
     """
     decorators = "".join(f"@pytest.mark.{mark}\n" for mark in marks)
+    _point(pytester)
     pytester.makepyfile(
         f"import pytest\n\n\n{decorators}def test_case(sim_case_index):\n    pass\n"
     )
     return pytester.runpytest_subprocess("-p", "no:xdist", "--strict-markers")
 
 
-def test_every_session_writes_its_own_stamp_folder_and_removes_nothing(
+def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     pytester: pytest.Pytester,
 ):
-    """Two sessions leave two stamp folders, the first intact, each with its planned count.
+    """Running one case at a time into a session leaves `planned.json` at `sim_runs`.
 
-    The first session runs under pytest-xdist and its workers share one stamp; the second reruns
-    one case by its node id.
+    Case 0 runs under pytest-xdist, then case 1 alone by its node id; the second run neither
+    rewrites case 0's file nor plans only the one case it selected.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    session = _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*XDIST).assert_outcomes(passed=2)
-    test_dir = pytester.path / "monte_carlo" / "test_scenario" / "test_case"
-    (first,) = [path for path in test_dir.iterdir()]
-    before = {path.name: path.stat().st_mtime_ns for path in first.iterdir()}
-    assert sorted(before) == ["planned.json", "run_0000.h5", "run_0001.h5"]
-    assert json.loads((first / "planned.json").read_text()) == {"runs": 2}
+    pytester.runpytest_subprocess(*XDIST, "test_scenario.py::test_case[0]").assert_outcomes(
+        passed=1
+    )
+    directory = session / "test_scenario" / "test_case"
+    assert sorted(path.name for path in directory.iterdir()) == ["planned.json", "run_0000.h5"]
+    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    before = (directory / "run_0000.h5").stat().st_mtime_ns
 
     pytester.runpytest_subprocess(*SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
         passed=1
     )
 
-    (second,) = [path for path in test_dir.iterdir() if path != first]
-    assert re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{4}", second.name)
-    assert sorted(path.name for path in second.iterdir()) == ["planned.json", "run_0001.h5"]
-    assert json.loads((second / "planned.json").read_text()) == {"runs": 1}
-    assert {path.name: path.stat().st_mtime_ns for path in first.iterdir()} == before
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "planned.json",
+        "run_0000.h5",
+        "run_0001.h5",
+    ]
+    assert json.loads((directory / "planned.json").read_text()) == {"runs": 2}
+    assert (directory / "run_0000.h5").stat().st_mtime_ns == before
+    assert [path.name for path in session.iterdir()] == ["test_scenario"]
 
 
 def test_a_collect_only_session_creates_nothing(pytester: pytest.Pytester):
@@ -876,10 +888,14 @@ def test_a_collect_only_session_creates_nothing(pytester: pytest.Pytester):
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    session = _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
     result = pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
     assert result.ret == pytest.ExitCode.OK
-    assert not (pytester.path / "monte_carlo").exists()
+    assert not session.exists()
+    assert list((pytester.path / "monte_carlo").iterdir()) == [
+        pytester.path / "monte_carlo" / "SESSION"
+    ]
 
 
 def _git(directory: Path, *args: str) -> str:
@@ -947,6 +963,7 @@ def _provenance_session(
         f"        return json.dumps({direct_url!r}) if {direct_url!r} is not None else None\n\n\n"
         "plugin.distribution = lambda name: Distribution()\n"
     )
+    _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     return pytester.runpytest_subprocess(*args)
 
@@ -961,7 +978,7 @@ def _provenance_attrs(pytester: pytest.Pytester) -> dict:
         `install`, `commit`, `requested_revision` and `dirty`.
     """
     prefix = "versions_wise_dynamics_"
-    (run,) = _read_runs(pytester.path / "monte_carlo" / "test_scenario" / "test_case")
+    (run,) = _read_runs(pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case")
     return {
         key: run["attrs"][prefix + key]
         for key in ("install", "commit", "requested_revision", "dirty")
@@ -1021,6 +1038,7 @@ def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytes
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
 
@@ -1062,6 +1080,7 @@ def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    _point(pytester)
     pytester.makeconftest(
         """
         import sys
@@ -1084,7 +1103,7 @@ def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
         """,
     )
     pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
-    assert len(list((pytester.path / "monte_carlo").rglob("run_*.h5"))) == 1
+    assert len(list((pytester.path / "monte_carlo" / SESSION).rglob("run_*.h5"))) == 1
 
 
 def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pytester):
@@ -1106,19 +1125,274 @@ def test_a_session_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.Pyt
 
 
 def test_the_readme_scenario_runs_as_a_session(pytester: pytest.Pytester):
-    """The README's worked example, marks included, runs as a session and writes its run files.
+    """The README's worked example, marks included, runs in the active session and writes its files.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     (example,) = re.findall(r"```python\n(.*?)```", README.read_text(), flags=re.DOTALL)
+    session = _point(pytester)
     pytester.makepyfile(test_example=example)
     pytester.runpytest_subprocess().assert_outcomes(passed=2)
 
-    files = sorted((pytester.path / "runs" / "test_example" / "test_case").glob("*/run_*.h5"))
+    files = sorted((session / "test_example" / "test_case").glob("run_*.h5"))
     assert len(files) == 2
     for path in files:
         with h5py.File(path, "r") as run_file:
             assert run_file["t_s"][:].tolist() == [0.0, 10.0, 20.0]
             assert run_file["guidance/sigma_RN"].attrs["units"] == "MRP"
             assert run_file.attrs["versions_guidance"] == "1.0"
+
+
+NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
+PLAIN_AND_MONTE_CARLO = """
+import pytest
+
+
+@pytest.mark.sim_runs(3)
+def test_monte_carlo_a(sim_case_index):
+    pass
+
+
+def test_monte_carlo_b(sim_case_index):
+    pass
+
+
+def test_plain():
+    pass
+"""
+
+
+def test_sim_session_with_a_name_writes_the_pointer_and_collects_nothing(
+    pytester: pytest.Pytester,
+):
+    """`--sim-session x` writes `<root>/SESSION`, prints `session: x`, exits 0 and runs no test.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makepyfile("def test_boom():\n    assert False\n")
+    result = pytester.runpytest_subprocess("--sim-session", "alpha")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert "session: alpha" in result.stdout.lines
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "alpha\n"
+    assert not any("test_boom" in line or "passed" in line for line in result.outlines)
+
+
+def test_sim_session_writes_the_pointer_under_the_ini_root(pytester: pytest.Pytester):
+    """The pointer is `<sim_out>/SESSION`, the root created if it does not exist.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makeini("[pytest]\nsim_out = ini_out/deeper\n")
+    result = pytester.runpytest_subprocess("--sim-session", "alpha")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert (pytester.path / "ini_out" / "deeper" / "SESSION").read_text() == "alpha\n"
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+@pytest.mark.parametrize("name", ["a", "7", "v1.2", "run_3-b", "A.b_c-d"])
+def test_sim_session_accepts_a_valid_name(pytester: pytest.Pytester, name: str):
+    """A name of letters, digits, `.`, `_` and `-`, starting with a letter or digit, is written.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        name: The session name.
+    """
+    result = pytester.runpytest_subprocess(f"--sim-session={name}")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == f"{name}\n"
+
+
+@pytest.mark.parametrize("name", ["..", ".", "-x", ".hidden", "SESSION", "a/b", "_a"])
+def test_sim_session_refuses_an_invalid_name_and_leaves_the_pointer(
+    pytester: pytest.Pytester, name: str
+):
+    """An invalid name exits non-zero, not as an unknown option; the pointer is left as it was.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        name: The refused session name.
+    """
+    _point(pytester, name="keep")
+    result = pytester.runpytest_subprocess(f"--sim-session={name}")
+
+    assert result.ret != pytest.ExitCode.OK
+    assert "unrecognized arguments" not in result.stderr.str() + result.stdout.str()
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "keep\n"
+    assert not (pytester.path / "SESSION").exists()
+
+
+def test_sim_session_without_a_name_shows_the_active_session_and_the_others(
+    pytester: pytest.Pytester,
+):
+    """With no name it prints `active: <name>`, then each other directory under the root.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    _point(pytester, name="beta")
+    for other in ("alpha", "gamma"):
+        (pytester.path / "monte_carlo" / other).mkdir()
+    result = pytester.runpytest_subprocess("--sim-session")
+
+    assert result.ret == pytest.ExitCode.OK
+    lines = [line.strip() for line in result.stdout.lines if line.strip()]
+    assert lines[0] == "active: beta"
+    assert sorted(lines[1:]) == ["alpha", "gamma"]
+
+
+def test_sim_session_without_a_name_and_no_pointer_says_none(pytester: pytest.Pytester):
+    """With no pointer, and no root at all, it prints `active: none` and exits 0.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    result = pytester.runpytest_subprocess("--sim-session")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert [line.strip() for line in result.stdout.lines if line.strip()] == ["active: none"]
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+def test_sim_session_under_xdist_addopts_starts_no_workers(pytester: pytest.Pytester):
+    """With `-n auto` in `addopts`, `--sim-session x` runs no pytest session at all.
+
+    A conftest writes a marker file in `pytest_sessionstart`; a plain run proves the marker works,
+    and the `--sim-session` run, started afterwards, leaves it absent: no controller session, so
+    no worker.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makeini("[pytest]\naddopts = -n auto\n")
+    pytester.makeconftest(
+        """
+        from pathlib import Path
+
+
+        def pytest_sessionstart(session):
+            Path(session.config.rootpath / "started").write_text("started")
+        """
+    )
+    pytester.makepyfile("def test_plain():\n    pass\n")
+    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+    marker = pytester.path / "started"
+    assert marker.exists()
+    marker.unlink()
+
+    result = pytester.runpytest_subprocess("--sim-session", "x")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("blocker", ["broken-pointer", "undescribable-install"])
+def test_sim_session_is_not_blocked_by_a_broken_pointer_or_install(
+    pytester: pytest.Pytester, blocker: str
+):
+    """The option needs neither a readable pointer nor a describable install.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        blocker: `broken-pointer`, an invalid name in `SESSION`, or `undescribable-install`, a
+            `wise-dynamics` install with no `direct_url.json`.
+    """
+    if blocker == "broken-pointer":
+        _point(pytester, name="../bad")
+    else:
+        pytester.makeconftest(
+            "import wise_dynamics.pytest_plugin as plugin\n\n\n"
+            "class Distribution:\n"
+            "    def read_text(self, name):\n"
+            "        return None\n\n\n"
+            "plugin.distribution = lambda name: Distribution()\n"
+        )
+    result = pytester.runpytest_subprocess("--sim-session", "x")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+
+
+@pytest.mark.parametrize("xdist", [("-p", "no:xdist"), ("-n", "2")], ids=["serial", "xdist"])
+def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """Each Monte Carlo test shows one `no-session` error naming `--sim-session`; plain tests pass.
+
+    Nothing is written.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
+
+    listing = pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
+    assert sorted(line for line in listing.outlines if "::" in line) == [
+        "test_mixed.py::test_monte_carlo_a[no-session]",
+        "test_mixed.py::test_monte_carlo_b[no-session]",
+        "test_mixed.py::test_plain",
+    ]
+
+    result = pytester.runpytest_subprocess(*xdist)
+
+    result.assert_outcomes(passed=1, errors=2)
+    assert result.stdout.str().count(NO_SESSION) >= 2
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+def test_a_pointer_to_a_session_that_does_not_exist_yet_creates_it(pytester: pytest.Pytester):
+    """A session named in the pointer but with no folder is created by the first run.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    _point(pytester, name="fresh")
+    assert not (pytester.path / "monte_carlo" / "fresh").exists()
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+    assert (
+        pytester.path / "monte_carlo" / "fresh" / "test_scenario" / "test_case" / "run_0000.h5"
+    ).is_file()
+
+
+def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pytester):
+    """Workers use the session the controller handed them, whatever the pointer says later.
+
+    Each case rewrites the pointer to `other` before it writes its run file; every file still lands
+    in the session the run started in, and `other` is never created.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    session = _point(pytester)
+    pointer = pytester.path / "monte_carlo" / "SESSION"
+    pytester.makepyfile(
+        test_switch=f"""
+        from pathlib import Path
+
+        import numpy as np
+        import pytest
+
+
+        @pytest.mark.sim_runs(6)
+        def test_case(sim_case_index, sim_run_file):
+            Path({str(pointer)!r}).write_text("other\\n")
+            sim_run_file({{"t_s": (np.zeros(2), "s")}})
+        """
+    )
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=6)
+
+    assert pointer.read_text() == "other\n"
+    directory = session / "test_switch" / "test_case"
+    assert [path.name for path in sorted(directory.glob("run_*.h5"))] == [
+        f"run_000{i}.h5" for i in range(6)
+    ]
+    assert not (pytester.path / "monte_carlo" / "other").exists()
