@@ -201,6 +201,9 @@ def test_directories(session: Path) -> list[TestFolder]:
     return sorted(found)
 
 
+test_directories.__test__ = False
+
+
 def read_test_results(directory: Path) -> TestResults:
     """Read what a Monte Carlo test left in its session directory.
 
