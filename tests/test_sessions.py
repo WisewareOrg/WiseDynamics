@@ -367,6 +367,25 @@ def test_a_worker_that_dies_in_a_fixture_replaces_the_cases_earlier_run_file(
     assert not (directory / "run_0001.h5").exists()
 
 
+def test_test_directories_lists_each_folder_holding_results_sorted(tmp_path: Path):
+    """Exactly the folders holding a test's results are listed, in sorted order.
+
+    One test is a plain function, one a method of a class; a sibling folder holds nothing.
+
+    Args:
+        tmp_path: The test's own temporary directory, holding a hand-built session.
+    """
+    plain = tmp_path / "test_b" / "test_plain"
+    method = tmp_path / "test_a" / "TestA" / "test_method"
+    for directory in (plain, method):
+        directory.mkdir(parents=True)
+        (directory / "planned.json").write_text(json.dumps({"runs": 1}))
+        (directory / "run_0000.h5").write_bytes(b"")
+    (tmp_path / "test_a" / "empty").mkdir()
+
+    assert _sessions().test_directories(tmp_path) == [method, plain]
+
+
 def test_read_test_results_returns_cases_below_planned_only(tmp_path: Path):
     """Runs and crashes for cases `0..planned-1` are returned; a stale higher file is ignored.
 
