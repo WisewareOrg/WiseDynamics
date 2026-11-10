@@ -25,6 +25,7 @@ from nbclient.exceptions import CellExecutionError
 from wise_dynamics import notebook as wd_notebook
 
 LOAD = "%load_ext wise_dynamics.notebook"
+NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
 FORMATS = "ipynb,py:percent"
 CAMPAIGN = """
 %%monte_carlo
@@ -173,6 +174,51 @@ def _sync(notebook: Path) -> Path:
         capture_output=True,
     )
     return notebook.with_suffix(".py")
+
+
+def _activate(root: Path, name: str | None) -> None:
+    """Write the session pointer `<root>/monte_carlo/SESSION`, or remove it.
+
+    Args:
+        root: The pytest rootdir, which holds the `monte_carlo` root.
+        name: The active session's name, or `None` for no active session.
+    """
+    pointer = root / "monte_carlo" / "SESSION"
+    if name is None:
+        pointer.unlink(missing_ok=True)
+        return
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(f"{name}\n")
+
+
+def _write_session(
+    notebook: Path,
+    name: str,
+    cases: list[int],
+    planned: int,
+    crashed: tuple[int, ...] = (),
+    stale: tuple[int, ...] = (),
+) -> None:
+    """Build session `name`'s folder for `TestA::test_x` of the notebook, by hand.
+
+    Args:
+        notebook: The paired notebook `sim_notebook` made.
+        name: The session's name.
+        cases: The cases that get a run file.
+        planned: The case count `planned.json` records.
+        crashed: The cases that get a crash record.
+        stale: Further cases, at or above `planned`, that get a run file.
+    """
+    directory = notebook.parent / "monte_carlo" / name / "campaign" / "TestA" / "test_x"
+    directory.mkdir(parents=True)
+    (directory / "planned.json").write_text(json.dumps({"runs": planned}))
+    for case in [*cases, *stale]:
+        with h5py.File(directory / f"run_{case:04d}.h5", "w") as run_file:
+            run_file.attrs["case"] = case
+            run_file.create_dataset("t_s", data=[0.0]).attrs["units"] = "s"
+    for case in crashed:
+        record = {"exception": "boom", "traceback": "Traceback..."}
+        (directory / f"run_{case:04d}.crash.json").write_text(json.dumps(record))
 
 
 def _execute(
@@ -522,14 +568,13 @@ def _expected_runs(directory: Path) -> list[dict]:
     """Read each run file in `directory` with h5py, in case order.
 
     Args:
-        directory: The test's run directory.
+        directory: The test's directory within its session.
 
     Returns:
         One mapping per file: its `case`, and the `units` and `sums` of every dataset by path.
     """
     runs = []
-    newest = sorted(path for path in directory.glob("*") if path.is_dir())[-1]
-    for path in sorted(newest.glob("run_*.h5")):
+    for path in sorted(directory.glob("run_*.h5")):
         datasets: dict[str, h5py.Dataset] = {}
         with h5py.File(path, "r") as run_file:
             run_file.visititems(
@@ -550,14 +595,15 @@ def _expected_runs(directory: Path) -> list[dict]:
 def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: Path):
     """A `leo500` campaign of four cases runs across workers; a fresh kernel loads every run.
 
-    The run prints no assert-rewrite warning, and its progress is one display, updated in place
-    until it reads four of four.
+    The run goes into the active session `real`. It prints no assert-rewrite warning, and its
+    progress is one display, updated in place until it reads four of four.
 
     Args:
         tmp_path: The test's own temporary directory.
     """
     campaign = [_code(LOAD), nbformat.v4.new_code_cell(CAMPAIGN.strip("\n"))]
     path = _write_notebook(tmp_path, campaign)
+    _activate(tmp_path, "real")
     env = _env(path)
     notebook = _execute(tmp_path, campaign, env)
     streams = "".join(out.text for out in notebook.cells[1].outputs if out.output_type == "stream")
@@ -571,11 +617,11 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     (line,) = [line for line in output.splitlines() if line.startswith("SUMMARY ")]
     loaded = json.loads(line.removeprefix("SUMMARY "))
 
-    expected = _expected_runs(tmp_path / "monte_carlo" / "campaign" / "test_leo")
+    expected = _expected_runs(tmp_path / "monte_carlo" / "real" / "campaign" / "test_leo")
     assert "PytestAssertRewriteWarning" not in streams
     assert len(meter) == 1
     assert "4/4" in meter[-1]
-    assert re.search(r"\d{8}T\d{6}Z-[0-9a-f]{4}: 4 of 4 cases", output)
+    assert re.search(r"^real: 4 of 4 cases$", output, flags=re.MULTILINE)
     assert loaded["cases"] == [0, 1, 2, 3]
     assert len(set(loaded["worker_pids"])) > 1
     assert loaded["kernel_pid"] not in loaded["worker_pids"]
@@ -599,61 +645,77 @@ def sim_notebook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch: pytest's fixture; it unsets `CI` for the test.
 
     Returns:
-        The notebook's path; nothing has run, so there are no run files.
+        The notebook's path; nothing has run, so there are no run files. Session `s` is active.
     """
     monkeypatch.delenv("CI", raising=False)
     path = _write_notebook(tmp_path, [_code(SIM_TESTS)])
     _sync(path)
+    _activate(tmp_path, "s")
     return path
 
 
 def test_load_runs_with_no_run_files_names_the_expected_folder(sim_notebook: Path):
-    """With no run files, `load_runs` raises `FileNotFoundError` naming the method's folder.
+    """With no folder in the active session, `load_runs` raises `FileNotFoundError` naming it.
 
     Args:
         sim_notebook: The paired notebook, never run.
     """
-    folder = sim_notebook.parent / "monte_carlo" / "campaign" / "TestA" / "test_x"
+    folder = sim_notebook.parent / "monte_carlo" / "s" / "campaign" / "TestA" / "test_x"
 
     with pytest.raises(FileNotFoundError, match=re.escape(str(folder))):
         wd_notebook.load_runs("TestA::test_x", sim_notebook)
 
 
-def test_load_runs_reads_the_newest_session_and_reports_found_of_planned(
-    sim_notebook: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+def test_load_runs_reads_the_active_session_and_reports_found_planned_and_crashed(
+    sim_notebook: Path, capsys: pytest.CaptureFixture[str]
 ):
-    """The newest stamp folder wins, even unfinished: its found and planned counts are printed.
-
-    The older session ran one case of one; the newer one was interrupted after two of three. With
-    `CI` set, it reads the `ci` root's own session instead.
+    """Cases 0, 1 and 3 of 4 are returned, case 2's crash is reported, a stale case 9 is ignored.
 
     Args:
         sim_notebook: The paired notebook, never run.
         capsys: pytest's fixture for capturing what `load_runs` prints.
-        monkeypatch: pytest's fixture for setting `CI` for this test only.
     """
-    root = sim_notebook.parent / "monte_carlo"
-    for folder, stamp, cases, planned in [
-        (root, "20260101T000000Z-aaaa", [0], 1),
-        (root, "20260102T000000Z-bbbb", [0, 1], 3),
-        (root / "ci", "20260103T000000Z-cccc", [0], 2),
-    ]:
-        session = folder / "campaign" / "TestA" / "test_x" / stamp
-        session.mkdir(parents=True)
-        (session / "planned.json").write_text(json.dumps({"runs": planned}))
-        for case in cases:
-            with h5py.File(session / f"run_{case:04d}.h5", "w") as run_file:
-                run_file.attrs["case"] = case
-                run_file.create_dataset("t_s", data=[0.0]).attrs["units"] = "s"
+    _write_session(sim_notebook, "s", [0, 1, 3], 4, crashed=(2,), stale=(9,))
 
     runs = wd_notebook.load_runs("TestA::test_x", sim_notebook)
 
-    assert [int(run["attrs"]["case"]) for run in runs] == [0, 1]
-    assert capsys.readouterr().out == "20260102T000000Z-bbbb: 2 of 3 cases\n"
+    assert [int(run["attrs"]["case"]) for run in runs] == [0, 1, 3]
+    assert capsys.readouterr().out == "s: 3 of 4 cases, crashed: 2\n"
 
-    monkeypatch.setenv("CI", "true")
-    wd_notebook.load_runs("TestA::test_x", sim_notebook)
-    assert capsys.readouterr().out == "20260103T000000Z-cccc: 1 of 2 cases\n"
+
+def test_load_runs_follows_a_session_switch_within_one_process(
+    sim_notebook: Path, capsys: pytest.CaptureFixture[str]
+):
+    """Pointing at another session between two calls makes the second call read that session.
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+        capsys: pytest's fixture for capturing what `load_runs` prints.
+    """
+    _write_session(sim_notebook, "first", [0], 1)
+    _write_session(sim_notebook, "second", [0, 1], 2)
+    _activate(sim_notebook.parent, "first")
+
+    assert len(wd_notebook.load_runs("TestA::test_x", sim_notebook)) == 1
+    assert capsys.readouterr().out == "first: 1 of 1 cases\n"
+
+    _activate(sim_notebook.parent, "second")
+
+    assert len(wd_notebook.load_runs("TestA::test_x", sim_notebook)) == 2
+    assert capsys.readouterr().out == "second: 2 of 2 cases\n"
+
+
+def test_load_runs_with_no_active_session_names_how_to_pick_one(sim_notebook: Path):
+    """With no pointer, `load_runs` raises `RuntimeError` naming `--sim-session`.
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+    """
+    _write_session(sim_notebook, "s", [0], 1)
+    _activate(sim_notebook.parent, None)
+
+    with pytest.raises(RuntimeError, match=re.escape(NO_SESSION)):
+        wd_notebook.load_runs("TestA::test_x", sim_notebook)
 
 
 def test_load_runs_turns_a_methods_qualified_name_into_its_node_path(sim_notebook: Path):
