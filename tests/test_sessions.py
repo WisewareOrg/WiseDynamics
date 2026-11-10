@@ -1,12 +1,38 @@
-"""Sessions: `session_directory`, the per-case result and crash record, and `read_test_results`."""
+"""Sessions: `session_directory`, the per-case result and crash record, and `read_test_results`.
+
+The plugin's behaviour is exercised through real pytest sessions in subprocesses. Cases write
+minimal run files, so no Basilisk simulation runs.
+"""
 
 import importlib
+import json
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+SESSION = "s"
 NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
+SERIAL = ("-p", "no:xdist")
+CASE_TEST = """
+import os
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+
+@pytest.mark.sim_runs(RUNS)
+def test_case(sim_case_index, sim_run_file):
+    mode = Path("mode").read_text() if Path("mode").exists() else "pass"
+    if mode == "raise-before-write":
+        raise RuntimeError("boom")
+    if mode == "abort" and sim_case_index == 1:
+        os.abort()
+    sim_run_file({"t_s": (np.zeros(2), "s")})
+    if mode == "assert-after-write":
+        assert False, "late"
+"""
 
 
 def _sessions() -> ModuleType:
@@ -32,6 +58,35 @@ def _point(pytester: pytest.Pytester, name: str, root: str = "monte_carlo") -> P
     (pytester.path / root).mkdir(parents=True, exist_ok=True)
     (pytester.path / root / "SESSION").write_text(name)
     return pytester.path / root / name.strip()
+
+
+def _campaign(pytester: pytest.Pytester, runs: int) -> Path:
+    """Write the one-test campaign into session `s` and return the test's directory.
+
+    The test's behaviour follows the content of a file `mode` in the rootdir: absent or `pass`
+    writes a run file; `raise-before-write` raises before it; `assert-after-write` fails after it;
+    `abort` kills the process in case 1.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        runs: The test's `sim_runs`.
+
+    Returns:
+        The test's directory in the session.
+    """
+    session = _point(pytester, SESSION + "\n")
+    pytester.makepyfile(test_scenario=CASE_TEST.replace("RUNS", str(runs)))
+    return session / "test_scenario" / "test_case"
+
+
+def _mode(pytester: pytest.Pytester, mode: str) -> None:
+    """Set how the campaign's cases behave on the next run.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        mode: One of the modes `_campaign` lists.
+    """
+    (pytester.path / "mode").write_text(mode)
 
 
 def test_session_directory_is_the_root_joined_to_the_pointers_name(pytester: pytest.Pytester):
@@ -99,3 +154,184 @@ def test_session_directory_with_an_invalid_name_raises_a_usage_error_naming_the_
 
     assert "SESSION" in str(raised.value)
     assert str(raised.value) != NO_SESSION
+
+
+def test_a_case_that_raises_before_its_run_file_leaves_a_crash_record(pytester: pytest.Pytester):
+    """A case failing before `sim_run_file` writes `run_NNNN.crash.json` and no run file.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 2)
+    _mode(pytester, "raise-before-write")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(failed=2)
+
+    assert not list(directory.glob("run_*.h5"))
+    for case in (0, 1):
+        record = json.loads((directory / f"run_{case:04d}.crash.json").read_text())
+        assert sorted(record) == ["exception", "traceback"]
+        assert isinstance(record["exception"], str)
+        assert isinstance(record["traceback"], str)
+        assert "boom" in record["exception"]
+        assert "boom" in record["traceback"]
+
+
+def test_a_case_whose_setup_fails_leaves_a_crash_record(pytester: pytest.Pytester):
+    """A failing fixture setup counts like a failing call: a record, no run file.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 1)
+    pytester.makeconftest(
+        """
+        import pytest
+
+
+        @pytest.fixture(autouse=True)
+        def broken(sim_case_index):
+            raise RuntimeError("setup boom")
+        """
+    )
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(errors=1)
+
+    record = json.loads((directory / "run_0000.crash.json").read_text())
+    assert "setup boom" in record["exception"]
+    assert not list(directory.glob("run_*.h5"))
+
+
+def test_a_passing_rerun_replaces_a_crash_with_a_run_file(pytester: pytest.Pytester):
+    """After a crash, a case that passes leaves its run file and no crash record.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 1)
+    _mode(pytester, "raise-before-write")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(failed=1)
+    assert (directory / "run_0000.crash.json").exists()
+
+    _mode(pytester, "pass")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+    assert sorted(path.name for path in directory.iterdir()) == ["planned.json", "run_0000.h5"]
+
+
+def test_a_crashing_rerun_replaces_a_run_file_with_a_crash_record(pytester: pytest.Pytester):
+    """After a pass, a case that crashes leaves its crash record and no run file.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 1)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    assert (directory / "run_0000.h5").exists()
+
+    _mode(pytester, "raise-before-write")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(failed=1)
+
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "planned.json",
+        "run_0000.crash.json",
+    ]
+
+
+def test_a_case_that_asserts_after_writing_keeps_its_run_file_only(pytester: pytest.Pytester):
+    """A case that wrote its run file and then failed has the file and no crash record.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 1)
+    _mode(pytester, "assert-after-write")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(failed=1)
+
+    assert sorted(path.name for path in directory.iterdir()) == ["planned.json", "run_0000.h5"]
+
+
+def test_rerunning_one_case_replaces_only_its_own_result(pytester: pytest.Pytester):
+    """A node-id rerun of case 1 rewrites its file and leaves case 0's file untouched.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 2)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+    before = {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")}
+
+    pytester.runpytest_subprocess(*SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
+        passed=1
+    )
+
+    after = {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")}
+    assert sorted(after) == ["run_0000.h5", "run_0001.h5"]
+    assert after["run_0000.h5"] == before["run_0000.h5"]
+    assert after["run_0001.h5"] != before["run_0001.h5"]
+
+
+def test_a_worker_that_dies_in_a_case_leaves_a_crash_record(pytester: pytest.Pytester):
+    """Under `-n 2`, `os.abort()` in case 1 gives it a crash record and no run file.
+
+    Cases 0 and 2 run to a run file. The first run passes every case, so the crash also replaces
+    case 1's earlier run file.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 3)
+    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=3)
+    assert (directory / "run_0001.h5").exists()
+
+    _mode(pytester, "abort")
+    result = pytester.runpytest_subprocess("-n", "2")
+
+    result.assert_outcomes(passed=2, failed=1)
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "planned.json",
+        "run_0000.h5",
+        "run_0001.crash.json",
+        "run_0002.h5",
+    ]
+    record = json.loads((directory / "run_0001.crash.json").read_text())
+    assert sorted(record) == ["exception", "traceback"]
+    assert isinstance(record["exception"], str)
+    assert isinstance(record["traceback"], str)
+
+
+def test_read_test_results_returns_cases_below_planned_only(tmp_path: Path):
+    """Runs and crashes for cases `0..planned-1` are returned; a stale higher file is ignored.
+
+    Args:
+        tmp_path: The test's own temporary directory, holding a hand-built test directory.
+    """
+    directory = tmp_path / "test_case"
+    directory.mkdir()
+    (directory / "planned.json").write_text(json.dumps({"runs": 4}))
+    for case in (0, 1, 3, 9):
+        (directory / f"run_{case:04d}.h5").write_bytes(b"")
+    crash = {"exception": "boom", "traceback": "Traceback..."}
+    (directory / "run_0002.crash.json").write_text(json.dumps(crash))
+    (directory / "run_0007.crash.json").write_text(json.dumps(crash))
+
+    results = _sessions().read_test_results(directory)
+
+    assert results.planned == 4
+    assert results.runs == {case: directory / f"run_{case:04d}.h5" for case in (0, 1, 3)}
+    assert results.crashes == {2: crash}
+
+
+def test_read_test_results_of_a_session_written_by_the_plugin(pytester: pytest.Pytester):
+    """The names the plugin writes are the names `read_test_results` reads.
+
+    A full pass reads back as three runs, no crash, and a stale case 3 is ignored.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 3)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=3)
+    (directory / "run_0003.h5").write_bytes(b"")
+
+    results = _sessions().read_test_results(directory)
+
+    assert (results.planned, sorted(results.runs), results.crashes) == (3, [0, 1, 2], {})
