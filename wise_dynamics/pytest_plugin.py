@@ -7,8 +7,6 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 
 import json
 import numbers
-import os
-import secrets
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -21,15 +19,16 @@ from urllib.request import url2pathname
 import numpy as np
 import pytest
 
+from wise_dynamics import sessions
+
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.scenario import Scenario
 
 __all__: list[str] = []
 
 _WORKER_DIRS = "wise_dynamics_dirs"
-_WORKER_STAMP = "wise_dynamics_stamp"
-_DEFAULT_ROOT = pytest.StashKey[Path]()
-_STAMP = pytest.StashKey[str]()
+_WORKER_SESSION = "wise_dynamics_session"
+_SESSION = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
@@ -62,12 +61,6 @@ _MARKS = (
         "seconds",
         f"simulated duration of each case, positive; default {_DEFAULT_DURATION_S:g}",
     ),
-    (
-        "sim_out",
-        "path",
-        "directory the run files are written under, relative to the rootdir; default the "
-        "`sim_out` ini setting",
-    ),
 )
 
 
@@ -79,7 +72,7 @@ class _Settings(NamedTuple):
         runs: The number of cases, after the `--ci` cap.
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
-        directory: The directory the test's run files are written to.
+        directory: The directory the test's run files are written to, in the active session.
     """
 
     scenario: str
@@ -102,54 +95,88 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help=f"cap every test's case count at {_CI_RUNS}",
     )
+    group.addoption(
+        "--sim-session",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="name",
+        help="with a name, make it the active Monte Carlo session; without, list the sessions; "
+        "either way no test runs",
+    )
     parser.addini(
         "sim_out",
         type="string",
         default=_DEFAULT_OUT,
-        help="directory the run files of a test without a `sim_out` mark are written under, "
-        f"relative to the rootdir; default {_DEFAULT_OUT}",
+        help="directory that holds the Monte Carlo sessions and the `SESSION` pointer, relative "
+        f"to the rootdir; default {_DEFAULT_OUT}",
     )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config: pytest.Config) -> int | None:
+    """Handle `--sim-session` without configuring the session or running any test.
+
+    The handler reads only the command line and the `sim_out` ini setting, so a broken pointer or
+    an install that cannot be described never blocks it.
+
+    Args:
+        config: The parsed, not yet configured, pytest configuration.
+
+    Returns:
+        The exit code when `--sim-session` was given, else None. An invalid name or an empty
+        `sim_out` ini setting stops the run with a usage error.
+    """
+    name = config.getoption("sim_session")
+    if name is None:
+        return None
+    root = sessions.sim_root(config)
+    if name:
+        sessions.check_name(name, "--sim-session")
+        root.mkdir(parents=True, exist_ok=True)
+        (root / sessions.POINTER).write_text(f"{name}\n")
+        print(f"session: {name}")
+        return int(pytest.ExitCode.OK)
+    pointer = root / sessions.POINTER
+    active = pointer.read_text().strip() if pointer.is_file() else ""
+    print(f"active: {active or 'none'}")
+    others = sorted(path.name for path in root.iterdir() if path.is_dir()) if root.is_dir() else []
+    for other in others:
+        if other != active:
+            print(other)
+    return int(pytest.ExitCode.OK)
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the `sim_` marks and resolve the session's default run directory.
+    """Register the `sim_` marks and check the `sim_out` ini setting.
 
-    The default directory is the `sim_out` ini setting, joined to the rootdir when relative. The
-    controlling process, or the only one, picks the session's stamp, a UTC time and four random
-    hex digits that name the session's folder under each test's directory; every pytest-xdist
-    worker receives it. The first file written creates the folder.
+    The active session is resolved when a test first needs it, not here.
+
+    A usage error stops the session when the `sim_out` ini setting is empty or the `wise-dynamics`
+    install is neither a git pin nor an editable local checkout.
 
     Args:
         config: The session's pytest configuration, which holds the stash.
-
-    Raises:
-        pytest.UsageError: The `sim_out` ini setting is empty, or the `wise-dynamics` install is
-            neither a git pin nor an editable local checkout.
     """
     for name, argument, description in _MARKS:
         config.addinivalue_line("markers", f"{name}({argument}): {description}")
-    out = config.getini("sim_out")
-    if not out:
-        raise pytest.UsageError("the sim_out ini setting must not be empty")
-    config.stash[_DEFAULT_ROOT] = config.rootpath / out
-    workerinput = getattr(config, "workerinput", None)
-    config.stash[_STAMP] = (
-        workerinput[_WORKER_STAMP]
-        if workerinput is not None
-        else f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
-    )
+    sessions.sim_root(config)
     config.stash[_WRITTEN_DIRS] = set()
     config.stash[_PROVENANCE] = _provenance()
 
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
-    """Hand a starting pytest-xdist worker the session's stamp.
+    """Hand a starting pytest-xdist worker the active session, or why there is none.
 
     Args:
         node: The pytest-xdist worker node being configured.
     """
-    node.workerinput[_WORKER_STAMP] = node.config.stash[_STAMP]
+    try:
+        handed = {"directory": str(_active_session(node.config)), "error": None}
+    except pytest.UsageError as error:
+        handed = {"directory": None, "error": str(error)}
+    node.workerinput[_WORKER_SESSION] = handed
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -169,6 +196,9 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize every test that uses `sim_case_index` over its case numbers.
 
+    With no usable active session the test gets the single case `no-session`, which errors at
+    setup with the reason; other tests are unaffected.
+
     Args:
         metafunc: The test function being collected.
     """
@@ -179,6 +209,11 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
+    except pytest.UsageError as error:
+        metafunc.parametrize(
+            "sim_case_index", [pytest.param(str(error), id="no-session")], indirect=True
+        )
+        return
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
 
 
@@ -186,7 +221,8 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count into the session's folder.
 
     A `--collect-only` session writes nothing, and neither does a pytest-xdist controller, which
-    collects nothing; each worker writes the same content.
+    collects nothing; each worker writes the same content. A test with no active session has no
+    folder to write to.
 
     Args:
         session: The finished collection session.
@@ -195,7 +231,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         return
     planned: dict[Path, int] = {}
     for item in session.items:
-        if "sim_case_index" in item.fixturenames:
+        if "sim_case_index" in item.fixturenames and not _is_no_session(item):
             directory = _settings(item).directory
             planned[directory] = planned.get(directory, 0) + 1
     for directory, runs in planned.items():
@@ -241,6 +277,8 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
     Returns:
         The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
     """
+    if isinstance(request.param, str):
+        pytest.fail(request.param, pytrace=False)
     return request.param
 
 
@@ -383,34 +421,58 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
     if node.config.getoption("ci"):
         runs = min(runs, _CI_RUNS)
-    directory = _run_dir(node) / node.config.stash[_STAMP]
+    directory = _run_dir(node)
     return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
 
 
 def _run_dir(node: pytest.Function) -> Path:
-    """Build a test's run directory without resolving its scenario.
+    """Build a test's run directory in the active session.
 
     Args:
         node: The test function, or one of its parametrized items.
 
     Returns:
-        `_test_directory` under the test's `sim_out` mark, resolved against the rootdir, else
-        under the session's default root; under `--ci`, under that root's `ci` directory.
+        `_test_directory` under the active session's directory.
+    """
+    return _test_directory(node, _active_session(node.config))
+
+
+def _active_session(config: pytest.Config) -> Path:
+    """Resolve the run's session directory once, so a later switch of the pointer cannot split it.
+
+    A pytest-xdist worker uses the session its controller handed it.
+
+    Args:
+        config: The session's pytest configuration, which holds the stash.
+
+    Returns:
+        The active session's directory.
 
     Raises:
-        ValueError: A mark is malformed; the message starts with the mark's name.
+        pytest.UsageError: There is no active session, or its name is invalid.
     """
-    values = _marked_values(node)
-    if "sim_out" in values:
-        out = values["sim_out"]
-        if not isinstance(out, str | os.PathLike):
-            raise ValueError(f"sim_out: expected a path, got {out!r}")
-        if not os.fspath(out):
-            raise ValueError("sim_out: expected a non-empty path")
-        root = node.config.rootpath / out
-    else:
-        root = node.config.stash[_DEFAULT_ROOT]
-    return _test_directory(node, root / "ci" if node.config.getoption("ci") else root)
+    if _SESSION not in config.stash:
+        workerinput = getattr(config, "workerinput", None)
+        if workerinput is None:
+            config.stash[_SESSION] = sessions.session_directory(config)
+        else:
+            handed = workerinput[_WORKER_SESSION]
+            if handed["directory"] is None:
+                raise pytest.UsageError(handed["error"])
+            config.stash[_SESSION] = Path(handed["directory"])
+    return config.stash[_SESSION]
+
+
+def _is_no_session(item: pytest.Function) -> bool:
+    """Tell whether an item is the `no-session` case of a Monte Carlo test.
+
+    Args:
+        item: A collected test item that uses `sim_case_index`.
+
+    Returns:
+        Whether its case parameter is the reason text rather than a case number.
+    """
+    return isinstance(item.callspec.params["sim_case_index"], str)
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:
