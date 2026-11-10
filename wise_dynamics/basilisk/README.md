@@ -12,7 +12,7 @@ raises.
 | module | holds |
 |---|---|
 | `wise_dynamics/pytest_plugin.py` | the pytest plugin's marks, `--ci`, `--sim-session` and `sim_*` fixtures |
-| `wise_dynamics/sessions.py` | the session pointer and layout: `session_directory` and `read_test_results` |
+| `wise_dynamics/sessions.py` | the session pointer and layout: `session_directory`, `recorded_tests` and `read_test_results` |
 | `wise_dynamics/notebook.py` | the `%%monte_carlo` notebook magic and `load_runs` (the `notebook` extra) |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
@@ -117,8 +117,10 @@ cases agrees on where runs are, and a running notebook kernel follows a switch. 
 the session once, so switching it midway does not split the run. A test's run files are in
 `<root>/<session>/<test file>/<class>/<function>/`: the test file is its path relative to the
 rootdir without `.py`, and each enclosing class, outermost first, is a directory. Before the first
-case runs, each worker writes `planned.json`, `{"runs": N}` for the test's case count after the
-`--ci` cap, into that directory.
+case runs, each worker writes `planned.json`, `{"runs": N, "nodeid": "<test file>.py::<class>::<function>"}`,
+into that directory: the test's case count after the `--ci` cap, and its node id without
+parameters. `wise_dynamics.sessions.recorded_tests(session)` lists a session's test folders with
+their node ids, so a consumer finds a test's folder by its node id instead of parsing the path.
 
 A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.crash.json`, and
 nothing else is cleared, so rerunning one case by its node id replaces only its result. A case
