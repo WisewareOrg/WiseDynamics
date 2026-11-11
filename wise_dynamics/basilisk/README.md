@@ -191,8 +191,9 @@ from a cell. Install the `notebook` extra, `wise-dynamics[notebook]`, and load t
 paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest
 with `-n auto` and `--full-monte-carlo` (capped, without the option, when `WISE_DYNAMICS_CAPPED`
 is set). The tests also include any test function or `Test*` class the cell's code creates, such as
-by assigning it into the namespace. The cell then raises if any test fails, so Run All stops before
-the plot cells. The notebook's path comes from the argument, else `__vsc_ipynb_file__` (VS Code),
+by assigning it into the namespace. The magic runs the cell first and then flies the tests it
+defines or creates, so a cell that defines or creates no test is refused after it has run. The cell
+then raises if any test fails, so Run All stops before the plot cells. The notebook's path comes from the argument, else `__vsc_ipynb_file__` (VS Code),
 else `JPY_SESSION_NAME` (a Jupyter server).
 
 Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
