@@ -2,7 +2,7 @@
 
 A test configures its campaign with marks on the function, a class or the module, the closest
 winning. Installing `wise-dynamics` registers this module through its `pytest11` entry point.
-`wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
+`wise_dynamics/basilisk/README.md` documents the marks, `--full-monte-carlo` and fixtures.
 """
 
 import json
@@ -37,7 +37,7 @@ _INSTALL_HINT = (
     "`uv pip install -e <checkout>`."
 )
 _DEFAULT_OUT = "monte_carlo"
-_CI_RUNS = 2
+_CAPPED_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
 _DEFAULT_RUNS = 8
 _DEFAULT_FIDELITY = "lo"
@@ -85,7 +85,7 @@ class _Settings(NamedTuple):
 
     Attributes:
         scenario: The scenario's name in `SCENARIOS`.
-        runs: The number of cases, after the `--ci` cap.
+        runs: The number of cases, after the cap.
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
         directory: The directory the test's run files are written to, in the active session.
@@ -101,17 +101,17 @@ class _Settings(NamedTuple):
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the `--ci` option.
+    """Register the `--full-monte-carlo` and `--sim-session` options and the `sim_out` setting.
 
     Args:
         parser: The pytest command-line parser.
     """
     group = parser.getgroup("wise-dynamics", "WiseDynamics vehicle cases")
     group.addoption(
-        "--ci",
+        "--full-monte-carlo",
         action="store_true",
         default=False,
-        help=f"cap every test's case count at {_CI_RUNS}",
+        help=f"fly every case of every test; without it each test flies at most {_CAPPED_RUNS}",
     )
     group.addoption(
         "--sim-session",
@@ -236,7 +236,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count and node path into the session's folder.
 
-    The count is the test's `sim_runs` after the `--ci` cap, not the number of cases selected.
+    The count is the test's `sim_runs` after the cap, not the number of cases selected.
 
     A `--collect-only` run writes nothing, and neither does a pytest-xdist controller, which
     collects nothing; each worker writes the same content. A test with no active Monte Carlo
@@ -352,7 +352,7 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
         request: The fixture request, whose `param` is the case number.
 
     Returns:
-        The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
+        The case number, from 0 up to the test's `sim_runs` (after the cap).
     """
     if isinstance(request.param, _NoSession):
         pytest.fail(request.param.reason, pytrace=False)
@@ -468,7 +468,7 @@ def sim_run_file(
 
 
 def _settings(node: pytest.Function) -> _Settings:
-    """Resolve a test's configuration from its marks, the defaults and `--ci`.
+    """Resolve a test's configuration from its marks, the defaults and the cap.
 
     Resolving the run directory raises `pytest.UsageError` through `_active_session` when no
     session is active or its name is invalid.
@@ -477,7 +477,7 @@ def _settings(node: pytest.Function) -> _Settings:
         node: The test function, or one of its parametrized items.
 
     Returns:
-        The test's settings, its case count capped at two under `--ci`.
+        The test's settings, its case count capped at two unless `--full-monte-carlo` is given.
 
     Raises:
         ValueError: A mark's value is malformed; the message starts with the mark's name.
@@ -509,8 +509,8 @@ def _settings(node: pytest.Function) -> _Settings:
             _vehicle_type(vehicle)
         except ValueError as error:
             raise ValueError(f"sim_vehicle: {error}") from None
-    if node.config.getoption("ci"):
-        runs = min(runs, _CI_RUNS)
+    if not node.config.getoption("full_monte_carlo"):
+        runs = min(runs, _CAPPED_RUNS)
     directory = _run_dir(node)
     return _Settings(scenario, int(runs), fidelity, float(duration_s), directory, vehicle)
 

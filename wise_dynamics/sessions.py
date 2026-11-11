@@ -177,7 +177,7 @@ def write_planned(directory: Path, runs: int, nodeid: str) -> None:
 
     Args:
         directory: The test's directory in a session.
-        runs: The test's case count after the `--ci` cap.
+        runs: The test's case count after the cap.
         nodeid: The test's node path relative to the rootdir, without parameters.
     """
     directory.mkdir(parents=True, exist_ok=True)
