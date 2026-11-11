@@ -140,7 +140,9 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     """Handle `--sim-session` without configuring the session or running any test.
 
     The handler reads only the command line and the `sim_out` ini setting, so a broken pointer or
-    an install that cannot be described never blocks it.
+    an install that cannot be described never blocks it. When `WISE_DYNAMICS_SESSION_REPORT` names
+    a file, the list mode writes the session directory `session_directory` gives, or null when no
+    session is active, to it as JSON.
 
     Args:
         config: The parsed, not yet configured, pytest configuration.

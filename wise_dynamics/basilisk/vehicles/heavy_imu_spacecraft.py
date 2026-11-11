@@ -6,10 +6,7 @@ __all__ = ["HeavyImuSpacecraft"]
 
 
 class HeavyImuSpacecraft(ImuSpacecraft):
-    """`ImuSpacecraft` at three times the mass and x and y inertia, twice the z inertia, same IMU.
-
-    Scaling every inertia by one factor would leave the torque-free tumble unchanged, and point-mass
-    gravity ignores mass, so z scales less to make the vehicle fly differently.
+    """`ImuSpacecraft` with a different mass and inertia ratio, so it tumbles differently; same IMU.
 
     Attributes:
         mass_kg: Nominal hub mass, in kilograms.

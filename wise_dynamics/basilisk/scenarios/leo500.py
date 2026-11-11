@@ -5,14 +5,13 @@ from Basilisk.utilities import orbitalMotion, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
 from wise_dynamics.basilisk.scenario import Scenario
-from wise_dynamics.basilisk.vehicle import Vehicle
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["Leo500"]
 
 
 class Leo500(Scenario):
-    """An `ImuSpacecraft` tumbling on a classical-element orbit about a point-mass Earth.
+    """A vehicle tumbling on a classical-element orbit about a point-mass Earth.
 
     The inertial frame N is Earth-centred, with no rotation and no epoch: point-mass gravity has
     nothing that depends on time. The class attributes define the scenario, and the constructor
@@ -42,7 +41,7 @@ class Leo500(Scenario):
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     record_s: float = 10.0
 
-    def __init__(self, vehicle_type: type[Vehicle] = ImuSpacecraft) -> None:
+    def __init__(self, vehicle_type: type[ImuSpacecraft] = ImuSpacecraft) -> None:
         """Build a vehicle of `vehicle_type` and place it at the class attributes' placement.
 
         The scenario holds it as `vehicle`, which `disperse` replaces, and in `vehicles`, as

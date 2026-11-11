@@ -706,3 +706,22 @@ def test_current_session_with_no_pointer_raises_no_session_error(
 
     with pytest.raises(_sessions().NoSessionError):
         _sessions().current_session()
+
+
+def test_current_session_with_an_invalid_pointer_name_raises_runtime_error_with_pytests_output(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """A pointer pytest rejects fails the subprocess, so no path is returned and the cause shows.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture; it unsets the variable.
+    """
+    monkeypatch.delenv("WISE_DYNAMICS_CAPPED", raising=False)
+    _point(pytester, "bad/name\n")
+
+    with pytest.raises(RuntimeError, match="could not report the session") as raised:
+        _sessions().current_session()
+
+    assert not isinstance(raised.value, _sessions().NoSessionError)
+    assert "bad/name" in str(raised.value)
