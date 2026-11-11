@@ -34,6 +34,7 @@ SCRATCH = "scratch"
 CAPPED_ENV = "WISE_DYNAMICS_CAPPED"
 REPORT_ENV = "WISE_DYNAMICS_SESSION_REPORT"
 NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
+_CASE_FILE = re.compile(r"run_(\d+)(?:\.crash\.json|\.h5)")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -216,6 +217,19 @@ def crash_path(directory: Path, case: int) -> Path:
         The case's crash record path.
     """
     return directory / f"run_{case:04d}.crash.json"
+
+
+def _case_number(path: Path) -> int | None:
+    """Read the case number from the name of a run file or crash record.
+
+    Args:
+        path: A path in a test's directory.
+
+    Returns:
+        The case number when `path` is named as `run_path` or `crash_path` names one, else None.
+    """
+    match = _CASE_FILE.fullmatch(path.name)
+    return int(match[1]) if match else None
 
 
 def write_planned(directory: Path, runs: int, nodeid: str) -> None:

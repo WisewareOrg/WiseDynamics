@@ -8,7 +8,6 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 import json
 import numbers
 import os
-import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -36,7 +35,6 @@ _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _CALLER = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
-_CASE_FILE = re.compile(r"run_(\d+)\.(?:h5|crash\.json)")
 _INSTALL_HINT = (
     "Install a pinned release with `uv sync` against a git dependency, or a local checkout with\n"
     "`uv pip install -e <checkout>`."
@@ -605,8 +603,8 @@ def _delete_leftovers(directory: Path, runs: int) -> None:
         runs: The test's planned case count.
     """
     for path in directory.glob("run_*"):
-        match = _CASE_FILE.fullmatch(path.name)
-        if match and int(match[1]) >= runs:
+        case = sessions._case_number(path)
+        if case is not None and case >= runs:
             path.unlink(missing_ok=True)
 
 
