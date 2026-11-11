@@ -117,11 +117,11 @@ JSON, `null` when none is active; `current_session()` reads it.
 | `sim_duration_s` | the test's `sim_duration_s` |
 | `sim_test_directory` | the test's directory in the session its runs land in (`scratch` for a capped run), the directory `sim_run_file` writes to |
 | `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory of the active session through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and the calling repository's provenance (`versions_caller_commit`, the commit of the git repository that holds the rootdir, and `versions_caller_dirty`, whether its tree has uncommitted changes; both absent when the rootdir is not in a git checkout), `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory of the session its runs land in (`scratch` for a capped run) through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and the calling repository's provenance (`versions_caller_commit`, the commit of the git repository that holds the rootdir, and `versions_caller_dirty`, whether its tree has uncommitted changes; both absent when the rootdir is not in a git checkout), `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
-is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
+is and reruns alone by its node id: `pytest "<test file>::test_case[k]" --full-monte-carlo`.
 
 A session is a named working set holding one set of run files per test
 ([ADR 0002 rev 2](../../docs/decisions/0002-monte-carlo-sessions.md)). `<root>/SESSION` holds the

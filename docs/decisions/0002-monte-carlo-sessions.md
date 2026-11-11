@@ -71,7 +71,8 @@ means only that it never ran.
 
 ## Consequences
 
-- A rerun of one case by its node id changes that case's files and nothing else.
+- A full rerun (`--full-monte-carlo`) of one case by its node id changes that case's files and
+  nothing else.
 - Deleting a session is removing its folder.
 - A bare `pytest` run, the editor's test explorer and CI fly two cases per test into `scratch` and
   leave the user's session untouched.
