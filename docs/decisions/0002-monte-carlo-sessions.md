@@ -36,8 +36,8 @@ it.
 
 A case replaces its own result: a case that starts deletes its own earlier run file and crash
 record. A campaign of N cases, once collected, also deletes the run files and crash records of its
-test numbered N and above, so the leftovers of an earlier, larger campaign never mix in with the
-new one. Nothing else is cleared. A case that fails without having written its run file leaves a crash
+test numbered N and above, so the leftovers of an earlier, larger campaign never mix in with the new
+one. Nothing else is cleared. A case that fails without having written its run file leaves a crash
 record. Every case below N in a session is therefore a run, a crash record or missing, and missing
 means only that it never ran.
 
