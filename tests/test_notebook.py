@@ -465,7 +465,7 @@ def test_a_notebook_with_nothing_to_mark_is_not_rewritten(
 def test_a_cell_defining_no_test_is_refused(
     shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """A saved cell with no top-level test raises, and its code does not run.
+    """A saved cell that neither defines nor creates a test raises, after its code has run.
 
     Args:
         shell: The in-process shell with the magic loaded.
@@ -479,7 +479,7 @@ def test_a_cell_defining_no_test_is_refused(
     with pytest.raises(RuntimeError, match="defines no test"):
         shell.run_cell_magic("monte_carlo", "", _body(cell))
 
-    assert not (tmp_path / "ran").exists()
+    assert (tmp_path / "ran").exists()
 
 
 def test_no_path_source_is_refused_asking_for_the_path(

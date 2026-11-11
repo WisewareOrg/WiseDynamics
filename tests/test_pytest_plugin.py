@@ -1563,7 +1563,8 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
 def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = False) -> dict:
     """Fly one case in a rootdir that is (or is not) a committed repository; read its root attrs.
 
-    The repository ignores the run folder and Python's caches, so only `dirty` makes it dirty.
+    The repository ignores the run folder, Python's caches and pytester's own output files, so
+    nothing is untracked and only `dirty` makes it dirty.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -1577,7 +1578,11 @@ def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = Fal
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     if repository:
         _git(pytester.path, "init", "-q")
-        (pytester.path / ".gitignore").write_text("monte_carlo/\n__pycache__/\n.pytest_cache/\n")
+        (pytester.path / ".gitignore").write_text(
+            (
+                "monte_carlo/\n__pycache__/\n.pytest_cache/\n.cache/\nrunpytest-current\nstdout\nstderr\n"
+            )
+        )
         _git(pytester.path, "add", "-A")
         _git(pytester.path, "commit", "-q", "-m", "first")
         if dirty:
