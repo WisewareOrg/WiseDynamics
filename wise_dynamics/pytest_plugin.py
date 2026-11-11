@@ -33,6 +33,7 @@ _WORKER_SESSION = "wise_dynamics_session"
 _SESSION = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
+_CALLER = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
 _CASE_FILE = re.compile(r"run_(\d+)\.(?:h5|crash\.json)")
 _INSTALL_HINT = (
@@ -189,6 +190,7 @@ def pytest_configure(config: pytest.Config) -> None:
     sessions.sim_root(config)
     config.stash[_WRITTEN_DIRS] = set()
     config.stash[_PROVENANCE] = _provenance()
+    config.stash[_CALLER] = _caller_provenance(config.rootpath)
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -437,8 +439,9 @@ def sim_run_file(
     The file is `run_<NNNN>.h5`, written through `sim_scenario.vehicle` and laid out as the basilisk
     README describes. The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the
     case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the install's provenance
-    (`versions_wise_dynamics_*`, see the basilisk README) and one `draw_<name>` per value the
-    scenario drew.
+    (`versions_wise_dynamics_*`, see the basilisk README), the rootdir repository's commit and
+    dirty state (`versions_caller_commit` and `versions_caller_dirty`, absent when the rootdir is
+    not a git checkout) and one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -459,6 +462,10 @@ def sim_run_file(
         **{
             f"versions_wise_dynamics_{name}": value
             for name, value in request.config.stash[_PROVENANCE].items()
+        },
+        **{
+            f"versions_caller_{name}": value
+            for name, value in request.config.stash[_CALLER].items()
         },
     }
     for name, value in sim_scenario.draws.items():
@@ -765,6 +772,29 @@ def _provenance() -> dict[str, str | bool]:
         "requested_revision": "",
         "dirty": bool(status.stdout.strip()),
     }
+
+
+def _caller_provenance(rootdir: Path) -> dict[str, str | bool]:
+    """Describe the git repository that holds the rootdir.
+
+    Args:
+        rootdir: The pytest rootdir.
+
+    Returns:
+        `commit` (HEAD) and `dirty` (whether `git status --porcelain` lists anything); empty when
+        `git` cannot describe the rootdir.
+    """
+    git = ["git", "-C", str(rootdir)]
+    try:
+        commit = subprocess.run(
+            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        )
+        status = subprocess.run(
+            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {}
+    return {"commit": commit.stdout.strip(), "dirty": bool(status.stdout.strip())}
 
 
 def _run_files(count: int) -> str:
