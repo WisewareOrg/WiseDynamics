@@ -61,7 +61,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 
         Raises:
             RuntimeError: The notebook is unpaired or will not sync, the cell differs from the
-                notebook on disk or defines no test, or the cell or a test fails.
+                notebook on disk or defines or creates no test, or the cell or a test fails.
         """
         notebook = _notebook_path(line)
         py = _notebook_py(notebook)
@@ -85,11 +85,20 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
             )
             or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
         ]
-        if not tests:
-            raise RuntimeError("This cell defines no test.")
         if notebook.suffix == ".ipynb":
             _mark_notebook_only(notebook)
+        before = dict(ipython.user_ns)
         ipython.run_cell(cell).raise_error()
+        tests += [
+            name
+            for name, value in ipython.user_ns.items()
+            if name.startswith("test")
+            and callable(value)
+            and before.get(name) is not value
+            and name not in tests
+        ]
+        if not tests:
+            raise RuntimeError("This cell defines no test.")
         ci = ["--ci"] if os.environ.get("CI") else []
         progress = _Progress()
         exit_code = pytest.main(

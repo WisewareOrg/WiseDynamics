@@ -5,6 +5,7 @@ from Basilisk.utilities import orbitalMotion, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
 
 from wise_dynamics.basilisk.scenario import Scenario
+from wise_dynamics.basilisk.vehicle import Vehicle
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["Leo500"]
@@ -41,15 +42,18 @@ class Leo500(Scenario):
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
     record_s: float = 10.0
 
-    def __init__(self) -> None:
-        """Build the `ImuSpacecraft` and place it at the class attributes' placement.
+    def __init__(self, vehicle_type: type[Vehicle] = ImuSpacecraft) -> None:
+        """Build a vehicle of `vehicle_type` and place it at the class attributes' placement.
 
         The scenario holds it as `vehicle`, which `disperse` replaces, and in `vehicles`, as
         `[vehicle]`. `draws`, what `disperse` drew and applied, name to value, starts empty.
+
+        Args:
+            vehicle_type: The vehicle to fly, an `ImuSpacecraft` or a subclass of it.
         """
         super().__init__()
         self.draws: dict[str, np.ndarray] = {}
-        self.vehicle = self._placed(ImuSpacecraft())
+        self.vehicle = self._placed(vehicle_type())
         self.vehicles = [self.vehicle]
 
     def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> None:

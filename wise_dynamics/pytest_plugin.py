@@ -49,6 +49,12 @@ _MARKS = (
         "name",
         f"name of the scenario in wise_dynamics.basilisk.SCENARIOS; default {_DEFAULT_SCENARIO}",
     ),
+    (
+        "sim_vehicle",
+        "name",
+        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's"
+        " own",
+    ),
     ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
         "sim_fidelity",
@@ -83,6 +89,7 @@ class _Settings(NamedTuple):
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
         directory: The directory the test's run files are written to, in the active session.
+        vehicle: The vehicle's name in `VEHICLES`, or None for the scenario's own.
     """
 
     scenario: str
@@ -90,6 +97,7 @@ class _Settings(NamedTuple):
     fidelity: str
     duration_s: float
     directory: Path
+    vehicle: str | None = None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -380,7 +388,11 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     """
     settings = _settings(request.node)
     draws_stream, noise_stream = _streams(sim_case_index)
-    scenario = _scenario_type(settings.scenario)()
+    scenario_type = _scenario_type(settings.scenario)
+    if settings.vehicle is None:
+        scenario = scenario_type()
+    else:
+        scenario = scenario_type(_vehicle_type(settings.vehicle))
     scenario.fidelity = settings.fidelity
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
@@ -491,10 +503,16 @@ def _settings(node: pytest.Function) -> _Settings:
         or not duration_s > 0
     ):
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
+    vehicle = values.get("sim_vehicle")
+    if vehicle is not None:
+        try:
+            _vehicle_type(vehicle)
+        except ValueError as error:
+            raise ValueError(f"sim_vehicle: {error}") from None
     if node.config.getoption("ci"):
         runs = min(runs, _CI_RUNS)
     directory = _run_dir(node)
-    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory, vehicle)
 
 
 def _run_dir(node: pytest.Function) -> Path:
@@ -725,6 +743,25 @@ def _scenario_type(name: str) -> "type[Scenario]":
         raise ValueError(
             f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
         ) from None
+
+
+def _vehicle_type(name: object) -> type:
+    """Look up a vehicle class by name, importing Basilisk on first use.
+
+    Args:
+        name: A name in `VEHICLES`.
+
+    Returns:
+        The vehicle class `name` registers.
+
+    Raises:
+        ValueError: `name` is not registered.
+    """
+    from wise_dynamics.basilisk.vehicles import VEHICLES
+
+    if name not in VEHICLES:
+        raise ValueError(f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}")
+    return VEHICLES[name]
 
 
 def _streams(index: int) -> list[np.random.SeedSequence]:
