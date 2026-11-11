@@ -79,19 +79,20 @@ def test_x(sim_case_index):
 
 
 def _env(session: Path) -> dict[str, str]:
-    """Build a kernel's whole environment, with `CI` unset and `JPY_SESSION_NAME` set.
+    """Build a kernel's whole environment, with `WISE_DYNAMICS_CAPPED` unset and the session set.
 
     Args:
         session: The notebook `JPY_SESSION_NAME` names.
 
     Returns:
-        The inherited environment without `CI`, `JPY_SESSION_NAME` and pytest's own variables,
-        plus `JPY_SESSION_NAME`.
+        The inherited environment without `CI`, `WISE_DYNAMICS_CAPPED`, `JPY_SESSION_NAME` and
+        pytest's own variables, plus `JPY_SESSION_NAME`.
     """
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("CI", "JPY_SESSION_NAME") and not key.startswith("PYTEST_")
+        if key not in ("CI", "WISE_DYNAMICS_CAPPED", "JPY_SESSION_NAME")
+        and not key.startswith("PYTEST_")
     }
     env["JPY_SESSION_NAME"] = str(session)
     return env
@@ -280,18 +281,19 @@ def shell() -> Iterator[InteractiveShell]:
     InteractiveShell.clear_instance()
 
 
-def _magic_env(monkeypatch: pytest.MonkeyPatch, session: Path | None = None, ci: bool = False):
-    """Set exactly the two variables the magic reads.
+def _magic_env(monkeypatch: pytest.MonkeyPatch, session: Path | None = None, capped: bool = False):
+    """Set exactly the variables the magic reads; `CI` is unset.
 
     Args:
         monkeypatch: pytest's fixture for setting the environment for this test only.
         session: What `JPY_SESSION_NAME` names, or `None` to leave it unset.
-        ci: Whether `CI` is set.
+        capped: Whether `WISE_DYNAMICS_CAPPED` is set.
     """
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("WISE_DYNAMICS_CAPPED", raising=False)
     monkeypatch.delenv("JPY_SESSION_NAME", raising=False)
-    if ci:
-        monkeypatch.setenv("CI", "true")
+    if capped:
+        monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
     if session:
         monkeypatch.setenv("JPY_SESSION_NAME", str(session))
 
@@ -495,30 +497,100 @@ def test_no_path_source_is_refused_asking_for_the_path(
         shell.run_cell_magic("monte_carlo", "", "def test_x():\n    pass\n")
 
 
-@pytest.mark.parametrize("ci", [True, False], ids=["ci", "no-ci"])
-def test_the_run_gets_the_ci_option_only_when_ci_is_set(
-    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ci: bool
+@pytest.mark.parametrize(
+    ("capped", "ci", "full"),
+    [(False, False, True), (True, False, False), (False, True, True), (True, True, False)],
+    ids=["default", "capped", "ci-ignored", "capped-and-ci"],
+)
+def test_the_run_gets_the_full_monte_carlo_option_unless_wise_dynamics_capped_is_set(
+    shell: InteractiveShell,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capped: bool,
+    ci: bool,
+    full: bool,
 ):
-    """The cell's test sees `--ci` exactly when `CI` is set.
+    """The cell's test sees `--full-monte-carlo` exactly when the variable is unset; `CI` is moot.
 
     Args:
         shell: The in-process shell with the magic loaded.
         monkeypatch: pytest's fixture for setting the environment for this test only.
         tmp_path: The test's own temporary directory.
+        capped: Whether `WISE_DYNAMICS_CAPPED` is set.
         ci: Whether `CI` is set.
+        full: Whether the run must have been given `--full-monte-carlo`.
     """
-    sentinel = tmp_path / "ci"
+    sentinel = tmp_path / "full"
     cell = _magic(
         "from pathlib import Path\n\n\n"
-        "def test_records_ci(request):\n"
-        f"    Path({str(sentinel)!r}).write_text(repr(request.config.getoption('--ci')))\n"
+        "def test_records_full(request):\n"
+        f"    option = request.config.getoption('--full-monte-carlo')\n"
+        f"    Path({str(sentinel)!r}).write_text(repr(option))\n"
     )
     path = _write_notebook(tmp_path, [_code(LOAD), cell])
-    _magic_env(monkeypatch, path, ci=ci)
+    _magic_env(monkeypatch, path, capped=capped)
+    if ci:
+        monkeypatch.setenv("CI", "true")
 
     shell.run_cell_magic("monte_carlo", "", _body(cell))
 
-    assert sentinel.read_text() == repr(ci)
+    assert sentinel.read_text() == repr(full)
+
+
+CREATED = """
+from pathlib import Path
+
+LOG = Path({log!r})
+
+
+def _record(name):
+    def test():
+        with LOG.open("a") as file:
+            file.write(name + "\\n")
+
+    return test
+
+
+def test_defined():
+    _record("test_defined")()
+
+
+test_made = _record("test_made")
+TestMade = type("TestMade", (), {{"test_inside": lambda self: _record("TestMade")()}})
+"""
+PRE_EXISTING = """
+from pathlib import Path
+
+
+def test_old():
+    with Path({log!r}).open("a") as file:
+        file.write("test_old\\n")
+"""
+
+
+def test_the_magic_runs_the_tests_a_cell_defines_or_creates_once_and_no_earlier_one(
+    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A `def`, a function bound by assignment and a class built by `type` each run once.
+
+    A `test*` function an earlier cell defined is in the namespace before the cell runs, so it is
+    not one of the cell's tests and does not run.
+
+    Args:
+        shell: The in-process shell with the magic loaded.
+        monkeypatch: pytest's fixture for setting the environment for this test only.
+        tmp_path: The test's own temporary directory.
+    """
+    log = tmp_path / "log"
+    earlier = textwrap.dedent(PRE_EXISTING.format(log=str(log)))
+    cell = _magic(CREATED.format(log=str(log)))
+    path = _write_notebook(tmp_path, [_code(LOAD), _code(earlier), cell])
+    _magic_env(monkeypatch, path)
+    shell.run_cell(earlier).raise_error()
+
+    shell.run_cell_magic("monte_carlo", "", _body(cell))
+
+    assert sorted(log.read_text().split()) == ["TestMade", "test_defined", "test_made"]
 
 
 def test_the_magic_runs_only_its_cells_tests_in_workers_and_raises_on_failure(tmp_path: Path):
@@ -642,12 +714,13 @@ def sim_notebook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     Args:
         tmp_path: The test's own temporary directory.
-        monkeypatch: pytest's fixture; it unsets `CI` for the test.
+        monkeypatch: pytest's fixture; it unsets `CI` and `WISE_DYNAMICS_CAPPED` for the test.
 
     Returns:
         The notebook's path; nothing has run, so there are no run files. Session `s` is active.
     """
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("WISE_DYNAMICS_CAPPED", raising=False)
     path = _write_notebook(tmp_path, [_code(SIM_TESTS)])
     _sync(path)
     _activate(tmp_path, "s")
@@ -760,3 +833,23 @@ def test_load_runs_refuses_a_node_with_more_than_one_run_directory(sim_notebook:
     """
     with pytest.raises(RuntimeError, match="2 run directories"):
         wd_notebook.load_runs("TestA", sim_notebook)
+
+
+def test_load_runs_follows_wise_dynamics_capped_to_the_scratch_session(
+    sim_notebook: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """With the variable set, `load_runs` reads `scratch`, not the pointer's session `s`.
+
+    Args:
+        sim_notebook: The paired notebook, never run; session `s` is active.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+        capsys: pytest's fixture for capturing what `load_runs` prints.
+    """
+    _write_session(sim_notebook, "s", [0, 1, 2], 3)
+    _write_session(sim_notebook, "scratch", [0], 1)
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
+
+    runs = wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+    assert len(runs) == 1
+    assert capsys.readouterr().out == "scratch: 1 of 1 cases\n"
