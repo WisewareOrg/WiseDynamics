@@ -390,6 +390,126 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     assert list(temporary.iterdir()) == []
 
 
+def _scratch_test(pytester: pytest.Pytester) -> Path:
+    """Write the one-test file asking for 5 cases, and return its scratch-session directory.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+
+    Returns:
+        `<rootdir>/monte_carlo/scratch/test_scenario/test_case`.
+    """
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(5)", "sim_duration_s(3)"))))
+    return pytester.path / "monte_carlo" / "scratch" / "test_scenario" / "test_case"
+
+
+def _assert_two_cases_in_scratch(directory: Path) -> None:
+    """Check that `directory` holds exactly cases 0 and 1 and a plan for 2.
+
+    Args:
+        directory: The test's directory in the scratch session.
+    """
+    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
+    assert json.loads((directory / "planned.json").read_text()) == {
+        "runs": 2,
+        "nodeid": "test_scenario.py::test_case",
+    }
+
+
+@pytest.mark.capped_runs
+def test_a_capped_run_writes_to_scratch_and_leaves_the_active_session_alone(
+    pytester: pytest.Pytester,
+):
+    """With pointer `x`, a capped run lands in `scratch`; the pointer and `x/` are untouched.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    active = _point(pytester, name="x")
+    active.mkdir()
+    (active / "keep.txt").write_text("mine")
+    directory = _scratch_test(pytester)
+
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+
+    _assert_two_cases_in_scratch(directory)
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+    assert [path.name for path in active.iterdir()] == ["keep.txt"]
+
+
+@pytest.mark.capped_runs
+def test_a_capped_run_needs_no_active_session_and_writes_no_pointer(pytester: pytest.Pytester):
+    """With no pointer a capped run still works, in `scratch`, and creates no pointer.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _scratch_test(pytester)
+
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+
+    _assert_two_cases_in_scratch(directory)
+    assert not (pytester.path / "monte_carlo" / "SESSION").exists()
+
+
+@pytest.mark.capped_runs
+def test_a_full_run_keeps_the_pointers_session_and_writes_nothing_to_scratch(
+    pytester: pytest.Pytester,
+):
+    """`--full-monte-carlo` flies every case into the pointer's session, not `scratch`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    active = _point(pytester, name="x")
+    _scratch_test(pytester)
+
+    result = pytester.runpytest_subprocess(*SERIAL, "--full-monte-carlo")
+
+    assert result.ret == pytest.ExitCode.OK
+    result.assert_outcomes(passed=5)
+
+    assert len(_read_runs(active / "test_scenario" / "test_case")) == 5
+    assert not (pytester.path / "monte_carlo" / "scratch").exists()
+
+
+@pytest.mark.capped_runs
+def test_wise_dynamics_capped_forces_a_full_flight_flag_into_a_capped_scratch_run(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """With `WISE_DYNAMICS_CAPPED` set, `--full-monte-carlo` still flies 2 cases, into `scratch`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+    """
+    active = _point(pytester, name="x")
+    directory = _scratch_test(pytester)
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
+
+    result = pytester.runpytest_subprocess(*SERIAL, "--full-monte-carlo")
+
+    assert result.ret == pytest.ExitCode.OK
+    result.assert_outcomes(passed=2)
+    _assert_two_cases_in_scratch(directory)
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+    assert not active.exists()
+
+
+@pytest.mark.capped_runs
+def test_sim_session_scratch_is_rejected_and_leaves_the_pointer(pytester: pytest.Pytester):
+    """`--sim-session scratch` is a usage error naming `scratch`, and writes no pointer.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    result = pytester.runpytest_subprocess("--sim-session", "scratch")
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "scratch" in result.stderr.str()
+    assert not (pytester.path / "monte_carlo" / "SESSION").exists()
+
+
 def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester):
     """An empty `sim_out` ini value stops the session with a usage error naming the setting.
 
