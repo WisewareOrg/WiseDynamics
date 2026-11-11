@@ -781,6 +781,9 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         ("sim_runs()", "sim_runs"),
         ("sim_runs(1, 2)", "sim_runs"),
         ("sim_runs(3, n=3)", "sim_runs"),
+        ('sim_vehicle(["a"])', "sim_vehicle"),
+        ("sim_vehicle()", "sim_vehicle"),
+        ("sim_vehicle(1, 2)", "sim_vehicle"),
     ],
 )
 def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(

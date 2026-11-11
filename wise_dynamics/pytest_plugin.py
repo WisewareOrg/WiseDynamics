@@ -540,6 +540,8 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
     vehicle = values.get("sim_vehicle")
     if vehicle is not None:
+        if not isinstance(vehicle, str):
+            raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
         try:
             _vehicle_type(vehicle)
         except ValueError as error:
