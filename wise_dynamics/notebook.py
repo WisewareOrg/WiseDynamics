@@ -92,8 +92,8 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         tests += [
             name
             for name, value in ipython.user_ns.items()
-            if name.startswith("test")
-            and callable(value)
+            if (name.startswith("test") and callable(value))
+            or (name.startswith("Test") and isinstance(value, type))
             and before.get(name) is not value
             and name not in tests
         ]

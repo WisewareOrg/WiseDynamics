@@ -1,4 +1,4 @@
-"""The IMU spacecraft at three times its mass and inertia: a stand-in second vehicle."""
+"""The IMU spacecraft, heavier and differently shaped: a stand-in second vehicle."""
 
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
@@ -6,7 +6,10 @@ __all__ = ["HeavyImuSpacecraft"]
 
 
 class HeavyImuSpacecraft(ImuSpacecraft):
-    """`ImuSpacecraft` with three times the mass and inertia, and the same IMU.
+    """`ImuSpacecraft` at three times the mass and x and y inertia, twice the z inertia, same IMU.
+
+    Scaling every inertia by one factor would leave the torque-free tumble unchanged, and point-mass
+    gravity ignores mass, so z scales less to make the vehicle fly differently.
 
     Attributes:
         mass_kg: Nominal hub mass, in kilograms.
@@ -17,5 +20,5 @@ class HeavyImuSpacecraft(ImuSpacecraft):
     inertia_B_kg_m2 = (
         (2700.0, 0.0, 0.0),
         (0.0, 2400.0, 0.0),
-        (0.0, 0.0, 1800.0),
+        (0.0, 0.0, 1200.0),
     )
