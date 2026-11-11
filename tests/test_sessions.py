@@ -502,3 +502,63 @@ def test_read_test_results_of_a_session_written_by_the_plugin(pytester: pytest.P
     results = _sessions().read_test_results(directory)
 
     assert (results.planned, sorted(results.runs), results.crashes) == (3, [0, 1, 2], {})
+
+
+@pytest.mark.parametrize("workers", [SERIAL, ("-n", "2")], ids=["serial", "xdist"])
+def test_a_campaign_deletes_its_own_run_and_crash_files_numbered_at_or_above_its_plan(
+    pytester: pytest.Pytester, workers: tuple[str, ...]
+):
+    """A folder with cases 0-9, then a run planned for 4: cases 4-9 go, 0-3 stay, siblings stay.
+
+    Only case 0 is selected, so cases 1-3 are neither rerun nor rewritten. Another test's folder,
+    which this run does not collect, is not touched.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        workers: The pytest-xdist arguments of the run.
+    """
+    directory = _campaign(pytester, 4)
+    sibling = directory.parent / "test_gone"
+    directory.mkdir(parents=True)
+    sibling.mkdir()
+    for case in range(10):
+        (directory / f"run_{case:04d}.h5").write_bytes(b"old")
+    for case in (1, 5, 8):
+        (directory / f"run_{case:04d}.crash.json").write_text("{}")
+    for name in ("run_0007.h5", "run_0007.crash.json", "run_0002.h5"):
+        (sibling / name).write_bytes(b"old")
+
+    pytester.runpytest_subprocess(*workers, "test_scenario.py::test_case[0]").assert_outcomes(
+        passed=1
+    )
+
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "planned.json",
+        "run_0000.h5",
+        "run_0001.crash.json",
+        "run_0001.h5",
+        "run_0002.h5",
+        "run_0003.h5",
+    ]
+    assert (directory / "run_0001.h5").read_bytes() == b"old"
+    assert json.loads((directory / "planned.json").read_text())["runs"] == 4
+    assert sorted(path.name for path in sibling.iterdir()) == [
+        "run_0002.h5",
+        "run_0007.crash.json",
+        "run_0007.h5",
+    ]
+
+
+def test_a_collect_only_run_deletes_no_leftover_files(pytester: pytest.Pytester):
+    """`--collect-only` clears nothing: only a run that writes `planned.json` clears leftovers.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 2)
+    directory.mkdir(parents=True)
+    (directory / "run_0005.h5").write_bytes(b"old")
+
+    pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
+
+    assert (directory / "run_0005.h5").exists()
