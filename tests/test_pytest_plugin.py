@@ -700,6 +700,66 @@ def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
     assert not list(pytester.path.rglob("run_*.h5"))
 
 
+VEHICLE_PROBE = """
+import pytest
+from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk.vehicles.heavy_imu_spacecraft import HeavyImuSpacecraft
+
+@pytest.mark.sim_runs(1)
+@pytest.mark.sim_scenario(SCENARIO)
+MARKdef test_case(sim_case_index, sim_scenario):
+    assert type(sim_scenario.vehicle) is EXPECTED
+"""
+
+
+@pytest.mark.parametrize("scenario", ["leo500", "leo400"])
+@pytest.mark.parametrize(
+    ("mark", "expected"),
+    [
+        ('@pytest.mark.sim_vehicle("heavy_imu_spacecraft")\n', "HeavyImuSpacecraft"),
+        ('@pytest.mark.sim_vehicle("imu_spacecraft")\n', "ImuSpacecraft"),
+        ("", "ImuSpacecraft"),
+    ],
+    ids=["heavy", "named-default", "no-mark"],
+)
+def test_the_sim_vehicle_mark_chooses_the_vehicle_class_a_scenario_flies(
+    pytester: pytest.Pytester, scenario: str, mark: str, expected: str
+):
+    """A marked vehicle is the class the scenario flies; no mark keeps the scenario's own.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        scenario: The `sim_scenario` mark's name.
+        mark: The `sim_vehicle` decorator line, or empty.
+        expected: The vehicle class the case must hold, exactly.
+    """
+    _point(pytester)
+    source = (
+        VEHICLE_PROBE.replace("SCENARIO", repr(scenario))
+        .replace("MARK", mark)
+        .replace("EXPECTED", expected)
+    )
+    pytester.makepyfile(source)
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+
+
+def test_an_unknown_sim_vehicle_fails_collection_listing_the_known_names(
+    pytester: pytest.Pytester,
+):
+    """An unregistered vehicle name fails collection naming the mark, the bad name and the known.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    from wise_dynamics.basilisk.vehicles import VEHICLES
+
+    result = _bad_mark_session(pytester, 'sim_vehicle("bogus")')
+    result.stdout.fnmatch_lines(["*.py::test_case: sim_vehicle: *"])
+    known = ", ".join(sorted(VEHICLES))
+    result.stdout.fnmatch_lines([f"*unknown vehicle 'bogus'; known vehicles: {known}"])
+    assert not list(pytester.path.rglob("run_*.h5"))
+
+
 @pytest.mark.parametrize(
     ("ci", "expected"),
     [
@@ -798,8 +858,8 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         assert option in unrecognized[0]
 
 
-def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
-    """`--strict-markers` accepts the four marks and rejects `sim_out`, which is not a mark.
+def test_the_five_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
+    """`--strict-markers` accepts the five marks and rejects `sim_out`, which is not a mark.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -809,7 +869,13 @@ def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytes
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*'sim_out' not found in `markers` configuration option*"])
 
-    marks = ['sim_scenario("leo500")', "sim_runs(1)", 'sim_fidelity("lo")', "sim_duration_s(3)"]
+    marks = [
+        'sim_scenario("leo500")',
+        'sim_vehicle("imu_spacecraft")',
+        "sim_runs(1)",
+        'sim_fidelity("lo")',
+        "sim_duration_s(3)",
+    ]
     _strict_session(pytester, marks).assert_outcomes(passed=1)
 
 
