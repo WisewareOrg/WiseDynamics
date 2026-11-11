@@ -8,6 +8,7 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 import json
 import numbers
 import os
+import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ _SESSION = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
+_CASE_FILE = re.compile(r"run_(\d+)\.(?:h5|crash\.json)")
 _INSTALL_HINT = (
     "Install a pinned release with `uv sync` against a git dependency, or a local checkout with\n"
     "`uv pip install -e <checkout>`."
@@ -244,7 +246,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count and node path into the session's folder.
 
-    The count is the test's `sim_runs` after the cap, not the number of cases selected.
+    The count is the test's `sim_runs` after the cap, not the number of cases selected. The run
+    files and crash records the test's folder holds for cases from that count up are deleted.
 
     A `--collect-only` run writes nothing, and neither does a pytest-xdist controller, which
     collects nothing; each worker writes the same content. A test with no active Monte Carlo
@@ -262,6 +265,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
             planned[settings.directory] = (settings.runs, item.nodeid.partition("[")[0])
     for directory, (runs, nodeid) in planned.items():
         sessions.write_planned(directory, runs, nodeid)
+        _delete_leftovers(directory, runs)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -579,6 +583,19 @@ def _active_session(config: pytest.Config) -> Path:
                 raise pytest.UsageError(handed["error"])
             config.stash[_SESSION] = Path(handed["directory"])
     return config.stash[_SESSION]
+
+
+def _delete_leftovers(directory: Path, runs: int) -> None:
+    """Delete a test's run files and crash records of cases numbered `runs` or higher.
+
+    Args:
+        directory: The test's directory in the session.
+        runs: The test's planned case count.
+    """
+    for path in directory.glob("run_*"):
+        match = _CASE_FILE.fullmatch(path.name)
+        if match and int(match[1]) >= runs:
+            path.unlink(missing_ok=True)
 
 
 def _capped(config: pytest.Config) -> bool:

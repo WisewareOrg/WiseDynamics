@@ -92,14 +92,16 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         tests += [
             name
             for name, value in ipython.user_ns.items()
-            if (name.startswith("test") and callable(value))
-            or (name.startswith("Test") and isinstance(value, type))
+            if (
+                (name.startswith("test") and callable(value))
+                or (name.startswith("Test") and isinstance(value, type))
+            )
             and before.get(name) is not value
             and name not in tests
         ]
         if not tests:
             raise RuntimeError("This cell defines no test.")
-        ci = ["--ci"] if os.environ.get("CI") else []
+        full = [] if os.environ.get(sessions.CAPPED_ENV) else ["--full-monte-carlo"]
         progress = _Progress()
         exit_code = pytest.main(
             [
@@ -108,7 +110,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
                 "auto",
                 "-W",
                 "ignore::pytest.PytestAssertRewriteWarning",
-                *ci,
+                *full,
             ],
             plugins=[progress],
         )
@@ -148,7 +150,7 @@ def load_runs(
         collected = subprocess.run(
             [sys.executable, "-m", "pytest", f"{py}::{node}", "--collect-only", "-q"]
             + ["-o", "addopts=", "-p", "no:xdist", "-p", "wise_dynamics.notebook"]
-            + (["--ci"] if os.environ.get("CI") else []),
+            + ([] if os.environ.get(sessions.CAPPED_ENV) else ["--full-monte-carlo"]),
             cwd=py.parent,
             env={**os.environ, _REPORT: str(report)},
             capture_output=True,
