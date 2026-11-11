@@ -7,6 +7,7 @@ winning. Installing `wise-dynamics` registers this module through its `pytest11`
 
 import json
 import numbers
+import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -149,6 +150,13 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     if name is None:
         return None
     root = sessions.sim_root(config)
+    report = os.environ.get(sessions.REPORT_ENV)
+    if report and not name:
+        try:
+            found = str(sessions.session_directory(config))
+        except sessions.NoSessionError:
+            found = None
+        Path(report).write_text(json.dumps(found))
     if name:
         sessions.check_name(name, "--sim-session")
         sessions.write_pointer(root, name)
@@ -373,6 +381,20 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 
 @pytest.fixture
+def sim_test_directory(request: pytest.FixtureRequest) -> Path:
+    """The test's directory in the session its runs are written to.
+
+    Args:
+        request: The fixture request, whose config resolves the session.
+
+    Returns:
+        The directory `sim_run_file` writes this test's run files in: `scratch` for a capped run,
+        else the active session.
+    """
+    return _settings(request.node).directory
+
+
+@pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
     """This case's scenario, dispersed from the case's two random streams.
 
@@ -509,7 +531,7 @@ def _settings(node: pytest.Function) -> _Settings:
             _vehicle_type(vehicle)
         except ValueError as error:
             raise ValueError(f"sim_vehicle: {error}") from None
-    if not node.config.getoption("full_monte_carlo"):
+    if _capped(node.config):
         runs = min(runs, _CAPPED_RUNS)
     directory = _run_dir(node)
     return _Settings(scenario, int(runs), fidelity, float(duration_s), directory, vehicle)
@@ -538,21 +560,38 @@ def _active_session(config: pytest.Config) -> Path:
         config: The session's pytest configuration, which holds the stash.
 
     Returns:
-        The active session's directory.
+        The `scratch` session's directory when the run is capped, else the active session's.
 
     Raises:
-        pytest.UsageError: There is no active session, or its name is invalid.
+        pytest.UsageError: A full run has no active session, or its name is invalid.
     """
     if _SESSION not in config.stash:
         workerinput = getattr(config, "workerinput", None)
         if workerinput is None:
-            config.stash[_SESSION] = sessions.session_directory(config)
+            config.stash[_SESSION] = (
+                sessions.sim_root(config) / sessions.SCRATCH
+                if _capped(config)
+                else sessions.session_directory(config)
+            )
         else:
             handed = workerinput[_WORKER_SESSION]
             if handed["directory"] is None:
                 raise pytest.UsageError(handed["error"])
             config.stash[_SESSION] = Path(handed["directory"])
     return config.stash[_SESSION]
+
+
+def _capped(config: pytest.Config) -> bool:
+    """Tell whether the run flies at most two cases per test, into the `scratch` session.
+
+    Args:
+        config: The session's pytest configuration.
+
+    Returns:
+        True unless `--full-monte-carlo` is given; True whatever it says while the
+        `WISE_DYNAMICS_CAPPED` environment variable is non-empty.
+    """
+    return bool(os.environ.get(sessions.CAPPED_ENV)) or not config.getoption("full_monte_carlo")
 
 
 def _case_of(item: pytest.Item) -> int | None:

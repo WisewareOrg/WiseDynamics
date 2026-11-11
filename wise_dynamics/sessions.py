@@ -5,7 +5,11 @@ each session is the folder `<root>/<name>`. `wise_dynamics/basilisk/README.md` d
 """
 
 import json
+import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -16,6 +20,7 @@ __all__ = [
     "NoSessionError",
     "RecordedTest",
     "crash_path",
+    "current_session",
     "read_test_results",
     "recorded_tests",
     "run_path",
@@ -25,6 +30,9 @@ __all__ = [
 
 POINTER = "SESSION"
 PLANNED = "planned.json"
+SCRATCH = "scratch"
+CAPPED_ENV = "WISE_DYNAMICS_CAPPED"
+REPORT_ENV = "WISE_DYNAMICS_SESSION_REPORT"
 NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -91,12 +99,13 @@ def check_name(name: str, source: str) -> str:
 
     Raises:
         pytest.UsageError: `name` is not a letter or digit followed by letters, digits, `.`, `_`
-            and `-`, or is `SESSION`.
+            and `-`, or is `SESSION` or `scratch`.
     """
-    if not _NAME.fullmatch(name) or name == POINTER:
+    if not _NAME.fullmatch(name) or name in (POINTER, SCRATCH):
         raise pytest.UsageError(
             f"invalid Monte Carlo session name {name!r} in {source}: start with a letter or "
-            f"digit, then use letters, digits, '.', '_' and '-'; {POINTER} is reserved"
+            f"digit, then use letters, digits, '.', '_' and '-'; {POINTER} and {SCRATCH} are "
+            "reserved"
         )
     return name
 
@@ -126,24 +135,58 @@ def write_pointer(root: Path, name: str) -> None:
 
 
 def session_directory(config: pytest.Config) -> Path:
-    """Find the active session's directory.
+    """Find the directory the session's runs are read from and written to.
 
     Args:
         config: The pytest configuration whose rootdir and `sim_out` ini setting locate the root.
 
     Returns:
-        `<root>/<name>`, `name` being the stripped content of `<root>/SESSION`. The directory may
-        not exist yet.
+        `<root>/scratch` when the `WISE_DYNAMICS_CAPPED` environment variable is non-empty;
+        otherwise `<root>/<name>`, `name` being the stripped content of `<root>/SESSION`. The
+        directory may not exist yet.
 
     Raises:
         NoSessionError: The pointer is missing or empty. A subclass of `pytest.UsageError`, which
             is also raised when the name the pointer holds is invalid.
     """
     root = sim_root(config)
+    if os.environ.get(CAPPED_ENV):
+        return root / SCRATCH
     name = read_pointer(root)
     if not name:
         raise NoSessionError(NO_SESSION)
     return root / check_name(name, str(root / POINTER))
+
+
+def current_session() -> Path:
+    """Find the session directory `session_directory` gives pytest at the current directory.
+
+    It runs `python -m pytest --sim-session` in a subprocess, so the rootdir and the `sim_out`
+    ini setting come from pytest's own lookup. Use it outside pytest, such as in a notebook.
+
+    Returns:
+        The session's directory, which may not exist yet.
+
+    Raises:
+        NoSessionError: No session is active.
+        RuntimeError: The subprocess did not report a session.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        report = Path(scratch) / "session.json"
+        listed = subprocess.run(
+            [sys.executable, "-m", "pytest", "--sim-session", "-o", "addopts="],
+            env={**os.environ, REPORT_ENV: str(report)},
+            capture_output=True,
+            text=True,
+        )
+        if listed.returncode or not report.exists():
+            raise RuntimeError(
+                f"pytest could not report the session:\n{listed.stdout}{listed.stderr}"
+            )
+        found = json.loads(report.read_text())
+    if found is None:
+        raise NoSessionError(NO_SESSION)
+    return Path(found)
 
 
 def run_path(directory: Path, case: int) -> Path:
