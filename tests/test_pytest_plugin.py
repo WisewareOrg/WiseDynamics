@@ -1579,9 +1579,7 @@ def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = Fal
     if repository:
         _git(pytester.path, "init", "-q")
         (pytester.path / ".gitignore").write_text(
-            (
-                "monte_carlo/\n__pycache__/\n.pytest_cache/\n.cache/\nrunpytest-current\nstdout\nstderr\n"
-            )
+            "monte_carlo/\n__pycache__/\n.pytest_cache/\n.cache/\nrunpytest-current\nstdout\nstderr\n"
         )
         _git(pytester.path, "add", "-A")
         _git(pytester.path, "commit", "-q", "-m", "first")
