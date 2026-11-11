@@ -25,6 +25,7 @@ from wise_dynamics import sessions
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.scenario import Scenario
+    from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__: list[str] = []
 
@@ -92,7 +93,7 @@ class _Settings(NamedTuple):
         runs: The number of cases, after the cap.
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
-        directory: The directory the test's run files are written to, in the active session.
+        directory: The directory the test's run files are written to, in the runs' session.
         vehicle: The vehicle's name in `VEHICLES`, or None for the scenario's own.
     """
 
@@ -101,7 +102,7 @@ class _Settings(NamedTuple):
     fidelity: str
     duration_s: float
     directory: Path
-    vehicle: str | None = None
+    vehicle: str | None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -139,10 +140,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_cmdline_main(config: pytest.Config) -> int | None:
     """Handle `--sim-session` without configuring the session or running any test.
 
-    The handler reads only the command line and the `sim_out` ini setting, so a broken pointer or
-    an install that cannot be described never blocks it. When `WISE_DYNAMICS_SESSION_REPORT` names
-    a file, the list mode writes the session directory `session_directory` gives, or null when no
-    session is active, to it as JSON.
+    Naming a session reads only the command line and the `sim_out` ini setting, so an install that
+    cannot be described never blocks it. The list mode also reads the pointer, and an invalid name
+    in it stops the run with a usage error. When `WISE_DYNAMICS_SESSION_REPORT` names a file, the
+    list mode writes the session directory `session_directory` gives, or null when no session is
+    active, to it as JSON.
 
     Args:
         config: The parsed, not yet configured, pytest configuration.
@@ -155,18 +157,18 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     if name is None:
         return None
     root = sessions.sim_root(config)
-    report = os.environ.get(sessions.REPORT_ENV)
-    if report and not name:
-        try:
-            found = str(sessions.session_directory(config))
-        except sessions.NoSessionError:
-            found = None
-        Path(report).write_text(json.dumps(found))
     if name:
         sessions.check_name(name, "--sim-session")
         sessions.write_pointer(root, name)
         print(f"session: {name}")
         return int(pytest.ExitCode.OK)
+    report = os.environ.get(sessions.REPORT_ENV)
+    if report:
+        try:
+            found = str(sessions.session_directory(config))
+        except sessions.NoSessionError:
+            found = None
+        Path(report).write_text(json.dumps(found))
     active = sessions.read_pointer(root)
     print(f"active: {active or 'none'}")
     others = sorted(path.name for path in root.iterdir() if path.is_dir()) if root.is_dir() else []
@@ -422,7 +424,7 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     if settings.vehicle is None:
         scenario = scenario_type()
     else:
-        scenario = scenario_type(_vehicle_type(settings.vehicle))
+        scenario = scenario_type(vehicle_type=_vehicle_type(settings.vehicle))
     scenario.fidelity = settings.fidelity
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
@@ -436,7 +438,7 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, in the test's directory of the active session.
+    """A writer of this case's run file, in the test's directory of the session its runs land in.
 
     The file is `run_<NNNN>.h5`, written through `sim_scenario.vehicle` and laid out as the basilisk
     README describes. The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the
@@ -553,7 +555,7 @@ def _settings(node: pytest.Function) -> _Settings:
 
 
 def _run_dir(node: pytest.Function) -> Path:
-    """Build a test's run directory in the active session.
+    """Build a test's run directory in the session its runs land in.
 
     `_active_session` raises `pytest.UsageError` when no session is active or its name is invalid.
 
@@ -561,7 +563,7 @@ def _run_dir(node: pytest.Function) -> Path:
         node: The test function, or one of its parametrized items.
 
     Returns:
-        `_test_directory` under the active session's directory.
+        `_test_directory` under the directory `_active_session` gives.
     """
     return _test_directory(node, _active_session(node.config))
 
@@ -758,24 +760,37 @@ def _provenance() -> dict[str, str | bool]:
             f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
             f"{_INSTALL_HINT}"
         )
-    git = ["git", "-C", url2pathname(urlparse(url).path)]
+    path = url2pathname(urlparse(url).path)
     try:
-        commit = subprocess.run(
-            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-        )
-        status = subprocess.run(
-            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
-        )
+        commit, dirty = _git_state(path)
     except (OSError, subprocess.CalledProcessError) as error:
         raise pytest.UsageError(
-            f"git could not describe the editable checkout {git[2]}: {error}\n{_INSTALL_HINT}"
+            f"git could not describe the editable checkout {path}: {error}\n{_INSTALL_HINT}"
         ) from None
     return {
         "install": "local",
-        "commit": commit.stdout.strip(),
+        "commit": commit,
         "requested_revision": "",
-        "dirty": bool(status.stdout.strip()),
+        "dirty": dirty,
     }
+
+
+def _git_state(path: str | Path) -> tuple[str, bool]:
+    """Read the HEAD commit and the dirty state of the git repository holding `path`.
+
+    Args:
+        path: A directory in the repository.
+
+    Returns:
+        HEAD's commit and whether `git status --porcelain` lists anything, untracked files included.
+        An `OSError` (no `git`) or `subprocess.CalledProcessError` (not a repository) propagates.
+    """
+    git = ["git", "-C", str(path)]
+    commit = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
+    status = subprocess.run(
+        [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
+    )
+    return commit.stdout.strip(), bool(status.stdout.strip())
 
 
 def _caller_provenance(rootdir: Path) -> dict[str, str | bool]:
@@ -785,20 +800,14 @@ def _caller_provenance(rootdir: Path) -> dict[str, str | bool]:
         rootdir: The pytest rootdir.
 
     Returns:
-        `commit` (HEAD) and `dirty` (whether `git status --porcelain` lists anything); empty when
-        `git` cannot describe the rootdir.
+        `commit` (HEAD) and `dirty` (as `_git_state`); empty when `git` cannot describe the
+        rootdir.
     """
-    git = ["git", "-C", str(rootdir)]
     try:
-        commit = subprocess.run(
-            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-        )
-        status = subprocess.run(
-            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
-        )
+        commit, dirty = _git_state(rootdir)
     except (OSError, subprocess.CalledProcessError):
         return {}
-    return {"commit": commit.stdout.strip(), "dirty": bool(status.stdout.strip())}
+    return {"commit": commit, "dirty": dirty}
 
 
 def _run_files(count: int) -> str:
@@ -835,7 +844,7 @@ def _scenario_type(name: str) -> "type[Scenario]":
         ) from None
 
 
-def _vehicle_type(name: object) -> type:
+def _vehicle_type(name: str) -> "type[Vehicle]":
     """Look up a vehicle class by name, importing Basilisk on first use.
 
     Args:

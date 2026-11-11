@@ -135,7 +135,10 @@ def write_pointer(root: Path, name: str) -> None:
 
 
 def session_directory(config: pytest.Config) -> Path:
-    """Find the directory the session's runs are read from and written to.
+    """Find the pointer's session directory, or `scratch` while the capped variable is set.
+
+    A bare pytest run is capped and writes to `scratch` whatever this returns; only a full run
+    writes to the directory this returns.
 
     Args:
         config: The pytest configuration whose rootdir and `sim_out` ini setting locate the root.
@@ -171,8 +174,8 @@ def current_session() -> Path:
         NoSessionError: No session is active.
         RuntimeError: The subprocess did not report a session.
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        report = Path(scratch) / "session.json"
+    with tempfile.TemporaryDirectory() as tmp:
+        report = Path(tmp) / "session.json"
         listed = subprocess.run(
             [sys.executable, "-m", "pytest", "--sim-session", "-o", "addopts="],
             env={**os.environ, REPORT_ENV: str(report)},

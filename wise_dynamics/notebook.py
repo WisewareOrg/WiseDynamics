@@ -124,7 +124,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 def load_runs(
     test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Read back the run files of a notebook test in the active session, finished or not.
+    """Read back the run files of a notebook test in the session its runs land in, finished or not.
 
     It prints one line, `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>`
     when any case left a crash record.
@@ -141,12 +141,12 @@ def load_runs(
     Raises:
         RuntimeError: No Monte Carlo session is active, the test does not collect from the
             notebook's `.py`, or the node collects tests of more than one function.
-        FileNotFoundError: The test has no results in the active session.
+        FileNotFoundError: The test has no results in that session.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
     py = _notebook_py(_notebook_path(os.fspath(notebook) if notebook is not None else ""))
-    with tempfile.TemporaryDirectory() as scratch:
-        report = Path(scratch) / "run_dir.json"
+    with tempfile.TemporaryDirectory() as tmp:
+        report = Path(tmp) / "run_dir.json"
         collected = subprocess.run(
             [sys.executable, "-m", "pytest", f"{py}::{node}", "--collect-only", "-q"]
             + ["-o", "addopts=", "-p", "no:xdist", "-p", "wise_dynamics.notebook"]
