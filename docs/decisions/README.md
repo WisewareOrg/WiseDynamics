@@ -38,7 +38,7 @@ decision and its reasoning, not who ruled it.
 | # | Rev | Decided | Decision |
 |---|---|---|---|
 | [0001](0001-basilisk-simulation-host.md) | 1 | 2026-10-31 | Simulate spacecraft dynamics with Basilisk as the simulation host |
-| [0002](0002-monte-carlo-sessions.md) | 1 | 2026-11-09 | Keep Monte Carlo runs in named sessions |
+| [0002](0002-monte-carlo-sessions.md) | 2 | 2026-11-11 | Keep Monte Carlo runs in named sessions |
 
 ## Revisions
 
