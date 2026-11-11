@@ -607,3 +607,102 @@ def test_sim_test_directory_is_where_the_tests_run_files_are_written(
     expected = pytester.path / "monte_carlo" / session / "test_scenario" / "test_case"
     assert (pytester.path / "reported").read_text() == str(expected)
     assert (expected / "run_0000.h5").is_file()
+
+
+def test_session_directory_is_scratch_whenever_wise_dynamics_capped_is_set(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """With the variable non-empty, the answer is `<root>/scratch` whatever the pointer says.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+    """
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
+    config = pytester.parseconfig()
+    scratch = pytester.path / "monte_carlo" / "scratch"
+
+    assert _sessions().session_directory(config) == scratch
+
+    _point(pytester, "alpha\n")
+    assert _sessions().session_directory(pytester.parseconfig()) == scratch
+
+
+def test_an_empty_wise_dynamics_capped_leaves_the_pointers_session(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """Only a non-empty value caps: an empty one is as good as unset.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+    """
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "")
+    _point(pytester, "alpha\n")
+
+    assert _sessions().session_directory(pytester.parseconfig()) == (
+        pytester.path / "monte_carlo" / "alpha"
+    )
+
+
+@pytest.fixture
+def flown_session(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Fly one full case into session `s` of a `sim_out` named `out`, then work in a nested cwd.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture; it unsets the variable and moves the working directory.
+
+    Returns:
+        The session's directory, which holds the run file.
+    """
+    monkeypatch.delenv("WISE_DYNAMICS_CAPPED", raising=False)
+    pytester.makeini("[pytest]\nsim_out = out\n")
+    session = _point(pytester, SESSION + "\n", root="out")
+    pytester.makepyfile(test_scenario=CASE_TEST.replace("RUNS", "1"))
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    assert (session / "test_scenario" / "test_case" / "run_0000.h5").is_file()
+    nested = pytester.path / "a" / "b"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    return session
+
+
+def test_current_session_is_where_a_full_run_wrote_from_a_nested_directory(flown_session: Path):
+    """Outside pytest, `current_session()` finds the rootdir and `sim_out` as pytest does.
+
+    Args:
+        flown_session: The session a full run wrote into; the working directory is below the
+            rootdir.
+    """
+    assert _sessions().current_session() == flown_session
+
+
+def test_current_session_is_scratch_when_wise_dynamics_capped_is_set(
+    flown_session: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The variable reaches the subprocess that finds the session, so it answers `scratch`.
+
+    Args:
+        flown_session: The session a full run wrote into, beside which `scratch` is looked for.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+    """
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
+
+    assert _sessions().current_session() == flown_session.parent / "scratch"
+
+
+def test_current_session_with_no_pointer_raises_no_session_error(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """With no pointer there is no session to return.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture; it unsets the variable.
+    """
+    monkeypatch.delenv("WISE_DYNAMICS_CAPPED", raising=False)
+    pytester.makeini("[pytest]\nsim_out = out\n")
+
+    with pytest.raises(_sessions().NoSessionError):
+        _sessions().current_session()
