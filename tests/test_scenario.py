@@ -56,7 +56,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
     [
         ("hi", 20_000_000, svIntegrators.svIntegratorRK4),
         ("med", 50_000_000, svIntegrators.svIntegratorRK4),
-        ("lo", 50_000_000, svIntegrators.svIntegratorRK2),
+        ("lo", 100_000_000, svIntegrators.svIntegratorRK2),
     ],
 )
 def test_each_fidelity_sets_its_step_and_integrator_on_the_vehicle_that_runs(

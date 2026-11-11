@@ -30,8 +30,12 @@ Monte Carlo campaign, configured by marks (see the basilisk README); `-n` runs w
 and needs `pytest-xdist`, which the consumer adds itself:
 
 ```sh
+pytest --sim-session first
 pytest tests/sim -n 8
 ```
+
+Run files are kept in named sessions, which the basilisk README documents; a consumer adds the
+one-line `just session [name]` recipe that this repository's `justfile` has.
 
 The `notebook` extra adds a `%%monte_carlo` magic and `load_runs`; see the basilisk README.
 
@@ -43,9 +47,10 @@ WiseDynamics depends on no flight software; flight software depends on WiseDynam
 
 ## Layout
 
-- `wise_dynamics/` — the installed package: the pytest plugin, and the `basilisk` subpackage below.
+- `wise_dynamics/` — the installed package: the pytest plugin and its sessions, and the `basilisk` subpackage below.
 - `wise_dynamics/basilisk/` — the vehicle and scenario interfaces, the vehicles and the scenarios.
 - `tests/` — the test suite.
+- `justfile` — the `session` recipe.
 - `docs/decisions/` — this repository's ADRs.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers how a change is made and checked.

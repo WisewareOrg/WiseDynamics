@@ -33,7 +33,9 @@ except ImportError as error:
         "install them with the extra: pip install 'wise-dynamics[notebook]'"
     ) from error
 
-from wise_dynamics.pytest_plugin import _run_dir
+from wise_dynamics import sessions
+from wise_dynamics.pytest_plugin import _active_session, _run_dir
+from wise_dynamics.sessions import NoSessionError
 
 __all__ = ["load_ipython_extension", "load_runs"]
 
@@ -111,9 +113,10 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 def load_runs(
     test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Read back the run files of a notebook test's newest session, finished or not.
+    """Read back the run files of a notebook test in the active session, finished or not.
 
-    It prints one line, `<stamp>: <found> of <planned> cases`.
+    It prints one line, `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>`
+    when any case left a crash record.
 
     Args:
         test: The test function or method defined in the notebook, or its node path in the paired
@@ -125,9 +128,9 @@ def load_runs(
         `datasets` maps each HDF5 dataset path to `(values, units)`.
 
     Raises:
-        RuntimeError: The test does not collect from the notebook's `.py`, or the node collects
-            tests of more than one function.
-        FileNotFoundError: The test's run directory holds no session folder.
+        RuntimeError: No Monte Carlo session is active, the test does not collect from the
+            notebook's `.py`, or the node collects tests of more than one function.
+        FileNotFoundError: The test has no results in the active session.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
     py = _notebook_py(_notebook_path(os.fspath(notebook) if notebook is not None else ""))
@@ -146,25 +149,26 @@ def load_runs(
             raise RuntimeError(
                 f"{py}::{node} does not collect:\n{collected.stdout}{collected.stderr}"
             )
-        directories = json.loads(report.read_text())
+        handshake = json.loads(report.read_text())
+    if handshake["session"] is None:
+        raise RuntimeError(sessions.NO_SESSION)
+    directories = handshake["directories"]
     if len(directories) != 1:
         raise RuntimeError(
             f"{py}::{node} collects tests in {len(directories)} run directories; it must name a "
             "single test function or method"
         )
-    stamps = sorted(path for path in Path(directories[0]).glob("*") if path.is_dir())
-    if not stamps:
-        raise FileNotFoundError(f"no run folders in {directories[0]}")
-    newest = stamps[-1]
-    files = sorted(newest.glob("run_*.h5"))
-    planned = (
-        json.loads((newest / "planned.json").read_text())["runs"]
-        if (newest / "planned.json").exists()
-        else "?"
+    directory = Path(directories[0])
+    if not (directory / sessions.PLANNED).is_file():
+        raise FileNotFoundError(f"no Monte Carlo results in {directory}")
+    results = sessions.read_test_results(directory)
+    crashed = (
+        f", crashed: {', '.join(map(str, sorted(results.crashes)))}" if results.crashes else ""
     )
-    print(f"{newest.name}: {len(files)} of {planned} cases")
+    print(f"{handshake['session']}: {len(results.runs)} of {results.planned} cases{crashed}")
     runs = []
-    for file in files:
+    for case in sorted(results.runs):
+        file = results.runs[case]
         with h5py.File(file, "r") as run_file:
             names: list[str] = []
             run_file.visit(names.append)
@@ -174,18 +178,30 @@ def load_runs(
                 if isinstance(run_file[name], h5py.Dataset)
             }
             runs.append({"attrs": dict(run_file.attrs), "datasets": datasets})
-    return sorted(runs, key=lambda run: run["attrs"]["case"])
+    return runs
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
-    """Write the collected tests' run directories to the file `WISE_DYNAMICS_RUN_DIR_REPORT` names.
+    """Write the active session and the collected tests' run directories to the report file.
+
+    The file is the one `WISE_DYNAMICS_RUN_DIR_REPORT` names; its JSON is `{"session": <name or
+    null>, "directories": [...]}`, with no directories when there is no active session.
+
+    An invalid name in the session pointer stops the collection with a usage error.
 
     Args:
         session: The finished collection session.
     """
     report = os.environ.get(_REPORT)
     if report and session.items:
-        Path(report).write_text(json.dumps(sorted({str(_run_dir(item)) for item in session.items})))
+        try:
+            name: str | None = _active_session(session.config).name
+        except NoSessionError:
+            name = None
+        directories = (
+            [] if name is None else sorted({str(_run_dir(item)) for item in session.items})
+        )
+        Path(report).write_text(json.dumps({"session": name, "directories": directories}))
 
 
 class _Progress:
