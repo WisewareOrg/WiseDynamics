@@ -1558,3 +1558,61 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
         f"run_000{i}.h5" for i in range(6)
     ]
     assert not (pytester.path / "monte_carlo" / "other").exists()
+
+
+def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = False) -> dict:
+    """Fly one case in a rootdir that is (or is not) a committed repository; read its root attrs.
+
+    The repository ignores the run folder and Python's caches, so only `dirty` makes it dirty.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        repository: Whether the rootdir is a git repository.
+        dirty: Whether a tracked file differs from HEAD when the case runs.
+
+    Returns:
+        The run file's root attributes.
+    """
+    session = _point(pytester)
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    if repository:
+        _git(pytester.path, "init", "-q")
+        (pytester.path / ".gitignore").write_text("monte_carlo/\n__pycache__/\n.pytest_cache/\n")
+        _git(pytester.path, "add", "-A")
+        _git(pytester.path, "commit", "-q", "-m", "first")
+        if dirty:
+            (pytester.path / ".gitignore").write_text("monte_carlo/\n__pycache__/\n# edited\n")
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    (run,) = _read_runs(session / "test_scenario" / "test_case")
+    return run["attrs"]
+
+
+@pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])
+def test_the_run_file_records_the_rootdir_repositorys_commit_and_dirt(
+    pytester: pytest.Pytester, dirty: bool
+):
+    """The caller's repository HEAD and whether it has changes sit beside the install's.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        dirty: Whether a tracked file differs from HEAD.
+    """
+    attrs = _caller_attrs(pytester, repository=True, dirty=dirty)
+
+    assert attrs["versions_caller_commit"] == _git(pytester.path, "rev-parse", "HEAD")
+    assert type(attrs["versions_caller_dirty"]) is np.bool_
+    assert bool(attrs["versions_caller_dirty"]) is dirty
+    assert "versions_wise_dynamics_commit" in attrs
+
+
+def test_a_rootdir_that_is_not_a_git_checkout_records_no_caller_provenance(
+    pytester: pytest.Pytester,
+):
+    """With no repository there is no commit to record, so neither attribute is written.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    attrs = _caller_attrs(pytester, repository=False)
+
+    assert not [key for key in attrs if key.startswith("versions_caller_")]
