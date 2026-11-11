@@ -53,7 +53,7 @@ _MARKS = (
     (
         "sim_fidelity",
         "level",
-        "integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.05 s; "
+        "integration fidelity: hi is RK4 at 0.02 s, med RK4 at 0.05 s, lo RK2 at 0.1 s; "
         f"default {_DEFAULT_FIDELITY}",
     ),
     (

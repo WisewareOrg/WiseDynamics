@@ -63,7 +63,7 @@ against hi:
 |---|---|---|---|---|
 | `hi` | RK4 | 0.02 s | (reference) | (reference) |
 | `med` | RK4 | 0.05 s | 1.9 um | 5.9e-13 rad |
-| `lo` | RK2 | 0.05 s | 17.7 cm | 9.05 urad |
+| `lo` | RK2 | 0.1 s | 70.7 cm | 36.2 urad |
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
 `vehicles`, `fidelity` and `record_s`, and runs once. The vehicles run every step of the fidelity.
@@ -140,7 +140,7 @@ local checkout (`uv pip install -e <checkout>`) stops the pytest run before coll
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
-`period_s` = 1.0, so it steps at 1 Hz while the default fidelity steps the vehicle at 20 Hz. Its
+`period_s` = 1.0, so it steps at 1 Hz while the default fidelity steps the vehicle at 10 Hz. Its
 output joins the run file through `fsw_fields`.
 Pick a session with `pytest --sim-session <name>`, then `pytest <test file> -n 8` runs it as a
 Monte Carlo campaign; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer

@@ -19,7 +19,7 @@ _RECORD_PRIORITY = 0
 _FIDELITY = {
     "hi": (0.02, svIntegrators.svIntegratorRK4),
     "med": (0.05, svIntegrators.svIntegratorRK4),
-    "lo": (0.05, svIntegrators.svIntegratorRK2),
+    "lo": (0.1, svIntegrators.svIntegratorRK2),
 }
 
 
@@ -33,7 +33,7 @@ class Scenario:
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`. `run` derives the integration step and the integrator
             it gives every vehicle's spacecraft from it: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at
-            0.05 s and `"lo"` RK2 at 0.05 s.
+            0.05 s and `"lo"` RK2 at 0.1 s.
     """
 
     fidelity: str = "lo"
