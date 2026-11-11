@@ -1,6 +1,7 @@
 """Enables pytest's own `pytester` fixture and shares test-only fixtures."""
 
 import importlib
+import os
 import sys
 import textwrap
 import types
@@ -10,6 +11,50 @@ from pathlib import Path
 import pytest
 
 pytest_plugins = ["pytester"]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the `capped_runs` mark.
+
+    Args:
+        config: The session's pytest configuration.
+    """
+    config.addinivalue_line(
+        "markers",
+        "capped_runs: the test's pytester sessions run as given, without the "
+        "`--full-monte-carlo` flag the other tests' sessions are started with",
+    )
+
+
+@pytest.fixture(autouse=True)
+def full_flights_by_default(request: pytest.FixtureRequest) -> None:
+    """Start every pytester subprocess session with `--full-monte-carlo`, unless the test opts out.
+
+    A simulator session flies at most two cases per test unless it is given the flag, so a test
+    that checks more cases, or where the runs land in the active session, needs it. A test marked
+    `capped_runs` is checking the capped behaviour and passes its own arguments unchanged.
+
+    Args:
+        request: The fixture request, used to reach `pytester` and the test's marks.
+    """
+    if "pytester" not in request.fixturenames or request.node.get_closest_marker("capped_runs"):
+        return
+    pytester = request.getfixturevalue("pytester")
+    run = pytester.runpytest_subprocess
+
+    def run_full(*args: str | os.PathLike[str], timeout: float | None = None) -> pytest.RunResult:
+        """Run a subprocess session with `--full-monte-carlo` first among the arguments.
+
+        Args:
+            *args: The session's pytest arguments.
+            timeout: Seconds after which the session is stopped.
+
+        Returns:
+            The session's result.
+        """
+        return run("--full-monte-carlo", *args, timeout=timeout)
+
+    pytester.runpytest_subprocess = run_full
 
 
 @pytest.fixture

@@ -390,25 +390,6 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     assert list(temporary.iterdir()) == []
 
 
-def test_ci_writes_under_the_session_and_plans_the_capped_count(pytester: pytest.Pytester):
-    """`--ci` caps the cases and writes into the session, not a `ci` folder.
-
-    Args:
-        pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    _point(pytester)
-    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(5)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*SERIAL, "--ci").assert_outcomes(passed=2)
-
-    directory = pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case"
-    assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
-    assert json.loads((directory / "planned.json").read_text()) == {
-        "runs": 2,
-        "nodeid": "test_scenario.py::test_case",
-    }
-    assert not (pytester.path / "monte_carlo" / "ci").exists()
-
-
 def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester):
     """An empty `sim_out` ini value stops the session with a usage error naming the setting.
 
@@ -760,22 +741,23 @@ def test_an_unknown_sim_vehicle_fails_collection_listing_the_known_names(
     assert not list(pytester.path.rglob("run_*.h5"))
 
 
+@pytest.mark.capped_runs
 @pytest.mark.parametrize(
-    ("ci", "expected"),
+    ("full", "expected"),
     [
-        (False, {"test_a": 5, "test_b": 1, "test_c": 8}),
-        (True, {"test_a": 2, "test_b": 1, "test_c": 2}),
+        (False, {"test_a": 2, "test_b": 1, "test_c": 2}),
+        (True, {"test_a": 5, "test_b": 1, "test_c": 8}),
     ],
-    ids=["without-ci", "ci"],
+    ids=["capped", "full-monte-carlo"],
 )
-def test_ci_caps_every_tests_case_count_at_two(
-    pytester: pytest.Pytester, ci: bool, expected: dict[str, int]
+def test_a_bare_run_caps_every_tests_case_count_at_two_and_the_flag_lifts_it(
+    pytester: pytest.Pytester, full: bool, expected: dict[str, int]
 ):
-    """`--ci` caps a test's cases at 2; a test asking for fewer runs its own.
+    """Without `--full-monte-carlo` a test's cases are capped at 2; fewer requested keeps its own.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        ci: Whether the session passes `--ci`.
+        full: Whether the session passes `--full-monte-carlo`.
         expected: Test name to the number of cases it collects.
     """
     _point(pytester)
@@ -795,7 +777,9 @@ def test_ci_caps_every_tests_case_count_at_two(
             pass
         """
     )
-    result = pytester.runpytest_subprocess("-p", "no:xdist", "--collect-only", "-q", *["--ci"] * ci)
+    result = pytester.runpytest_subprocess(
+        "-p", "no:xdist", "--collect-only", "-q", *["--full-monte-carlo"] * full
+    )
     assert result.ret == pytest.ExitCode.OK
     for name, count in expected.items():
         assert (
@@ -804,13 +788,13 @@ def test_ci_caps_every_tests_case_count_at_two(
         )
 
 
-def test_ci_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester):
-    """`--ci` changes the case count only.
+@pytest.mark.capped_runs
+def test_a_capped_run_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester):
+    """The cap changes the case count only.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    _point(pytester)
     pytester.makepyfile(
         """
         import pytest
@@ -823,21 +807,23 @@ def test_ci_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester)
             assert sim_scenario.fidelity == "hi"
         """
     )
-    pytester.runpytest_subprocess("-p", "no:xdist", "--ci").assert_outcomes(passed=2)
+    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=2)
 
 
-def test_ci_still_rejects_a_bad_mark(pytester: pytest.Pytester):
-    """A `sim_runs(0)` mark fails collection under `--ci`; the cap does not repair it.
+@pytest.mark.capped_runs
+def test_a_capped_run_still_rejects_a_bad_mark(pytester: pytest.Pytester):
+    """A `sim_runs(0)` mark fails collection in a capped run; the cap does not repair it.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    result = _bad_mark_session(pytester, "sim_runs(0)", "--ci")
+    result = _bad_mark_session(pytester, "sim_runs(0)")
     result.stdout.fnmatch_lines(["*.py::test_case: sim_runs: *"])
 
 
+@pytest.mark.capped_runs
 def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
-    """Each `--sim-*` option is an unrecognized argument.
+    """Each `--sim-*` option, and `--ci`, is an unrecognized argument.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -848,9 +834,12 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         "--sim-fidelity": "lo",
         "--sim-duration-s": "3",
         "--sim-out": "out",
+        "--ci": "",
     }
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess(*(arg for item in options.items() for arg in item))
+    result = pytester.runpytest_subprocess(
+        *(arg for item in options.items() for arg in item if arg)
+    )
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     unrecognized = [line for line in result.stderr.lines if "unrecognized arguments:" in line]
     assert len(unrecognized) == 1
