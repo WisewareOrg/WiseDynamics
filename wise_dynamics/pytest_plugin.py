@@ -141,10 +141,9 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     """Handle `--sim-session` without configuring the session or running any test.
 
     Naming a session reads only the command line and the `sim_out` ini setting, so an install that
-    cannot be described never blocks it. The list mode also reads the pointer, and an invalid name
-    in it stops the run with a usage error. When `WISE_DYNAMICS_SESSION_REPORT` names a file, the
-    list mode writes the session directory `session_directory` gives, or null when no session is
-    active, to it as JSON.
+    cannot be described never blocks it. When `WISE_DYNAMICS_SESSION_REPORT` names a file, the list
+    mode writes the session directory `session_directory` gives, or null when no session is
+    active, to it as JSON; an invalid name in the pointer then stops the run with a usage error.
 
     Args:
         config: The parsed, not yet configured, pytest configuration.
