@@ -19,7 +19,7 @@ raises.
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class; `VEHICLES` registers each under the module's name |
 | `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario |
 
-Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft` and `SCENARIOS` from
+Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft`, `SCENARIOS` and `VEHICLES` from
 `wise_dynamics.basilisk`, and a scenario class from its own module,
 `wise_dynamics.basilisk.scenarios.<name>`. A test picks one scenario with the `sim_scenario` mark, a
 name in `SCENARIOS`, and the scenario builds its own vehicle unless the `sim_vehicle` mark names
