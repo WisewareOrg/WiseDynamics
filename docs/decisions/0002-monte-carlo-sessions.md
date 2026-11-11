@@ -29,15 +29,15 @@ agrees on where runs are. No environment variable names the active session.
 A run is capped by default: each test flies at most two cases unless `--full-monte-carlo` is
 passed. A capped run is never evidence, and in the active session it would delete the full
 campaign's cases (below), so it writes to a fixed session, `scratch`, whatever the pointer says,
-and never moves the pointer. `scratch` is a reserved name that `--sim-session` refuses. The
-environment variable `WISE_DYNAMICS_CAPPED` forces capped runs even with `--full-monte-carlo`; a
-consumer sets it only for tests that run a notebook, so a notebook's own full-campaign magic stays
-capped there. An interactive kernel never sets it.
+and never moves the pointer. `scratch` is a reserved name that `--sim-session` refuses. An
+environment variable forces capped runs even with `--full-monte-carlo`, so that a notebook's own
+full-campaign magic stays capped when a consumer tests the notebook; the basilisk README describes
+it.
 
 A case replaces its own result: a case that starts deletes its own earlier run file and crash
-record. A campaign of N cases that starts also deletes the run files and crash records of its test
-numbered N and above, so the leftovers of an earlier, larger campaign never mix in with the new
-one. Nothing else is cleared. A case that fails without having written its run file leaves a crash
+record. A campaign of N cases, once collected, also deletes the run files and crash records of its
+test numbered N and above, so the leftovers of an earlier, larger campaign never mix in with the
+new one. Nothing else is cleared. A case that fails without having written its run file leaves a crash
 record. Every case below N in a session is therefore a run, a crash record or missing, and missing
 means only that it never ran.
 

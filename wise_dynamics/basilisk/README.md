@@ -48,7 +48,9 @@ module's name. A module defining none or several raises `TypeError` when the pac
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
 its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
-no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle` and in
+no required argument and one optional argument, the vehicle class to build in place of its own,
+which the `sim_vehicle` mark supplies; a scenario that does not accept it cannot be used with that
+mark. It builds its vehicle, places it, and holds it as `scenario.vehicle` and in
 `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
 `rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
 `rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
@@ -97,15 +99,17 @@ test marked for fewer runs its own. Bare `pytest`, the editor's test explorer an
 capped, and a full campaign is asked for. A capped run writes to the `scratch` session whatever the
 pointer says, and never changes the pointer. `WISE_DYNAMICS_CAPPED`, when non-empty in the
 environment, forces a capped run even with `--full-monte-carlo`; a consumer's tests that run a
-notebook set it, and an interactive kernel never does. The `sim_out`
-ini setting, a path relative to the rootdir or an absolute one and not empty, is the root of every
-session in a project; default `monte_carlo`.
+notebook set it, and an interactive kernel never does. The `sim_out` ini setting, a path relative to
+the rootdir or an absolute one and not empty, is the root of every session in a project; default
+`monte_carlo`.
 
 `--sim-session <name>` makes `<name>` the active session and runs no test; with no name it prints
 the active session and lists the others. A name starts with a letter or digit, then letters,
 digits, `.`, `_` or `-`, and is neither `SESSION` nor `scratch`, so `--sim-session scratch` is
-rejected. `just session [name]` wraps it. A Monte Carlo test
-run with no active session shows one error naming `--sim-session`; the other tests of its file run.
+rejected. `just session [name]` wraps it. A Monte Carlo test run with no active session shows one
+error naming `--sim-session`; the other tests of its file run. When `WISE_DYNAMICS_SESSION_REPORT`
+names a file, `--sim-session` with no name also writes the active session's directory there as
+JSON, `null` when none is active; `current_session()` reads it.
 
 | fixture | gives |
 |---|---|
@@ -187,8 +191,9 @@ from a cell. Install the `notebook` extra, `wise-dynamics[notebook]`, and load t
 paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest
 with `-n auto` and `--full-monte-carlo` (capped, without the option, when `WISE_DYNAMICS_CAPPED`
 is set). The tests also include any test function or `Test*` class the cell's code creates, such as
-by assigning it into the namespace. The cell then raises if any test fails, so Run All stops before the plot cells. The notebook's path comes from the argument,
-else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
+by assigning it into the namespace. The cell then raises if any test fails, so Run All stops before
+the plot cells. The notebook's path comes from the argument, else `__vsc_ipynb_file__` (VS Code),
+else `JPY_SESSION_NAME` (a Jupyter server).
 
 Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
 may be the `.ipynb` or the paired `.py` opened as a notebook. Every worker imports the `.py`, so
