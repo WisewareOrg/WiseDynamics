@@ -562,3 +562,48 @@ def test_a_collect_only_run_deletes_no_leftover_files(pytester: pytest.Pytester)
     pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
 
     assert (directory / "run_0005.h5").exists()
+
+
+DIRECTORY_TEST = """
+from pathlib import Path
+
+import numpy as np
+
+
+def test_case(sim_case_index, sim_run_file, sim_test_directory):
+    assert isinstance(sim_test_directory, Path)
+    written = sim_run_file({"t_s": (np.zeros(2), "s")})
+    assert written.parent == sim_test_directory
+    Path("reported").write_text(str(sim_test_directory))
+"""
+
+
+@pytest.mark.parametrize(
+    ("flags", "session"),
+    [(("--full-monte-carlo",), SESSION), ((), "scratch")],
+    ids=["full", "capped"],
+)
+@pytest.mark.capped_runs
+def test_sim_test_directory_is_where_the_tests_run_files_are_written(
+    pytester: pytest.Pytester, flags: tuple[str, ...], session: str
+):
+    """The fixture is the test's directory in the session the runs land in, `scratch` if capped.
+
+    The test also checks, inside the run, that `sim_run_file` writes directly in it.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        flags: The arguments that make the run full or capped.
+        session: The session the runs must land in.
+    """
+    _point(pytester, SESSION + "\n")
+    pytester.makepyfile(
+        test_scenario="import pytest\n"
+        + DIRECTORY_TEST.replace("def test_case", "@pytest.mark.sim_runs(1)\ndef test_case")
+    )
+
+    pytester.runpytest_subprocess(*SERIAL, *flags).assert_outcomes(passed=1)
+
+    expected = pytester.path / "monte_carlo" / session / "test_scenario" / "test_case"
+    assert (pytester.path / "reported").read_text() == str(expected)
+    assert (expected / "run_0000.h5").is_file()
