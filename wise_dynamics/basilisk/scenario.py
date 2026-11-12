@@ -119,15 +119,15 @@ class Scenario:
         Gives every vehicle's spacecraft the integrator of `fidelity`, then builds the simulation
         with one process holding four tasks, which run in this order at each instant they share.
         The dynamics task holds each vehicle's `models()` and steps at the largest step of at most
-        1 s that divides `fsw_module.period_s`; `record_s` is a whole number of them, and a
-        period no step of at least 1 ms divides or a `record_s` that is not raises `ValueError`
-        before anything runs. The sensor
-        task, every `fsw_module.period_s`, holds each vehicle's `sensor_models` for that period,
-        which so sample the state of that instant. The flight-software task, every
-        `fsw_module.period_s`, holds `fsw_module`, which so reads the sensors' output of that
-        instant. The record task, every `record_s` from t = 0, holds one Basilisk recorder per
-        entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so truth and flight output
-        are recorded from the same instant. Runs from t = 0 for `duration_s`.
+        1 s that divides `fsw_module.period_s`. `record_s` must be a whole number of steps, and
+        the period divisible into steps of at least 1 ms; `_step_ns` raises `ValueError`, before
+        anything runs, where either is not. The sensor task, every `fsw_module.period_s`, holds
+        each vehicle's `sensor_models` for that period, which so sample the state of that instant.
+        The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
+        the sensors' output of that instant. The record task, every `record_s` from t = 0, holds one
+        Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
+        truth and flight output are recorded from the same instant. Runs from t = 0 for
+        `duration_s`.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
