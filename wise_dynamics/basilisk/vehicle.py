@@ -14,9 +14,11 @@ __all__ = ["Vehicle"]
 class Vehicle:
     """The plumbing every vehicle shares: writing its run file.
 
-    A subclass builds its Basilisk objects and provides `models()`, the modules a scenario adds to
-    its task, `readers()`, its sensor outputs by role, and `recorded_fields()`, run-file dataset
-    path to the `(message, field, units)` it records; a scenario places its `spacecraft`.
+    A subclass builds its Basilisk objects and provides `models()`, the propagated modules a
+    scenario steps with the dynamics; `sensor_models(sample_period_s)`, which sets each sensor's
+    per-sample noise for that period and lists the sensors a scenario samples at it; `readers()`,
+    its sensor outputs by role; and `recorded_fields()`, run-file dataset path to the
+    `(message, field, units)` it records. A scenario places its `spacecraft`.
     """
 
     def write_run_file(

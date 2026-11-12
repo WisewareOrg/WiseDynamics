@@ -1,7 +1,7 @@
 """A rigid spacecraft carrying one body-mounted IMU.
 
 The vehicle is a rigid hub carrying an IMU at its centre of mass with identity mounting, constant
-biases and white noise.
+biases and white noise specified as a density.
 """
 
 from typing import Any
@@ -34,9 +34,10 @@ class ImuSpacecraft(Vehicle):
         gyro_bias_P_rad_s: Nominal constant gyro bias in the IMU platform frame, in rad/s.
         accel_bias_P_m_s2: Nominal constant accelerometer bias in the IMU platform frame, in
             m/s^2.
-        gyro_noise_std_rad_s: Nominal per-sample 1-sigma white noise on each gyro axis, in rad/s.
-        accel_noise_std_m_s2: Nominal per-sample 1-sigma white noise on each accelerometer axis,
-            in m/s^2.
+        gyro_noise_density_rad_s_rthz: Nominal white-noise density on each gyro axis, in
+            rad/s/sqrt(Hz).
+        accel_noise_density_m_s2_rthz: Nominal white-noise density on each accelerometer axis, in
+            m/s^2/sqrt(Hz).
         noise_seed: Nominal seed of the IMU's white-noise generator.
         gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `dispersed` draws, in rad/s.
         accel_bias_std_P_m_s2: Per-axis 1-sigma of the accelerometer bias `dispersed` draws, in
@@ -51,8 +52,8 @@ class ImuSpacecraft(Vehicle):
     )
     gyro_bias_P_rad_s: Vector3 = (1e-4, -2e-4, 5e-5)
     accel_bias_P_m_s2: Vector3 = (1e-4, -5e-5, 2e-4)
-    gyro_noise_std_rad_s: float = 5e-5
-    accel_noise_std_m_s2: float = 5e-5
+    gyro_noise_density_rad_s_rthz: float = 5e-5
+    accel_noise_density_m_s2_rthz: float = 5e-5
     noise_seed: int = 0
     gyro_bias_std_P_rad_s: float = 1e-4
     accel_bias_std_P_m_s2: float = 1e-4
@@ -88,8 +89,8 @@ class ImuSpacecraft(Vehicle):
         inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3] | None = None,
         gyro_bias_P_rad_s: Vector3 | None = None,
         accel_bias_P_m_s2: Vector3 | None = None,
-        gyro_noise_std_rad_s: float | None = None,
-        accel_noise_std_m_s2: float | None = None,
+        gyro_noise_density_rad_s_rthz: float | None = None,
+        accel_noise_density_m_s2_rthz: float | None = None,
         noise_seed: int | None = None,
     ) -> None:
         """Build the hub and the IMU.
@@ -100,9 +101,10 @@ class ImuSpacecraft(Vehicle):
                 three rows.
             gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
             accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
-            gyro_noise_std_rad_s: Per-sample 1-sigma white noise on each gyro axis, in rad/s.
-            accel_noise_std_m_s2: Per-sample 1-sigma white noise on each accelerometer axis, in
-                m/s^2.
+            gyro_noise_density_rad_s_rthz: White-noise density on each gyro axis, in
+                rad/s/sqrt(Hz).
+            accel_noise_density_m_s2_rthz: White-noise density on each accelerometer axis, in
+                m/s^2/sqrt(Hz).
             noise_seed: Seed of the IMU's white-noise generator.
         """
         nominal = type(self)
@@ -116,11 +118,15 @@ class ImuSpacecraft(Vehicle):
         self.accel_bias_P_m_s2 = (
             nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
         )
-        self.gyro_noise_std_rad_s = (
-            nominal.gyro_noise_std_rad_s if gyro_noise_std_rad_s is None else gyro_noise_std_rad_s
+        self.gyro_noise_density_rad_s_rthz = (
+            nominal.gyro_noise_density_rad_s_rthz
+            if gyro_noise_density_rad_s_rthz is None
+            else gyro_noise_density_rad_s_rthz
         )
-        self.accel_noise_std_m_s2 = (
-            nominal.accel_noise_std_m_s2 if accel_noise_std_m_s2 is None else accel_noise_std_m_s2
+        self.accel_noise_density_m_s2_rthz = (
+            nominal.accel_noise_density_m_s2_rthz
+            if accel_noise_density_m_s2_rthz is None
+            else accel_noise_density_m_s2_rthz
         )
         self.noise_seed = nominal.noise_seed if noise_seed is None else noise_seed
 
@@ -138,17 +144,31 @@ class ImuSpacecraft(Vehicle):
         self.imu.dcm_PB = np.eye(3)
         self.imu.senRotBias = self.gyro_bias_P_rad_s
         self.imu.senTransBias = self.accel_bias_P_m_s2
-        self.imu.PMatrixGyro = self.gyro_noise_std_rad_s * np.eye(3)
-        self.imu.PMatrixAccel = self.accel_noise_std_m_s2 * np.eye(3)
         self.imu.RNGSeed = int(self.noise_seed)
 
     def models(self) -> list[Any]:
-        """List the vehicle's Basilisk modules in task order.
+        """List the vehicle's propagated Basilisk modules in task order.
 
         Returns:
-            The hub, then the IMU.
+            The hub.
         """
-        return [self.spacecraft, self.imu]
+        return [self.spacecraft]
+
+    def sensor_models(self, sample_period_s: float) -> list[Any]:
+        """Set each sensor's per-sample noise for its sample period, and list the sensors.
+
+        A sample carries white noise of 1-sigma density / sqrt(`sample_period_s`) on each axis.
+
+        Args:
+            sample_period_s: The period the sensors sample at, in seconds.
+
+        Returns:
+            The IMU.
+        """
+        root_period = np.sqrt(sample_period_s)
+        self.imu.PMatrixGyro = self.gyro_noise_density_rad_s_rthz / root_period * np.eye(3)
+        self.imu.PMatrixAccel = self.accel_noise_density_m_s2_rthz / root_period * np.eye(3)
+        return [self.imu]
 
     def readers(self) -> dict[str, Any]:
         """Build the vehicle's sensor readers.

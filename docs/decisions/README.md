@@ -39,6 +39,7 @@ decision and its reasoning, not who ruled it.
 |---|---|---|---|
 | [0001](0001-basilisk-simulation-host.md) | 1 | 2026-10-31 | Simulate spacecraft dynamics with Basilisk as the simulation host |
 | [0002](0002-monte-carlo-sessions.md) | 2 | 2026-11-11 | Keep Monte Carlo runs in named sessions |
+| [0003](0003-fidelity-tiers.md) | 1 | 2026-11-12 | Define each fidelity by its integrator and an accuracy budget, stepping at the flight software's period |
 
 ## Revisions
 
