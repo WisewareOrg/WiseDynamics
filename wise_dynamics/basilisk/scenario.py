@@ -1,5 +1,6 @@
 """The Basilisk plumbing every scenario runs on: one simulation, run once and recorded."""
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,16 +12,66 @@ __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
 _DYNAMICS_TASK = "dynamics_task"
+_SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
 _RECORD_TASK = "record_task"
-_DYNAMICS_PRIORITY = 2
+_DYNAMICS_PRIORITY = 3
+_SENSOR_PRIORITY = 2
 _FSW_PRIORITY = 1
 _RECORD_PRIORITY = 0
-_FIDELITY = {
-    "hi": (0.02, svIntegrators.svIntegratorRK4),
-    "med": (0.05, svIntegrators.svIntegratorRK4),
-    "lo": (0.1, svIntegrators.svIntegratorRK2),
-}
+_MAX_STEP_NS = 1_000_000_000
+
+
+def _ralston_rk3(spacecraft: Any) -> Any:
+    """Ralston's third-order Runge-Kutta, the one of least truncation-error bound.
+
+    Args:
+        spacecraft: The Basilisk dynamic object it integrates.
+
+    Returns:
+        The integrator.
+    """
+    return svIntegrators.svIntegratorRungeKutta3(
+        spacecraft,
+        [[0.0, 0.0, 0.0], [1 / 2, 0.0, 0.0], [0.0, 3 / 4, 0.0]],
+        [2 / 9, 1 / 3, 4 / 9],
+        [0.0, 1 / 2, 3 / 4],
+    )
+
+
+def _rkf78(spacecraft: Any) -> Any:
+    """Runge-Kutta-Fehlberg 7(8), holding each step to a relative 1e-10 and an absolute 1e-12.
+
+    Args:
+        spacecraft: The Basilisk dynamic object it integrates.
+
+    Returns:
+        The integrator.
+    """
+    integrator = svIntegrators.svIntegratorRKF78(spacecraft)
+    integrator.setRelativeTolerance(1e-10)
+    integrator.setAbsoluteTolerance(1e-12)
+    return integrator
+
+
+_FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_rk3}
+
+
+def _step_ns(fsw_ns: int, record_ns: int) -> int:
+    """The largest step of at most 1 s that divides both periods, in nanoseconds.
+
+    Args:
+        fsw_ns: The flight software's period, in nanoseconds.
+        record_ns: The recording period, in nanoseconds.
+
+    Returns:
+        The step.
+    """
+    common_ns = math.gcd(fsw_ns, record_ns)
+    count = -(-common_ns // _MAX_STEP_NS)
+    while common_ns % count:
+        count += 1
+    return common_ns // count
 
 
 class Scenario:
@@ -31,9 +82,9 @@ class Scenario:
     recording period in seconds. `run` reads them, and `fidelity`.
 
     Attributes:
-        fidelity: `"hi"`, `"med"` or `"lo"`. `run` derives the integration step and the integrator
-            it gives every vehicle's spacecraft from it: `"hi"` is RK4 at 0.02 s, `"med"` RK4 at
-            0.05 s and `"lo"` RK2 at 0.1 s.
+        fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft:
+            `"hi"` Runge-Kutta-Fehlberg 7(8) at a relative tolerance of 1e-10 and an absolute one
+            of 1e-12, `"med"` RK4 and `"lo"` Ralston's RK3.
     """
 
     fidelity: str = "lo"
@@ -54,14 +105,15 @@ class Scenario:
         """Run the vehicles with one flight-software module and record them all.
 
         Gives every vehicle's spacecraft the integrator of `fidelity`, then builds the simulation
-        with one process holding three tasks, which run in this order at
-        each instant they share. The dynamics task, every step of `fidelity`, holds each vehicle's
-        models.
-        The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
-        the sensors' output of that instant. The record task, every `record_s` from t = 0, holds
-        one Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`,
-        so truth and flight output are recorded from the same instant. Runs from t = 0 for
-        `duration_s`.
+        with one process holding four tasks, which run in this order at each instant they share.
+        The dynamics task holds each vehicle's `models()` and steps at the largest step of at most
+        1 s that divides both `fsw_module.period_s` and `record_s`. The sensor task, every
+        `fsw_module.period_s`, holds each vehicle's `sensor_models` for that period, which so
+        sample the state of that instant. The flight-software task, every `fsw_module.period_s`,
+        holds `fsw_module`, which so reads the sensors' output of that instant. The record task,
+        every `record_s` from t = 0, holds one Basilisk recorder per entry of each vehicle's
+        `recorded_fields()` and of `fsw_fields`, so truth and flight output are recorded from the
+        same instant. Runs from t = 0 for `duration_s`.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -81,7 +133,7 @@ class Scenario:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         self._executed = True
 
-        step_s, integrator_type = _FIDELITY[self.fidelity]
+        integrator_type = _FIDELITY[self.fidelity]
         fields = {}
         for vehicle in self.vehicles:
             integrator = integrator_type(vehicle.spacecraft)
@@ -89,22 +141,24 @@ class Scenario:
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
+        fsw_ns = macros.sec2nano(fsw_module.period_s)
         period_ns = macros.sec2nano(self.record_s)
         recorders = {path: message.recorder(period_ns) for path, (message, _, _) in fields.items()}
 
+        tasks = (
+            (_DYNAMICS_TASK, _step_ns(fsw_ns, period_ns), _DYNAMICS_PRIORITY),
+            (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
+            (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
+            (_RECORD_TASK, period_ns, _RECORD_PRIORITY),
+        )
         process = self._simulation.CreateNewProcess(_PROCESS)
-        process.addTask(
-            self._simulation.CreateNewTask(_DYNAMICS_TASK, macros.sec2nano(step_s)),
-            _DYNAMICS_PRIORITY,
-        )
-        process.addTask(
-            self._simulation.CreateNewTask(_FSW_TASK, macros.sec2nano(fsw_module.period_s)),
-            _FSW_PRIORITY,
-        )
-        process.addTask(self._simulation.CreateNewTask(_RECORD_TASK, period_ns), _RECORD_PRIORITY)
+        for name, task_ns, priority in tasks:
+            process.addTask(self._simulation.CreateNewTask(name, task_ns), priority)
         for vehicle in self.vehicles:
             for model in vehicle.models():
                 self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
+            for sensor in vehicle.sensor_models(fsw_module.period_s):
+                self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
         for recorder in recorders.values():
             self._simulation.AddModelToTask(_RECORD_TASK, recorder)

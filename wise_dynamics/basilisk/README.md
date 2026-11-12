@@ -35,9 +35,11 @@ sensor noise. A vehicle class disperses itself: `dispersed(rng, *, noise_seed)` 
 dispersion from `rng`, with the 1-sigmas its class attributes give, and returns a vehicle built
 with it and what it drew.
 
-A vehicle lists its Basilisk modules in `models()`, hands out sensor readers by role in
-`readers()`, and declares what it records in `recorded_fields()`: dataset path to
-`(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one
+A vehicle lists the Basilisk modules it propagates in `models()` and its sensors in
+`sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period:
+a sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands
+out sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`:
+dataset path to `(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one
 HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
@@ -57,22 +59,28 @@ mark. It builds its vehicle, places it, and holds it as `scenario.vehicle` and i
 `scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
 are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
 
-`scenario.fidelity`, an attribute from `Scenario` that defaults to `"lo"`, is the level `run`
-builds at. `run` derives the integration step and the integrator it gives every vehicle's
-spacecraft from it. The differences below are measured on Leo500 at the end of one 5700 s orbit,
-against hi:
+`scenario.fidelity`, an attribute from `Scenario` that defaults to `"lo"`, is the integrator `run`
+gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it propagates: each has a
+budget on the truth position's distance from `hi`'s over one orbit, which `tests/test_fidelity.py`
+holds every scenario to. The step is not a fidelity's: every fidelity steps at the largest step of
+at most 1 s that divides the flight software's period and `record_s`. The differences below are the
+largest over one 5700 s orbit of Leo400 and Leo500, at a 1 s step, against `hi`:
 
-| fidelity | integrator | step | position | attitude |
+| fidelity | integrator | budget | position | attitude |
 |---|---|---|---|---|
-| `hi` | RK4 | 0.02 s | (reference) | (reference) |
-| `med` | RK4 | 0.05 s | 1.9 um | 5.9e-13 rad |
-| `lo` | RK2 | 0.1 s | 70.7 cm | 36.2 urad |
+| `hi` | RKF78, relative tolerance 1e-10, absolute 1e-12 | (reference) | (reference) | (reference) |
+| `med` | RK4 | 1 mm | 1.5 um | 19 nrad |
+| `lo` | Ralston's RK3 | 1 m | 6.6 mm | 12 urad |
+
+[ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why.
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
-`vehicles`, `fidelity` and `record_s`, and runs once. The vehicles run every step of the fidelity.
-The flight-software module runs in its own task at its own `period_s`, an attribute it declares in
-seconds, after the vehicles at each instant they share, so it reads that instant's sensor output.
-The recorders run every `record_s`, after both, so truth and flight output are recorded from the
+`vehicles`, `fidelity` and `record_s`, and runs once. The vehicles' `models()` run every step.
+Their `sensor_models` run in their own task at the flight software's `period_s`, an attribute it
+declares in seconds, after the models at each instant they share, so they sample that instant's
+state. The flight-software module runs in its own task at the same period, after the sensors, so it
+reads that instant's sensor output.
+The recorders run every `record_s`, after the rest, so truth and flight output are recorded from the
 same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
 `recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to `(array,
 units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
@@ -158,7 +166,7 @@ local checkout (`uv pip install -e <checkout>`) stops the pytest run before coll
 
 A case, with Basilisk's stock `inertial3D` guidance standing in for flight software that reads
 `sim_scenario.vehicle.readers()` and starts from `sim_scenario.initial_state()`. It declares
-`period_s` = 1.0, so it steps at 1 Hz while the default fidelity steps the vehicle at 10 Hz. Its
+`period_s` = 1.0, so it, the IMU and the dynamics all step at 1 Hz. Its
 output joins the run file through `fsw_fields`.
 Pick a session with `pytest --sim-session <name>`, then `pytest <test file> -n 8` runs it as a
 Monte Carlo campaign; `-n` runs workers in parallel and needs `pytest-xdist`, which a consumer
