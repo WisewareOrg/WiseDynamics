@@ -63,7 +63,9 @@ are taken after dispersing. `initial_state()` returns the placement the vehicle 
 gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it propagates: each has a
 budget on the truth position's distance from `hi`'s over one orbit, which `tests/test_fidelity.py`
 holds every scenario to. The step is not a fidelity's: every fidelity steps at the largest step of
-at most 1 s that divides the flight software's period and `record_s`.
+at most 1 s that divides the flight software's period. `run` refuses, with a `ValueError` before
+anything runs, a period no step of at least 1 ms divides, and a `record_s` that is not a whole
+number of steps.
 
 | fidelity | integrator | budget over one orbit |
 |---|---|---|

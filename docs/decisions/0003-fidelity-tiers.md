@@ -34,8 +34,10 @@ orbit, which a test holds every scenario to:
 | `med` | RK4 | 1 mm |
 | `lo` | Ralston's third-order Runge-Kutta | 1 m |
 
-Every fidelity steps at the largest step of at most 1 s that divides the flight software's period
-and the recording period. The 1 s maximum is a chosen bound, not a measured one. A vehicle's sensors
+Every fidelity steps at the largest step of at most 1 s that divides the flight software's period.
+The recording period is a whole number of steps, and a run refuses, before anything runs, a
+recording period that is not or a flight-software period no step of at least 1 ms divides. The
+1 s maximum is a chosen bound, not a measured one. A vehicle's sensors
 run in their own task at the flight software's period, after the dynamics and before the flight
 software, so a case draws the same sensor noise at every fidelity. A sensor's white noise is a
 density; a sample carries 1-sigma density / sqrt(period).
@@ -78,6 +80,13 @@ fidelity's accuracy on the nominal scenarios.
 - **A step chosen per fidelity from its budget**, longer than 1 s where the flight software's
   period allows. Not taken: the 1 s maximum is chosen, and every measurement here is at a step of
   at most 1 s.
+- **A step dividing both the flight software's and the recording period.** Silent where the two
+  share no step of 1 s or less: a 3 Hz flight software recorded every 10 s steps at 1 ns, and a
+  run never finishes. A 1 ms floor on that step would refuse the same configuration the rule
+  taken here refuses, while letting the recording period shrink the step.
+- **Recording the last propagated state** at a recording period that is not a whole number of
+  steps. Never refuses, but records truth up to a step before its time stamp, so truth and flight
+  output stop being recorded from the same instant.
 - **Sensors in the dynamics task.** Splitting them out cost nothing measurable (coupled and split
   matched within run-to-run noise), and coupled sensors change a case's noise with its fidelity.
 

@@ -88,22 +88,23 @@ def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(
         (10.0, 10.0, 1_000_000_000),
         (0.1, 10.0, 100_000_000),
         (0.25, 10.0, 250_000_000),
-        (1.0, 0.5, 500_000_000),
         (2.5, 10.0, 625_000_000),
+        (1 / 3, 9.99999999, 333_333_333),
     ],
 )
-def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_and_record_periods(
+def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(
     period_s: float, record_s: float, step_ns: int
 ):
-    """The dynamics steps at the largest step of at most 1 s that divides both periods.
+    """The dynamics steps at the largest step of at most 1 s that divides the FSW's period.
 
-    The sensors and the flight software then run at the flight software's period, each on an
-    instant the dynamics has just reached.
+    The sensors and the flight software then run at the flight software's period, and the
+    recorders at `record_s`, a whole number of steps, each on an instant the dynamics has just
+    reached.
 
     Args:
         period_s: The flight software's period, in seconds.
         record_s: The recording period, in seconds.
-        step_ns: The dynamics task period the two give, in nanoseconds.
+        step_ns: The dynamics task period the flight software's period gives, in nanoseconds.
     """
     scenario = Leo500()
     scenario.record_s = record_s
@@ -114,6 +115,39 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_and_record_peri
     assert sensors.TaskData.TaskPeriod == round(period_s * 1e9)
     assert flight.TaskData.TaskPeriod == round(period_s * 1e9)
     assert record.TaskData.TaskPeriod == round(record_s * 1e9)
+
+
+@pytest.mark.parametrize(
+    ("period_s", "record_s"),
+    [(1 / 3, 10.0), (1.0, 0.5), (1.0, 2.5)],
+)
+def test_a_record_period_that_is_not_a_whole_number_of_steps_is_refused(
+    period_s: float, record_s: float
+):
+    """Recording off the step's instants is refused, naming both periods, before anything runs.
+
+    The same scenario then runs once its `record_s` is the flight software's period, which is
+    always a whole number of steps.
+
+    Args:
+        period_s: The flight software's period, in seconds.
+        record_s: The recording period, in seconds, not a whole number of the step it gives.
+    """
+    scenario = Leo500()
+    scenario.record_s = record_s
+    fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
+    with pytest.raises(ValueError, match=rf"record_s {record_s} .* period_s {period_s}"):
+        scenario.run(fsw, {}, duration_s=0.0)
+    scenario.record_s = period_s
+    assert scenario.run(fsw, {}, duration_s=2.0)["t_s"][0][0] == 0.0
+
+
+def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
+    """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
+    scenario = Leo500()
+    fsw = type("_Paced", (_Guidance,), {"period_s": 1.000000007})()
+    with pytest.raises(ValueError, match=r"period_s 1\.000000007 "):
+        scenario.run(fsw, {}, duration_s=0.0)
 
 
 def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():

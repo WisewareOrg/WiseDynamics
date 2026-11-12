@@ -1,6 +1,5 @@
 """The Basilisk plumbing every scenario runs on: one simulation, run once and recorded."""
 
-import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +19,7 @@ _SENSOR_PRIORITY = 2
 _FSW_PRIORITY = 1
 _RECORD_PRIORITY = 0
 _MAX_STEP_NS = 1_000_000_000
+_MIN_STEP_NS = 1_000_000
 
 
 def _ralston_rk3(spacecraft: Any) -> Any:
@@ -58,21 +58,33 @@ _FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_
 """Fidelity to the factory building its integrator for a spacecraft."""
 
 
-def _step_ns(fsw_ns: int, record_ns: int) -> int:
-    """The largest step of at most 1 s that divides both periods, in nanoseconds.
+def _step_ns(period_s: float, record_s: float) -> int:
+    """The largest step of at most 1 s that divides the flight software's period, in nanoseconds.
 
     Args:
-        fsw_ns: The flight software's period, in nanoseconds.
-        record_ns: The recording period, in nanoseconds.
+        period_s: The flight software's period, in seconds.
+        record_s: The recording period, in seconds.
 
     Returns:
         The step.
+
+    Raises:
+        ValueError: No step of at least 1 ms divides `period_s`, or `record_s` is not a whole
+            number of steps.
     """
-    common_ns = math.gcd(fsw_ns, record_ns)
-    count = -(-common_ns // _MAX_STEP_NS)
-    while common_ns % count:
-        count += 1
-    return common_ns // count
+    fsw_ns, record_ns = macros.sec2nano(period_s), macros.sec2nano(record_s)
+    fewest = -(-fsw_ns // _MAX_STEP_NS)
+    counts = (n for n in range(fewest, fsw_ns // _MIN_STEP_NS + 1) if fsw_ns % n == 0)
+    count = next(counts, None)
+    if count is None:
+        raise ValueError(f"no step of 1 ms to 1 s divides period_s {period_s} s")
+    step_ns = fsw_ns // count
+    if record_ns % step_ns:
+        raise ValueError(
+            f"record_s {record_s} s is not a whole number of the {step_ns} ns step that "
+            f"period_s {period_s} s gives"
+        )
+    return step_ns
 
 
 class Scenario:
@@ -107,13 +119,15 @@ class Scenario:
         Gives every vehicle's spacecraft the integrator of `fidelity`, then builds the simulation
         with one process holding four tasks, which run in this order at each instant they share.
         The dynamics task holds each vehicle's `models()` and steps at the largest step of at most
-        1 s that divides both `fsw_module.period_s` and `record_s`. The sensor task, every
-        `fsw_module.period_s`, holds each vehicle's `sensor_models` for that period, which so
-        sample the state of that instant. The flight-software task, every `fsw_module.period_s`,
-        holds `fsw_module`, which so reads the sensors' output of that instant. The record task,
-        every `record_s` from t = 0, holds one Basilisk recorder per entry of each vehicle's
-        `recorded_fields()` and of `fsw_fields`, so truth and flight output are recorded from the
-        same instant. Runs from t = 0 for `duration_s`.
+        1 s that divides `fsw_module.period_s`; `record_s` is a whole number of them, and a
+        period no step of at least 1 ms divides or a `record_s` that is not raises `ValueError`
+        before anything runs. The sensor
+        task, every `fsw_module.period_s`, holds each vehicle's `sensor_models` for that period,
+        which so sample the state of that instant. The flight-software task, every
+        `fsw_module.period_s`, holds `fsw_module`, which so reads the sensors' output of that
+        instant. The record task, every `record_s` from t = 0, holds one Basilisk recorder per
+        entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so truth and flight output
+        are recorded from the same instant. Runs from t = 0 for `duration_s`.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -131,6 +145,7 @@ class Scenario:
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
+        step_ns = _step_ns(fsw_module.period_s, self.record_s)
         self._executed = True
 
         make_integrator = _FIDELITY[self.fidelity]
@@ -146,7 +161,7 @@ class Scenario:
         recorders = {path: message.recorder(record_ns) for path, (message, _, _) in fields.items()}
 
         tasks = (
-            (_DYNAMICS_TASK, _step_ns(fsw_ns, record_ns), _DYNAMICS_PRIORITY),
+            (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
             (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
             (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
             (_RECORD_TASK, record_ns, _RECORD_PRIORITY),
