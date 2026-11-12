@@ -79,9 +79,10 @@ Their `sensor_models` run in their own task at the flight software's `period_s`,
 declares in seconds, after the models at each instant they share, so they sample that instant's
 state. The flight-software module runs in its own task at the same period, after the sensors, so it
 reads that instant's sensor output. The recorders run every `record_s`, after the rest, so truth
-and flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
-`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to `(array,
-units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
+and flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a
+flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
+empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
+then `fsw_fields`.
 
 ## pytest plugin
 

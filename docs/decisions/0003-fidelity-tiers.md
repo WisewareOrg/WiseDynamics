@@ -73,7 +73,8 @@ fidelity's accuracy on the nominal scenarios.
   more stages: RKF45 at 1 s costs 2.4 times RK4 and RKF78 5.4 times.
 - **RK4 at 0.02 s for `hi`, the former reference.** RKF78 at 1 s agrees with it to 0.6 um at a
   quarter of its cost, and holds its error to its tolerance where a fixed step does not. Tightening
-  RKF78 from Basilisk's default relative tolerance of 1e-4 to 1e-10 cost nothing measurable.
+  RKF78 from Basilisk's default relative tolerance of 1e-4 to 1e-10 cost nothing measurable on
+  Leo500 at a 1 s step.
 - **A step chosen per fidelity from its budget**, longer than 1 s where the flight software's
   period allows. Not taken: the 1 s maximum is chosen, and every measurement here is at a step of
   at most 1 s.
