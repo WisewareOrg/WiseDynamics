@@ -11,18 +11,19 @@ raises.
 
 | module | holds |
 |---|---|
-| `wise_dynamics/pytest_plugin.py` | the pytest plugin's marks, `--ci`, `--sim-session` and `sim_*` fixtures |
-| `wise_dynamics/sessions.py` | the session pointer and layout: `session_directory`, `recorded_tests` and `read_test_results` |
+| `wise_dynamics/pytest_plugin.py` | the pytest plugin's marks, `--full-monte-carlo`, `--sim-session` and `sim_*` fixtures |
+| `wise_dynamics/sessions.py` | the session pointer and layout: `session_directory`, `current_session`, `recorded_tests` and `read_test_results` |
 | `wise_dynamics/notebook.py` | the `%%monte_carlo` notebook magic and `load_runs` (the `notebook` extra) |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
-| `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class |
+| `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class; `VEHICLES` registers each under the module's name |
 | `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario |
 
-Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft` and `SCENARIOS` from
+Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft`, `SCENARIOS` and `VEHICLES` from
 `wise_dynamics.basilisk`, and a scenario class from its own module,
 `wise_dynamics.basilisk.scenarios.<name>`. A test picks one scenario with the `sim_scenario` mark, a
-name in `SCENARIOS`, and the scenario builds its own vehicle.
+name in `SCENARIOS`, and the scenario builds its own vehicle unless the `sim_vehicle` mark names
+another.
 
 ## Vehicles
 
@@ -47,7 +48,9 @@ module's name. A module defining none or several raises `TypeError` when the pac
 
 A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
 its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
-no arguments: it builds its vehicle, places it, and holds it as `scenario.vehicle` and in
+no required argument and one optional argument, the vehicle class to build in place of its own,
+which the `sim_vehicle` mark supplies; a scenario that does not accept it cannot be used with that
+mark. It builds its vehicle, places it, and holds it as `scenario.vehicle` and in
 `scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
 `rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
 `rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
@@ -88,42 +91,57 @@ bad one fails collection of the test, naming its node id and the mark.
 | `sim_runs(n)` | cases in the campaign, an integer of at least 1 | 8 |
 | `sim_duration_s(seconds)` | simulated seconds per case, positive | 5700 |
 | `sim_scenario(name)` | the scenario's name in `SCENARIOS` | `leo500` |
+| `sim_vehicle(name)` | the vehicle's name in `VEHICLES`, a module name in `wise_dynamics/basilisk/vehicles/`; the scenario builds that class instead of its own | the scenario's own |
 | `sim_fidelity(level)` | `hi`, `med` or `lo`, as the Scenarios section defines them | `lo` |
 
-`--ci` caps every test's case count at 2, and a test marked for fewer runs its own. The `sim_out`
-ini setting, a path relative to the rootdir or an absolute one and not empty, is the root of every
-session in a project; default `monte_carlo`.
+A run is capped unless `--full-monte-carlo` is given: every test's case count is at most 2, and a
+test marked for fewer runs its own. Bare `pytest`, the editor's test explorer and CI are therefore
+capped, and a full campaign is asked for. A capped run writes to the `scratch` session whatever the
+pointer says, and never changes the pointer. `WISE_DYNAMICS_CAPPED`, when non-empty in the
+environment, forces a capped run even with `--full-monte-carlo`; a consumer's tests that run a
+notebook set it, and an interactive kernel never does. The `sim_out` ini setting, a path relative to
+the rootdir or an absolute one and not empty, is the root of every session in a project; default
+`monte_carlo`.
 
 `--sim-session <name>` makes `<name>` the active session and runs no test; with no name it prints
 the active session and lists the others. A name starts with a letter or digit, then letters,
-digits, `.`, `_` or `-`, and is not `SESSION`. `just session [name]` wraps it. A Monte Carlo test
-run with no active session shows one error naming `--sim-session`; the other tests of its file run.
+digits, `.`, `_` or `-`, and is neither `SESSION` nor `scratch`, so `--sim-session scratch` is
+rejected. `just session [name]` wraps it. A Monte Carlo test run with no active session shows one
+error naming `--sim-session`; the other tests of its file run. When `WISE_DYNAMICS_SESSION_REPORT`
+names a file, `--sim-session` with no name also writes the active session's directory there as
+JSON, `null` when none is active; `current_session()` reads it.
 
 | fixture | gives |
 |---|---|
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | the test's `sim_duration_s` |
+| `sim_test_directory` | the test's directory in the session its runs land in (`scratch` for a capped run), the directory `sim_run_file` writes to |
 | `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
-| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory of the active session through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
+| `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory of the session its runs land in (`scratch` for a capped run) through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and the calling repository's provenance (`versions_caller_commit`, the commit of the git repository that holds the rootdir, and `versions_caller_dirty`, whether its tree has uncommitted changes; both absent when the rootdir is not in a git checkout), `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
 Case `k` takes its draws and its noise seed from the two streams of
 `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
-is and reruns alone by its node id: `pytest "<test file>::test_case[k]"`.
+is and reruns alone by its node id: `pytest "<test file>::test_case[k]" --full-monte-carlo`.
 
 A session is a named working set holding one set of run files per test
-([ADR 0002 rev 1](../../docs/decisions/0002-monte-carlo-sessions.md)). `<root>/SESSION` holds the
+([ADR 0002 rev 2](../../docs/decisions/0002-monte-carlo-sessions.md)). `<root>/SESSION` holds the
 active session's name; the plugin and `load_runs` read it, so every way of running or reading
-cases agrees on where runs are, and a running notebook kernel follows a switch. One run resolves
+cases agrees on where runs are, and a running notebook kernel follows a switch. Outside pytest,
+`wise_dynamics.sessions.current_session()` returns the directory of the session a run at the
+current directory reads and writes, `scratch` included when `WISE_DYNAMICS_CAPPED` is set, and
+raises `NoSessionError` when none is active. One run resolves
 the session once, so switching it midway does not split the run. A test's run files are in
 `<root>/<session>/<test file>/<class>/<function>/`: the test file is its path relative to the
 rootdir without `.py`, and each enclosing class, outermost first, is a directory. Before the first
 case runs, each worker writes `planned.json` into that directory,
 `{"runs": N, "nodeid": "<test file>.py::<class>::<function>"}`: the test's case count after the
-`--ci` cap, and its node id without parameters. `wise_dynamics.sessions.recorded_tests(session)` lists a session's test folders with
+cap, and its node id without parameters. `wise_dynamics.sessions.recorded_tests(session)` lists a session's test folders with
 their node ids, so a consumer finds a test's folder by its node id instead of parsing the path.
 
-A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.crash.json`, and
-nothing else is cleared, so rerunning one case by its node id replaces only its result. A case
+A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.crash.json`, so
+rerunning one case by its node id replaces only its result. A campaign of N cases also deletes, when
+it is collected, its test's run files and crash records numbered N and above, so the leftovers of an
+earlier, larger campaign are cleared; nothing else is. A case
 that fails in setup or call without having written its run file leaves `run_<NNNN>.crash.json`,
 `{"exception": ..., "traceback": ...}`; so does a case whose pytest-xdist worker dies, such as a
 segfault. A case that wrote its run file and then failed keeps the run file, unless its worker
@@ -170,10 +188,13 @@ def test_case(sim_scenario, sim_duration_s, sim_run_file):
 A jupytext-paired notebook (`jupytext --set-formats ipynb,py:percent <notebook>`) runs a campaign
 from a cell. Install the `notebook` extra, `wise-dynamics[notebook]`, and load the extension with
 `%load_ext wise_dynamics.notebook`. `%%monte_carlo [notebook path]` as a cell's first line syncs the
-paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest
-with `-n auto` (plus `--ci` when the `CI` environment variable is set); the cell then raises if any
-test fails, so Run All stops before the plot cells. The notebook's path comes from the argument,
-else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
+paired `.py` and runs the cell's top-level `test*` functions and `Test*` classes through pytest with
+`-n auto` and `--full-monte-carlo` (capped, without the option, when `WISE_DYNAMICS_CAPPED` is set).
+The tests also include any test function or `Test*` class the cell's code creates, such as by
+assigning it into the namespace. The magic runs the cell first and then flies the tests it defines
+or creates, so a cell that defines or creates no test is refused after it has run. The cell then
+raises if any test fails, so Run All stops before the plot cells. The notebook's path comes from the
+argument, else `__vsc_ipynb_file__` (VS Code), else `JPY_SESSION_NAME` (a Jupyter server).
 
 Save the notebook first; a cell that differs from the notebook on disk is refused. The notebook
 may be the `.ipynb` or the paired `.py` opened as a notebook. Every worker imports the `.py`, so

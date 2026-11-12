@@ -2,11 +2,12 @@
 
 A test configures its campaign with marks on the function, a class or the module, the closest
 winning. Installing `wise-dynamics` registers this module through its `pytest11` entry point.
-`wise_dynamics/basilisk/README.md` documents the marks, `--ci` and fixtures.
+`wise_dynamics/basilisk/README.md` documents the marks, `--full-monte-carlo` and fixtures.
 """
 
 import json
 import numbers
+import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ from wise_dynamics import sessions
 
 if TYPE_CHECKING:
     from wise_dynamics.basilisk.scenario import Scenario
+    from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__: list[str] = []
 
@@ -31,13 +33,14 @@ _WORKER_SESSION = "wise_dynamics_session"
 _SESSION = pytest.StashKey[Path]()
 _WRITTEN_DIRS = pytest.StashKey[set[Path]]()
 _PROVENANCE = pytest.StashKey[dict[str, str | bool]]()
+_CALLER = pytest.StashKey[dict[str, str | bool]]()
 _SEED = 0
 _INSTALL_HINT = (
     "Install a pinned release with `uv sync` against a git dependency, or a local checkout with\n"
     "`uv pip install -e <checkout>`."
 )
 _DEFAULT_OUT = "monte_carlo"
-_CI_RUNS = 2
+_CAPPED_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
 _DEFAULT_RUNS = 8
 _DEFAULT_FIDELITY = "lo"
@@ -48,6 +51,12 @@ _MARKS = (
         "sim_scenario",
         "name",
         f"name of the scenario in wise_dynamics.basilisk.SCENARIOS; default {_DEFAULT_SCENARIO}",
+    ),
+    (
+        "sim_vehicle",
+        "name",
+        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's"
+        " own",
     ),
     ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
@@ -79,10 +88,11 @@ class _Settings(NamedTuple):
 
     Attributes:
         scenario: The scenario's name in `SCENARIOS`.
-        runs: The number of cases, after the `--ci` cap.
+        runs: The number of cases, after the cap.
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
-        directory: The directory the test's run files are written to, in the active session.
+        directory: The directory the test's run files are written to, in the runs' session.
+        vehicle: The vehicle's name in `VEHICLES`, or None for the scenario's own.
     """
 
     scenario: str
@@ -90,20 +100,21 @@ class _Settings(NamedTuple):
     fidelity: str
     duration_s: float
     directory: Path
+    vehicle: str | None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the `--ci` option.
+    """Register the `--full-monte-carlo` and `--sim-session` options and the `sim_out` setting.
 
     Args:
         parser: The pytest command-line parser.
     """
     group = parser.getgroup("wise-dynamics", "WiseDynamics vehicle cases")
     group.addoption(
-        "--ci",
+        "--full-monte-carlo",
         action="store_true",
         default=False,
-        help=f"cap every test's case count at {_CI_RUNS}",
+        help=f"fly every case of every test; without it each test flies at most {_CAPPED_RUNS}",
     )
     group.addoption(
         "--sim-session",
@@ -127,8 +138,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_cmdline_main(config: pytest.Config) -> int | None:
     """Handle `--sim-session` without configuring the session or running any test.
 
-    The handler reads only the command line and the `sim_out` ini setting, so a broken pointer or
-    an install that cannot be described never blocks it.
+    Naming a session reads only the command line and the `sim_out` ini setting, so an install that
+    cannot be described never blocks it. When `WISE_DYNAMICS_SESSION_REPORT` names a file, the list
+    mode writes the session directory `session_directory` gives, or null when no session is
+    active, to it as JSON; an invalid name in the pointer then stops the run with a usage error.
 
     Args:
         config: The parsed, not yet configured, pytest configuration.
@@ -146,6 +159,13 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         sessions.write_pointer(root, name)
         print(f"session: {name}")
         return int(pytest.ExitCode.OK)
+    report = os.environ.get(sessions.REPORT_ENV)
+    if report:
+        try:
+            found = str(sessions.session_directory(config))
+        except sessions.NoSessionError:
+            found = None
+        Path(report).write_text(json.dumps(found))
     active = sessions.read_pointer(root)
     print(f"active: {active or 'none'}")
     others = sorted(path.name for path in root.iterdir() if path.is_dir()) if root.is_dir() else []
@@ -171,6 +191,7 @@ def pytest_configure(config: pytest.Config) -> None:
     sessions.sim_root(config)
     config.stash[_WRITTEN_DIRS] = set()
     config.stash[_PROVENANCE] = _provenance()
+    config.stash[_CALLER] = _caller_provenance(config.rootpath)
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -228,7 +249,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count and node path into the session's folder.
 
-    The count is the test's `sim_runs` after the `--ci` cap, not the number of cases selected.
+    The count is the test's `sim_runs` after the cap, not the number of cases selected. The run
+    files and crash records the test's folder holds for cases from that count up are deleted.
 
     A `--collect-only` run writes nothing, and neither does a pytest-xdist controller, which
     collects nothing; each worker writes the same content. A test with no active Monte Carlo
@@ -246,6 +268,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
             planned[settings.directory] = (settings.runs, item.nodeid.partition("[")[0])
     for directory, (runs, nodeid) in planned.items():
         sessions.write_planned(directory, runs, nodeid)
+        _delete_leftovers(directory, runs)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -344,7 +367,7 @@ def sim_case_index(request: pytest.FixtureRequest) -> int:
         request: The fixture request, whose `param` is the case number.
 
     Returns:
-        The case number, from 0 up to the test's `sim_runs` (after the `--ci` cap).
+        The case number, from 0 up to the test's `sim_runs` (after the cap).
     """
     if isinstance(request.param, _NoSession):
         pytest.fail(request.param.reason, pytrace=False)
@@ -365,6 +388,20 @@ def sim_duration_s(request: pytest.FixtureRequest) -> float:
 
 
 @pytest.fixture
+def sim_test_directory(request: pytest.FixtureRequest) -> Path:
+    """The test's directory in the session its runs are written to.
+
+    Args:
+        request: The fixture request, whose config resolves the session.
+
+    Returns:
+        The directory `sim_run_file` writes this test's run files in: `scratch` for a capped run,
+        else the active session.
+    """
+    return _settings(request.node).directory
+
+
+@pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
     """This case's scenario, dispersed from the case's two random streams.
 
@@ -380,7 +417,11 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     """
     settings = _settings(request.node)
     draws_stream, noise_stream = _streams(sim_case_index)
-    scenario = _scenario_type(settings.scenario)()
+    scenario_type = _scenario_type(settings.scenario)
+    if settings.vehicle is None:
+        scenario = scenario_type()
+    else:
+        scenario = scenario_type(vehicle_type=_vehicle_type(settings.vehicle))
     scenario.fidelity = settings.fidelity
     scenario.disperse(
         np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
@@ -394,13 +435,14 @@ def sim_run_file(
     sim_case_index: int,
     sim_scenario: "Scenario",
 ) -> Callable[..., Path]:
-    """A writer of this case's run file, in the test's directory of the active session.
+    """A writer of this case's run file, in the test's directory of the session its runs land in.
 
     The file is `run_<NNNN>.h5`, written through `sim_scenario.vehicle` and laid out as the basilisk
     README describes. The file's root attributes are `case`, `seed`, `fidelity`, `created_utc` (the
     case's start, ISO 8601 UTC), `versions_bsk`, `versions_wise_dynamics`, the install's provenance
-    (`versions_wise_dynamics_*`, see the basilisk README) and one `draw_<name>` per value the
-    scenario drew.
+    (`versions_wise_dynamics_*`, see the basilisk README), the rootdir repository's commit and
+    dirty state (`versions_caller_commit` and `versions_caller_dirty`, absent when the rootdir is
+    not a git checkout) and one `draw_<name>` per value the scenario drew.
 
     Args:
         request: The fixture request, whose node carries the marks and whose config stash records
@@ -421,6 +463,10 @@ def sim_run_file(
         **{
             f"versions_wise_dynamics_{name}": value
             for name, value in request.config.stash[_PROVENANCE].items()
+        },
+        **{
+            f"versions_caller_{name}": value
+            for name, value in request.config.stash[_CALLER].items()
         },
     }
     for name, value in sim_scenario.draws.items():
@@ -456,7 +502,7 @@ def sim_run_file(
 
 
 def _settings(node: pytest.Function) -> _Settings:
-    """Resolve a test's configuration from its marks, the defaults and `--ci`.
+    """Resolve a test's configuration from its marks, the defaults and the cap.
 
     Resolving the run directory raises `pytest.UsageError` through `_active_session` when no
     session is active or its name is invalid.
@@ -465,7 +511,7 @@ def _settings(node: pytest.Function) -> _Settings:
         node: The test function, or one of its parametrized items.
 
     Returns:
-        The test's settings, its case count capped at two under `--ci`.
+        The test's settings, its case count capped at two unless `--full-monte-carlo` is given.
 
     Raises:
         ValueError: A mark's value is malformed; the message starts with the mark's name.
@@ -491,14 +537,22 @@ def _settings(node: pytest.Function) -> _Settings:
         or not duration_s > 0
     ):
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
-    if node.config.getoption("ci"):
-        runs = min(runs, _CI_RUNS)
+    vehicle = values.get("sim_vehicle")
+    if vehicle is not None:
+        if not isinstance(vehicle, str):
+            raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
+        try:
+            _vehicle_type(vehicle)
+        except ValueError as error:
+            raise ValueError(f"sim_vehicle: {error}") from None
+    if _capped(node.config):
+        runs = min(runs, _CAPPED_RUNS)
     directory = _run_dir(node)
-    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory)
+    return _Settings(scenario, int(runs), fidelity, float(duration_s), directory, vehicle)
 
 
 def _run_dir(node: pytest.Function) -> Path:
-    """Build a test's run directory in the active session.
+    """Build a test's run directory in the session its runs land in.
 
     `_active_session` raises `pytest.UsageError` when no session is active or its name is invalid.
 
@@ -506,7 +560,7 @@ def _run_dir(node: pytest.Function) -> Path:
         node: The test function, or one of its parametrized items.
 
     Returns:
-        `_test_directory` under the active session's directory.
+        `_test_directory` under the directory `_active_session` gives.
     """
     return _test_directory(node, _active_session(node.config))
 
@@ -520,21 +574,51 @@ def _active_session(config: pytest.Config) -> Path:
         config: The session's pytest configuration, which holds the stash.
 
     Returns:
-        The active session's directory.
+        The `scratch` session's directory when the run is capped, else the active session's.
 
     Raises:
-        pytest.UsageError: There is no active session, or its name is invalid.
+        pytest.UsageError: A full run has no active session, or its name is invalid.
     """
     if _SESSION not in config.stash:
         workerinput = getattr(config, "workerinput", None)
         if workerinput is None:
-            config.stash[_SESSION] = sessions.session_directory(config)
+            config.stash[_SESSION] = (
+                sessions.sim_root(config) / sessions.SCRATCH
+                if _capped(config)
+                else sessions.session_directory(config)
+            )
         else:
             handed = workerinput[_WORKER_SESSION]
             if handed["directory"] is None:
                 raise pytest.UsageError(handed["error"])
             config.stash[_SESSION] = Path(handed["directory"])
     return config.stash[_SESSION]
+
+
+def _delete_leftovers(directory: Path, runs: int) -> None:
+    """Delete a test's run files and crash records of cases numbered `runs` or higher.
+
+    Args:
+        directory: The test's directory in the session.
+        runs: The test's planned case count.
+    """
+    for path in directory.glob("run_*"):
+        case = sessions._case_number(path)
+        if case is not None and case >= runs:
+            path.unlink(missing_ok=True)
+
+
+def _capped(config: pytest.Config) -> bool:
+    """Tell whether the run flies at most two cases per test, into the `scratch` session.
+
+    Args:
+        config: The session's pytest configuration.
+
+    Returns:
+        True unless `--full-monte-carlo` is given; True whatever it says while the
+        `WISE_DYNAMICS_CAPPED` environment variable is non-empty.
+    """
+    return bool(os.environ.get(sessions.CAPPED_ENV)) or not config.getoption("full_monte_carlo")
 
 
 def _case_of(item: pytest.Item) -> int | None:
@@ -673,24 +757,54 @@ def _provenance() -> dict[str, str | bool]:
             f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
             f"{_INSTALL_HINT}"
         )
-    git = ["git", "-C", url2pathname(urlparse(url).path)]
+    path = url2pathname(urlparse(url).path)
     try:
-        commit = subprocess.run(
-            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-        )
-        status = subprocess.run(
-            [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
-        )
+        commit, dirty = _git_state(path)
     except (OSError, subprocess.CalledProcessError) as error:
         raise pytest.UsageError(
-            f"git could not describe the editable checkout {git[2]}: {error}\n{_INSTALL_HINT}"
+            f"git could not describe the editable checkout {path}: {error}\n{_INSTALL_HINT}"
         ) from None
     return {
         "install": "local",
-        "commit": commit.stdout.strip(),
+        "commit": commit,
         "requested_revision": "",
-        "dirty": bool(status.stdout.strip()),
+        "dirty": dirty,
     }
+
+
+def _git_state(path: str | Path) -> tuple[str, bool]:
+    """Read the HEAD commit and the dirty state of the git repository holding `path`.
+
+    Args:
+        path: A directory in the repository.
+
+    Returns:
+        HEAD's commit and whether `git status --porcelain` lists anything, untracked files included.
+        An `OSError` (no `git`) or `subprocess.CalledProcessError` (not a repository) propagates.
+    """
+    git = ["git", "-C", str(path)]
+    commit = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
+    status = subprocess.run(
+        [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
+    )
+    return commit.stdout.strip(), bool(status.stdout.strip())
+
+
+def _caller_provenance(rootdir: Path) -> dict[str, str | bool]:
+    """Describe the git repository that holds the rootdir.
+
+    Args:
+        rootdir: The pytest rootdir.
+
+    Returns:
+        `commit` (HEAD) and `dirty` (as `_git_state`); empty when `git` cannot describe the
+        rootdir.
+    """
+    try:
+        commit, dirty = _git_state(rootdir)
+    except (OSError, subprocess.CalledProcessError):
+        return {}
+    return {"commit": commit, "dirty": dirty}
 
 
 def _run_files(count: int) -> str:
@@ -725,6 +839,25 @@ def _scenario_type(name: str) -> "type[Scenario]":
         raise ValueError(
             f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
         ) from None
+
+
+def _vehicle_type(name: str) -> "type[Vehicle]":
+    """Look up a vehicle class by name, importing Basilisk on first use.
+
+    Args:
+        name: A name in `VEHICLES`.
+
+    Returns:
+        The vehicle class `name` registers.
+
+    Raises:
+        ValueError: `name` is not registered.
+    """
+    from wise_dynamics.basilisk.vehicles import VEHICLES
+
+    if name not in VEHICLES:
+        raise ValueError(f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}")
+    return VEHICLES[name]
 
 
 def _streams(index: int) -> list[np.random.SeedSequence]:

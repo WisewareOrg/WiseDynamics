@@ -6,6 +6,7 @@
 from wise_dynamics.basilisk.scenario import Scenario
 from wise_dynamics.basilisk.scenarios import SCENARIOS
 from wise_dynamics.basilisk.vehicle import Vehicle
+from wise_dynamics.basilisk.vehicles import VEHICLES
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
-__all__ = ["SCENARIOS", "ImuSpacecraft", "Scenario", "Vehicle"]
+__all__ = ["SCENARIOS", "VEHICLES", "ImuSpacecraft", "Scenario", "Vehicle"]

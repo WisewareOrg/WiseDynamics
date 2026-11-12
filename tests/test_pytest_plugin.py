@@ -22,6 +22,7 @@ README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.m
 REPOSITORY = Path(__file__).parent.parent
 SESSION = "s"
 SERIAL = ("-p", "no:xdist")
+FULL = ("--full-monte-carlo",)
 XDIST = ("-n", "auto")
 
 SCENARIO_HEADER = """
@@ -158,7 +159,9 @@ def _run_session(
             _case_test((f"sim_runs({runs})", f"sim_duration_s({duration_s})", *marks))
         )
     )
-    pytester.runpytest_subprocess("-o", f"sim_out={out}", *args).assert_outcomes(passed=passed)
+    pytester.runpytest_subprocess(*FULL, "-o", f"sim_out={out}", *args).assert_outcomes(
+        passed=passed
+    )
     return _read_runs(session / "test_scenario" / "test_case")
 
 
@@ -338,7 +341,7 @@ def test_attrs_cannot_replace_the_run_files_own(pytester: pytest.Pytester):
             """
         )
     )
-    pytester.runpytest_subprocess("-o", "sim_out=out").assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, "-o", "sim_out=out").assert_outcomes(passed=1)
     assert not list(out_dir.rglob("run_*.h5"))
 
 
@@ -357,7 +360,7 @@ def _default_session(pytester: pytest.Pytester, *args: str, runs: int = 2) -> py
     pytester.makepyfile(
         test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
     )
-    result = pytester.runpytest_subprocess(*args)
+    result = pytester.runpytest_subprocess(*FULL, *args)
     result.assert_outcomes(passed=runs)
     return result
 
@@ -390,23 +393,119 @@ def test_a_session_with_no_sim_out_writes_to_the_default_run_folder(
     assert list(temporary.iterdir()) == []
 
 
-def test_ci_writes_under_the_session_and_plans_the_capped_count(pytester: pytest.Pytester):
-    """`--ci` caps the cases and writes into the session, not a `ci` folder.
+def _scratch_test(pytester: pytest.Pytester) -> Path:
+    """Write the one-test file asking for 5 cases, and return its scratch-session directory.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-    """
-    _point(pytester)
-    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(5)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*SERIAL, "--ci").assert_outcomes(passed=2)
 
-    directory = pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case"
+    Returns:
+        `<rootdir>/monte_carlo/scratch/test_scenario/test_case`.
+    """
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(5)", "sim_duration_s(3)"))))
+    return pytester.path / "monte_carlo" / "scratch" / "test_scenario" / "test_case"
+
+
+def _assert_two_cases_in_scratch(directory: Path) -> None:
+    """Check that `directory` holds exactly cases 0 and 1 and a plan for 2.
+
+    Args:
+        directory: The test's directory in the scratch session.
+    """
     assert [run["name"] for run in _read_runs(directory)] == ["run_0000.h5", "run_0001.h5"]
     assert json.loads((directory / "planned.json").read_text()) == {
         "runs": 2,
         "nodeid": "test_scenario.py::test_case",
     }
-    assert not (pytester.path / "monte_carlo" / "ci").exists()
+
+
+def test_a_capped_run_writes_to_scratch_and_leaves_the_active_session_alone(
+    pytester: pytest.Pytester,
+):
+    """With pointer `x`, a capped run lands in `scratch`; the pointer and `x/` are untouched.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    active = _point(pytester, name="x")
+    active.mkdir()
+    (active / "keep.txt").write_text("mine")
+    directory = _scratch_test(pytester)
+
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+
+    _assert_two_cases_in_scratch(directory)
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+    assert [path.name for path in active.iterdir()] == ["keep.txt"]
+
+
+def test_a_capped_run_needs_no_active_session_and_writes_no_pointer(pytester: pytest.Pytester):
+    """With no pointer a capped run still works, in `scratch`, and creates no pointer.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _scratch_test(pytester)
+
+    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+
+    _assert_two_cases_in_scratch(directory)
+    assert not (pytester.path / "monte_carlo" / "SESSION").exists()
+
+
+def test_a_full_run_keeps_the_pointers_session_and_writes_nothing_to_scratch(
+    pytester: pytest.Pytester,
+):
+    """`--full-monte-carlo` flies every case into the pointer's session, not `scratch`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    active = _point(pytester, name="x")
+    _scratch_test(pytester)
+
+    result = pytester.runpytest_subprocess(*SERIAL, "--full-monte-carlo")
+
+    assert result.ret == pytest.ExitCode.OK
+    result.assert_outcomes(passed=5)
+
+    assert len(_read_runs(active / "test_scenario" / "test_case")) == 5
+    assert not (pytester.path / "monte_carlo" / "scratch").exists()
+
+
+def test_wise_dynamics_capped_forces_a_full_flight_flag_into_a_capped_scratch_run(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    """With `WISE_DYNAMICS_CAPPED` set, `--full-monte-carlo` still flies 2 cases, into `scratch`.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        monkeypatch: pytest's fixture for setting the variable for this test only.
+    """
+    active = _point(pytester, name="x")
+    directory = _scratch_test(pytester)
+    monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "1")
+
+    result = pytester.runpytest_subprocess(*SERIAL, "--full-monte-carlo")
+
+    assert result.ret == pytest.ExitCode.OK
+    result.assert_outcomes(passed=2)
+    _assert_two_cases_in_scratch(directory)
+    assert (pytester.path / "monte_carlo" / "SESSION").read_text() == "x\n"
+    assert not active.exists()
+
+
+def test_sim_session_scratch_is_rejected_and_leaves_the_pointer(pytester: pytest.Pytester):
+    """`--sim-session scratch` is a usage error naming `scratch`, and writes no pointer.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    result = pytester.runpytest_subprocess("--sim-session", "scratch")
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "scratch" in result.stderr.str()
+    assert not (pytester.path / "monte_carlo" / "SESSION").exists()
 
 
 def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester):
@@ -417,7 +516,7 @@ def test_an_empty_sim_out_ini_setting_is_a_usage_error(pytester: pytest.Pytester
     """
     pytester.makeini("[pytest]\nsim_out =\n")
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
-    result = pytester.runpytest_subprocess(*SERIAL)
+    result = pytester.runpytest_subprocess(*FULL, *SERIAL)
 
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     assert "sim_out" in result.stderr.str()
@@ -450,7 +549,7 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
     )
     _point(pytester, "out")
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess("-o", "sim_out=out", "-n", "2").assert_outcomes(passed=2)
+    pytester.runpytest_subprocess(*FULL, "-o", "sim_out=out", "-n", "2").assert_outcomes(passed=2)
 
     in_out_dir = sorted(
         (pytester.path / "out" / SESSION / "test_scenario" / "test_case").glob("run_*.h5")
@@ -499,7 +598,7 @@ def test_two_campaigns_in_one_session_each_run_in_their_own_directory(
             _case_test(name="test_b", marks=("sim_runs(2)", "sim_duration_s(3)")),
         )
     )
-    result = pytester.runpytest_subprocess(*xdist)
+    result = pytester.runpytest_subprocess(*FULL, *xdist)
 
     result.assert_outcomes(passed=5)
     dir_a, dir_b = session / "test_two" / "test_a", session / "test_two" / "test_b"
@@ -519,9 +618,9 @@ def test_each_session_holds_its_own_run_files(pytester: pytest.Pytester):
     """
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
     first = _point(pytester, name="first")
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
     second = _point(pytester, name="second")
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
     for session in (first, second):
         assert [run["name"] for run in _read_runs(session / "test_scenario" / "test_case")] == [
@@ -546,7 +645,14 @@ def test_test_files_outside_the_rootdir_are_named_by_their_stem(
         files.append(tmp_path_factory.mktemp(stem) / f"{stem}.py")
         files[-1].write_text(source)
     result = pytester.runpytest_subprocess(
-        "-p", "no:xdist", "--rootdir", str(pytester.path), "-o", "sim_out=out", *map(str, files)
+        *FULL,
+        "-p",
+        "no:xdist",
+        "--rootdir",
+        str(pytester.path),
+        "-o",
+        "sim_out=out",
+        *map(str, files),
     )
 
     result.assert_outcomes(passed=2)
@@ -572,7 +678,7 @@ def test_a_class_and_a_nested_class_qualify_the_directory(pytester: pytest.Pytes
     )
     (pytester.path / "tests" / "sim").mkdir(parents=True)
     (pytester.path / "tests" / "sim" / "test_nested.py").write_text(source)
-    pytester.runpytest_subprocess().assert_outcomes(passed=2)
+    pytester.runpytest_subprocess(*FULL).assert_outcomes(passed=2)
 
     base = out_dir / "tests" / "sim" / "test_nested"
     found = sorted(path.relative_to(out_dir).parent for path in out_dir.rglob("run_*.h5"))
@@ -611,7 +717,7 @@ def test_the_closest_mark_wins_over_class_and_module_marks(pytester: pytest.Pyte
                 assert sim_duration_s == 13
         """
     )
-    pytester.runpytest_subprocess().assert_outcomes(passed=7)
+    pytester.runpytest_subprocess(*FULL).assert_outcomes(passed=7)
 
 
 def test_a_pytest_run_with_no_case_creates_no_run_folder(pytester: pytest.Pytester):
@@ -621,7 +727,7 @@ def test_a_pytest_run_with_no_case_creates_no_run_folder(pytester: pytest.Pytest
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     pytester.makepyfile("def test_nothing():\n    pass\n")
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
     assert not (pytester.path / "monte_carlo").exists()
 
 
@@ -645,7 +751,7 @@ def test_an_unmarked_test_gets_the_defaults(pytester: pytest.Pytester):
             assert sim_scenario.fidelity == "lo"
         """
     )
-    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=8)
+    pytester.runpytest_subprocess(*FULL, "-p", "no:xdist").assert_outcomes(passed=8)
 
 
 def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytest.RunResult:
@@ -680,6 +786,9 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         ("sim_runs()", "sim_runs"),
         ("sim_runs(1, 2)", "sim_runs"),
         ("sim_runs(3, n=3)", "sim_runs"),
+        ('sim_vehicle(["a"])', "sim_vehicle"),
+        ("sim_vehicle()", "sim_vehicle"),
+        ("sim_vehicle(1, 2)", "sim_vehicle"),
     ],
 )
 def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
@@ -700,22 +809,82 @@ def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
     assert not list(pytester.path.rglob("run_*.h5"))
 
 
+VEHICLE_PROBE = """
+import pytest
+from wise_dynamics.basilisk import ImuSpacecraft
+from wise_dynamics.basilisk.vehicles.heavy_imu_spacecraft import HeavyImuSpacecraft
+
+@pytest.mark.sim_runs(1)
+@pytest.mark.sim_scenario(SCENARIO)
+MARKdef test_case(sim_case_index, sim_scenario):
+    assert type(sim_scenario.vehicle) is EXPECTED
+"""
+
+
+@pytest.mark.parametrize("scenario", ["leo500", "leo400"])
 @pytest.mark.parametrize(
-    ("ci", "expected"),
+    ("mark", "expected"),
     [
-        (False, {"test_a": 5, "test_b": 1, "test_c": 8}),
-        (True, {"test_a": 2, "test_b": 1, "test_c": 2}),
+        ('@pytest.mark.sim_vehicle("heavy_imu_spacecraft")\n', "HeavyImuSpacecraft"),
+        ('@pytest.mark.sim_vehicle("imu_spacecraft")\n', "ImuSpacecraft"),
+        ("", "ImuSpacecraft"),
     ],
-    ids=["without-ci", "ci"],
+    ids=["heavy", "named-default", "no-mark"],
 )
-def test_ci_caps_every_tests_case_count_at_two(
-    pytester: pytest.Pytester, ci: bool, expected: dict[str, int]
+def test_the_sim_vehicle_mark_chooses_the_vehicle_class_a_scenario_flies(
+    pytester: pytest.Pytester, scenario: str, mark: str, expected: str
 ):
-    """`--ci` caps a test's cases at 2; a test asking for fewer runs its own.
+    """A marked vehicle is the class the scenario flies; no mark keeps the scenario's own.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
-        ci: Whether the session passes `--ci`.
+        scenario: The `sim_scenario` mark's name.
+        mark: The `sim_vehicle` decorator line, or empty.
+        expected: The vehicle class the case must hold, exactly.
+    """
+    _point(pytester)
+    source = (
+        VEHICLE_PROBE.replace("SCENARIO", repr(scenario))
+        .replace("MARK", mark)
+        .replace("EXPECTED", expected)
+    )
+    pytester.makepyfile(source)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
+
+
+def test_an_unknown_sim_vehicle_fails_collection_listing_the_known_names(
+    pytester: pytest.Pytester,
+):
+    """An unregistered vehicle name fails collection naming the mark, the bad name and the known.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    from wise_dynamics.basilisk.vehicles import VEHICLES
+
+    result = _bad_mark_session(pytester, 'sim_vehicle("bogus")')
+    result.stdout.fnmatch_lines(["*.py::test_case: sim_vehicle: *"])
+    known = ", ".join(sorted(VEHICLES))
+    result.stdout.fnmatch_lines([f"*unknown vehicle 'bogus'; known vehicles: {known}"])
+    assert not list(pytester.path.rglob("run_*.h5"))
+
+
+@pytest.mark.parametrize(
+    ("full", "expected"),
+    [
+        (False, {"test_a": 2, "test_b": 1, "test_c": 2}),
+        (True, {"test_a": 5, "test_b": 1, "test_c": 8}),
+    ],
+    ids=["capped", "full-monte-carlo"],
+)
+def test_a_bare_run_caps_every_tests_case_count_at_two_and_the_flag_lifts_it(
+    pytester: pytest.Pytester, full: bool, expected: dict[str, int]
+):
+    """Without `--full-monte-carlo` a test's cases are capped at 2; fewer requested keeps its own.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        full: Whether the session passes `--full-monte-carlo`.
         expected: Test name to the number of cases it collects.
     """
     _point(pytester)
@@ -735,7 +904,9 @@ def test_ci_caps_every_tests_case_count_at_two(
             pass
         """
     )
-    result = pytester.runpytest_subprocess("-p", "no:xdist", "--collect-only", "-q", *["--ci"] * ci)
+    result = pytester.runpytest_subprocess(
+        "-p", "no:xdist", "--collect-only", "-q", *["--full-monte-carlo"] * full
+    )
     assert result.ret == pytest.ExitCode.OK
     for name, count in expected.items():
         assert (
@@ -744,13 +915,12 @@ def test_ci_caps_every_tests_case_count_at_two(
         )
 
 
-def test_ci_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester):
-    """`--ci` changes the case count only.
+def test_a_capped_run_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester):
+    """The cap changes the case count only.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    _point(pytester)
     pytester.makepyfile(
         """
         import pytest
@@ -763,21 +933,21 @@ def test_ci_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester)
             assert sim_scenario.fidelity == "hi"
         """
     )
-    pytester.runpytest_subprocess("-p", "no:xdist", "--ci").assert_outcomes(passed=2)
+    pytester.runpytest_subprocess("-p", "no:xdist").assert_outcomes(passed=2)
 
 
-def test_ci_still_rejects_a_bad_mark(pytester: pytest.Pytester):
-    """A `sim_runs(0)` mark fails collection under `--ci`; the cap does not repair it.
+def test_a_capped_run_still_rejects_a_bad_mark(pytester: pytest.Pytester):
+    """A `sim_runs(0)` mark fails collection in a capped run; the cap does not repair it.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    result = _bad_mark_session(pytester, "sim_runs(0)", "--ci")
+    result = _bad_mark_session(pytester, "sim_runs(0)")
     result.stdout.fnmatch_lines(["*.py::test_case: sim_runs: *"])
 
 
 def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
-    """Each `--sim-*` option is an unrecognized argument.
+    """Each `--sim-*` option, and `--ci`, is an unrecognized argument.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -788,9 +958,12 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         "--sim-fidelity": "lo",
         "--sim-duration-s": "3",
         "--sim-out": "out",
+        "--ci": "",
     }
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess(*(arg for item in options.items() for arg in item))
+    result = pytester.runpytest_subprocess(
+        *(arg for item in options.items() for arg in item if arg)
+    )
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     unrecognized = [line for line in result.stderr.lines if "unrecognized arguments:" in line]
     assert len(unrecognized) == 1
@@ -798,8 +971,8 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         assert option in unrecognized[0]
 
 
-def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
-    """`--strict-markers` accepts the four marks and rejects `sim_out`, which is not a mark.
+def test_the_five_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytester):
+    """`--strict-markers` accepts the five marks and rejects `sim_out`, which is not a mark.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -809,7 +982,13 @@ def test_the_four_marks_are_registered_and_sim_out_is_not(pytester: pytest.Pytes
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*'sim_out' not found in `markers` configuration option*"])
 
-    marks = ['sim_scenario("leo500")', "sim_runs(1)", 'sim_fidelity("lo")', "sim_duration_s(3)"]
+    marks = [
+        'sim_scenario("leo500")',
+        'sim_vehicle("imu_spacecraft")',
+        "sim_runs(1)",
+        'sim_fidelity("lo")',
+        "sim_duration_s(3)",
+    ]
     _strict_session(pytester, marks).assert_outcomes(passed=1)
 
 
@@ -844,7 +1023,7 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     """
     session = _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*XDIST, "test_scenario.py::test_case[0]").assert_outcomes(
+    pytester.runpytest_subprocess(*FULL, *XDIST, "test_scenario.py::test_case[0]").assert_outcomes(
         passed=1
     )
     directory = session / "test_scenario" / "test_case"
@@ -855,7 +1034,7 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     }
     before = (directory / "run_0000.h5").stat().st_mtime_ns
 
-    pytester.runpytest_subprocess(*SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
+    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
         passed=1
     )
 
@@ -880,7 +1059,7 @@ def test_a_collect_only_pytest_run_creates_nothing(pytester: pytest.Pytester):
     """
     session = _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    result = pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
+    result = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
     assert result.ret == pytest.ExitCode.OK
     assert not session.exists()
     assert list((pytester.path / "monte_carlo").iterdir()) == [
@@ -955,7 +1134,7 @@ def _provenance_session(
     )
     _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
-    return pytester.runpytest_subprocess(*args)
+    return pytester.runpytest_subprocess(*FULL, *args)
 
 
 def _provenance_attrs(pytester: pytest.Pytester) -> dict:
@@ -1030,7 +1209,7 @@ def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytes
     """
     _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
     found = _provenance_attrs(pytester)
     assert found["install"] == "local"
@@ -1092,7 +1271,7 @@ def test_the_plugin_runs_without_the_notebook_extra(pytester: pytest.Pytester):
                 import wise_dynamics.notebook
         """,
     )
-    pytester.runpytest_subprocess(*SERIAL).assert_outcomes(passed=2)
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=2)
     assert len(list((pytester.path / "monte_carlo" / SESSION).rglob("run_*.h5"))) == 1
 
 
@@ -1111,7 +1290,7 @@ def test_a_pytest_run_using_no_sim_fixture_imports_no_basilisk(pytester: pytest.
             assert [name for name in sys.modules if name.startswith("Basilisk")] == []
         """
     )
-    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL).assert_outcomes(passed=1)
 
 
 def test_the_readme_scenario_runs_as_a_pytest_run(pytester: pytest.Pytester):
@@ -1123,7 +1302,7 @@ def test_the_readme_scenario_runs_as_a_pytest_run(pytester: pytest.Pytester):
     (example,) = re.findall(r"```python\n(.*?)```", README.read_text(), flags=re.DOTALL)
     session = _point(pytester)
     pytester.makepyfile(test_example=example)
-    pytester.runpytest_subprocess().assert_outcomes(passed=2)
+    pytester.runpytest_subprocess(*FULL).assert_outcomes(passed=2)
 
     files = sorted((session / "test_example" / "test_case").glob("run_*.h5"))
     assert len(files) == 2
@@ -1270,7 +1449,7 @@ def test_sim_session_under_xdist_addopts_starts_no_workers(pytester: pytest.Pyte
         """
     )
     pytester.makepyfile("def test_plain():\n    pass\n")
-    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL).assert_outcomes(passed=1)
     marker = pytester.path / "started"
     assert marker.exists()
     marker.unlink()
@@ -1323,14 +1502,14 @@ def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
     """
     pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
 
-    listing = pytester.runpytest_subprocess(*SERIAL, "--collect-only", "-q")
+    listing = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
     assert sorted(line for line in listing.outlines if "::" in line) == [
         "test_mixed.py::test_monte_carlo_a[no-session]",
         "test_mixed.py::test_monte_carlo_b[no-session]",
         "test_mixed.py::test_plain",
     ]
 
-    result = pytester.runpytest_subprocess(*xdist, "-rE")
+    result = pytester.runpytest_subprocess(*FULL, *xdist, "-rE")
 
     result.assert_outcomes(passed=1, errors=2)
     errored = sorted(line.split()[1] for line in result.outlines if line.startswith("ERROR "))
@@ -1375,7 +1554,7 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
             sim_run_file({"t_s": (np.zeros(2), "s")})
         """
     )
-    pytester.runpytest_subprocess("-n", "2").assert_outcomes(passed=6)
+    pytester.runpytest_subprocess(*FULL, "-n", "2").assert_outcomes(passed=6)
 
     assert pointer.read_text() == "other\n"
     directory = session / "test_switch" / "test_case"
@@ -1383,3 +1562,64 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
         f"run_000{i}.h5" for i in range(6)
     ]
     assert not (pytester.path / "monte_carlo" / "other").exists()
+
+
+def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = False) -> dict:
+    """Fly one case in a rootdir that is (or is not) a committed repository; read its root attrs.
+
+    The repository ignores the run folder, Python's caches and pytester's own output files, so
+    nothing is untracked and only `dirty` makes it dirty.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        repository: Whether the rootdir is a git repository.
+        dirty: Whether a tracked file differs from HEAD when the case runs.
+
+    Returns:
+        The run file's root attributes.
+    """
+    session = _point(pytester)
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+    if repository:
+        _git(pytester.path, "init", "-q")
+        (pytester.path / ".gitignore").write_text(
+            "monte_carlo/\n__pycache__/\n.pytest_cache/\n.cache/\nrunpytest-current\nstdout\nstderr\n"
+        )
+        _git(pytester.path, "add", "-A")
+        _git(pytester.path, "commit", "-q", "-m", "first")
+        if dirty:
+            (pytester.path / ".gitignore").write_text("monte_carlo/\n__pycache__/\n# edited\n")
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
+    (run,) = _read_runs(session / "test_scenario" / "test_case")
+    return run["attrs"]
+
+
+@pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])
+def test_the_run_file_records_the_rootdir_repositorys_commit_and_dirt(
+    pytester: pytest.Pytester, dirty: bool
+):
+    """The caller's repository HEAD and whether it has changes sit beside the install's.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        dirty: Whether a tracked file differs from HEAD.
+    """
+    attrs = _caller_attrs(pytester, repository=True, dirty=dirty)
+
+    assert attrs["versions_caller_commit"] == _git(pytester.path, "rev-parse", "HEAD")
+    assert type(attrs["versions_caller_dirty"]) is np.bool_
+    assert bool(attrs["versions_caller_dirty"]) is dirty
+    assert "versions_wise_dynamics_commit" in attrs
+
+
+def test_a_rootdir_that_is_not_a_git_checkout_records_no_caller_provenance(
+    pytester: pytest.Pytester,
+):
+    """With no repository there is no commit to record, so neither attribute is written.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    attrs = _caller_attrs(pytester, repository=False)
+
+    assert not [key for key in attrs if key.startswith("versions_caller_")]

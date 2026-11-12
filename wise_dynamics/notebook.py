@@ -61,7 +61,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 
         Raises:
             RuntimeError: The notebook is unpaired or will not sync, the cell differs from the
-                notebook on disk or defines no test, or the cell or a test fails.
+                notebook on disk or defines or creates no test, or the cell or a test fails.
         """
         notebook = _notebook_path(line)
         py = _notebook_py(notebook)
@@ -85,12 +85,23 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
             )
             or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
         ]
-        if not tests:
-            raise RuntimeError("This cell defines no test.")
         if notebook.suffix == ".ipynb":
             _mark_notebook_only(notebook)
+        before = dict(ipython.user_ns)
         ipython.run_cell(cell).raise_error()
-        ci = ["--ci"] if os.environ.get("CI") else []
+        tests += [
+            name
+            for name, value in ipython.user_ns.items()
+            if (
+                (name.startswith("test") and callable(value))
+                or (name.startswith("Test") and isinstance(value, type))
+            )
+            and before.get(name) is not value
+            and name not in tests
+        ]
+        if not tests:
+            raise RuntimeError("This cell defines no test.")
+        full = [] if os.environ.get(sessions.CAPPED_ENV) else ["--full-monte-carlo"]
         progress = _Progress()
         exit_code = pytest.main(
             [
@@ -99,7 +110,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
                 "auto",
                 "-W",
                 "ignore::pytest.PytestAssertRewriteWarning",
-                *ci,
+                *full,
             ],
             plugins=[progress],
         )
@@ -113,7 +124,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
 def load_runs(
     test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Read back the run files of a notebook test in the active session, finished or not.
+    """Read back the run files of a notebook test in the session its runs land in, finished or not.
 
     It prints one line, `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>`
     when any case left a crash record.
@@ -130,16 +141,16 @@ def load_runs(
     Raises:
         RuntimeError: No Monte Carlo session is active, the test does not collect from the
             notebook's `.py`, or the node collects tests of more than one function.
-        FileNotFoundError: The test has no results in the active session.
+        FileNotFoundError: The test has no results in that session.
     """
     node = test if isinstance(test, str) else test.__qualname__.replace(".", "::")
     py = _notebook_py(_notebook_path(os.fspath(notebook) if notebook is not None else ""))
-    with tempfile.TemporaryDirectory() as scratch:
-        report = Path(scratch) / "run_dir.json"
+    with tempfile.TemporaryDirectory() as tmp:
+        report = Path(tmp) / "run_dir.json"
         collected = subprocess.run(
             [sys.executable, "-m", "pytest", f"{py}::{node}", "--collect-only", "-q"]
             + ["-o", "addopts=", "-p", "no:xdist", "-p", "wise_dynamics.notebook"]
-            + (["--ci"] if os.environ.get("CI") else []),
+            + ([] if os.environ.get(sessions.CAPPED_ENV) else ["--full-monte-carlo"]),
             cwd=py.parent,
             env={**os.environ, _REPORT: str(report)},
             capture_output=True,

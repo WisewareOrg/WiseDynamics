@@ -9,9 +9,9 @@ run file. WiseDynamics holds no flight software and does no analysis of the run 
 
 Vehicles live in `wise_dynamics/basilisk/vehicles/` and scenarios in
 `wise_dynamics/basilisk/scenarios/`, one module each, registered by name in `SCENARIOS`. A scenario
-names its vehicle class. A consumer picks a scenario with the `sim_scenario` mark, reaches its
-vehicle as `scenario.vehicle`, and reads the parameters of either from its class attributes and
-class docstring.
+names its vehicle class, which the `sim_vehicle` mark replaces. A consumer picks a scenario with the
+`sim_scenario` mark, reaches its vehicle as `scenario.vehicle`, and reads the parameters of either
+from its class attributes and class docstring.
 
 ## Using it
 
@@ -31,8 +31,10 @@ and needs `pytest-xdist`, which the consumer adds itself:
 
 ```sh
 pytest --sim-session first
-pytest tests/sim -n 8
+pytest tests/sim -n 8 --full-monte-carlo
 ```
+
+Without `--full-monte-carlo` each test flies at most two cases, into the `scratch` session.
 
 Run files are kept in named sessions, which the basilisk README documents; a consumer adds the
 one-line `just session [name]` recipe that this repository's `justfile` has.
