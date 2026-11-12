@@ -146,7 +146,7 @@ def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
     """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
     scenario = Leo500()
     fsw = type("_Paced", (_Guidance,), {"period_s": 1.000000007})()
-    with pytest.raises(ValueError, match=r"period_s 1\.000000007 "):
+    with pytest.raises(ValueError, match=r"the 1000000007 ns flight-software period"):
         scenario.run(fsw, {}, duration_s=0.0)
 
 

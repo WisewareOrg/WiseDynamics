@@ -58,33 +58,24 @@ _FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_
 """Fidelity to the factory building its integrator for a spacecraft."""
 
 
-def _step_ns(period_s: float, record_s: float) -> int:
+def _step_ns(fsw_ns: int) -> int:
     """The largest step of at most 1 s that divides the flight software's period, in nanoseconds.
 
     Args:
-        period_s: The flight software's period, in seconds.
-        record_s: The recording period, in seconds.
+        fsw_ns: The flight software's period, in nanoseconds.
 
     Returns:
         The step.
 
     Raises:
-        ValueError: No step of at least 1 ms divides `period_s`, or `record_s` is not a whole
-            number of steps.
+        ValueError: No step of at least 1 ms divides the period.
     """
-    fsw_ns, record_ns = macros.sec2nano(period_s), macros.sec2nano(record_s)
     fewest = -(-fsw_ns // _MAX_STEP_NS)
     counts = (n for n in range(fewest, fsw_ns // _MIN_STEP_NS + 1) if fsw_ns % n == 0)
     count = next(counts, None)
     if count is None:
-        raise ValueError(f"no step of 1 ms to 1 s divides period_s {period_s} s")
-    step_ns = fsw_ns // count
-    if record_ns % step_ns:
-        raise ValueError(
-            f"record_s {record_s} s is not a whole number of the {step_ns} ns step that "
-            f"period_s {period_s} s gives"
-        )
-    return step_ns
+        raise ValueError(f"no step of 1 ms to 1 s divides the {fsw_ns} ns flight-software period")
+    return fsw_ns // count
 
 
 class Scenario:
@@ -117,14 +108,12 @@ class Scenario:
         """Run the vehicles with one flight-software module and record them all.
 
         Gives every vehicle's spacecraft the integrator of `fidelity`, then builds the simulation
-        with one process holding four tasks, which run in this order at each instant they share.
-        The dynamics task holds each vehicle's `models()` and steps at the largest step of at most
-        1 s that divides `fsw_module.period_s`. `record_s` must be a whole number of steps, and
-        the period divisible into steps of at least 1 ms; `_step_ns` raises `ValueError`, before
-        anything runs, where either is not. The sensor task, every `fsw_module.period_s`, holds
-        each vehicle's `sensor_models` for that period, which so sample the state of that instant.
-        The flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads
-        the sensors' output of that instant. The record task, every `record_s` from t = 0, holds one
+        with one process holding four tasks, which run in this order at each instant they share. The
+        dynamics task holds each vehicle's `models()` and steps at the largest step of at most 1 s
+        that divides `fsw_module.period_s`. The sensor task, every `fsw_module.period_s`, holds each
+        vehicle's `sensor_models` for that period, which so sample the state of that instant. The
+        flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
+        sensors' output of that instant. The record task, every `record_s` from t = 0, holds one
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
         `duration_s`.
@@ -142,10 +131,19 @@ class Scenario:
 
         Raises:
             RuntimeError: The scenario has already run.
+            ValueError: No step of at least 1 ms divides `fsw_module.period_s`, or `record_s` is
+                not a whole number of steps; raised before anything runs.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
-        step_ns = _step_ns(fsw_module.period_s, self.record_s)
+        fsw_ns = macros.sec2nano(fsw_module.period_s)
+        record_ns = macros.sec2nano(self.record_s)
+        step_ns = _step_ns(fsw_ns)
+        if record_ns % step_ns:
+            raise ValueError(
+                f"record_s {self.record_s} s is not a whole number of the {step_ns} ns step that "
+                f"period_s {fsw_module.period_s} s gives"
+            )
         self._executed = True
 
         make_integrator = _FIDELITY[self.fidelity]
@@ -156,8 +154,6 @@ class Scenario:
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
-        fsw_ns = macros.sec2nano(fsw_module.period_s)
-        record_ns = macros.sec2nano(self.record_s)
         recorders = {path: message.recorder(record_ns) for path, (message, _, _) in fields.items()}
 
         tasks = (
