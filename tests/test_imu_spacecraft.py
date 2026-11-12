@@ -98,8 +98,8 @@ def test_keywords_reach_the_basilisk_objects():
     assert imu.RNGSeed == 11
     assert vehicle.models() == [vehicle.spacecraft]
     assert vehicle.sensor_models(0.25) == [imu]
-    assert np.allclose(np.array(imu.PMatrixGyro), 7e-5 / 0.5 * np.eye(3), rtol=1e-15)
-    assert np.allclose(np.array(imu.PMatrixAccel), 9e-5 / 0.5 * np.eye(3), rtol=1e-15)
+    assert np.array_equal(np.array(imu.PMatrixGyro), 7e-5 / 0.5 * np.eye(3))
+    assert np.array_equal(np.array(imu.PMatrixAccel), 9e-5 / 0.5 * np.eye(3))
 
 
 def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():

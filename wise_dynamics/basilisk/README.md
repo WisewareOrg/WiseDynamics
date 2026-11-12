@@ -39,8 +39,8 @@ A vehicle lists the Basilisk modules it propagates in `models()` and its sensors
 `sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period:
 a sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands
 out sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`:
-dataset path to `(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one
-HDF5 file, each dataset float64 with a `units` attribute.
+dataset path to `(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from
+`Vehicle`, writes one HDF5 file, each dataset float64 with a `units` attribute.
 
 ## Scenarios
 
@@ -63,25 +63,23 @@ are taken after dispersing. `initial_state()` returns the placement the vehicle 
 gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it propagates: each has a
 budget on the truth position's distance from `hi`'s over one orbit, which `tests/test_fidelity.py`
 holds every scenario to. The step is not a fidelity's: every fidelity steps at the largest step of
-at most 1 s that divides the flight software's period and `record_s`. The differences below are the
-largest over one 5700 s orbit of Leo400 and Leo500, at a 1 s step, against `hi`:
+at most 1 s that divides the flight software's period and `record_s`.
 
-| fidelity | integrator | budget | position | attitude |
-|---|---|---|---|---|
-| `hi` | RKF78, relative tolerance 1e-10, absolute 1e-12 | (reference) | (reference) | (reference) |
-| `med` | RK4 | 1 mm | 1.5 um | 19 nrad |
-| `lo` | Ralston's RK3 | 1 m | 6.6 mm | 12 urad |
+| fidelity | integrator | budget over one orbit |
+|---|---|---|
+| `hi` | RKF78, relative tolerance 1e-10, absolute 1e-12 | (reference) |
+| `med` | RK4 | 1 mm |
+| `lo` | Ralston's RK3 | 1 m |
 
-[ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why.
+[ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
 
 `run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
 `vehicles`, `fidelity` and `record_s`, and runs once. The vehicles' `models()` run every step.
 Their `sensor_models` run in their own task at the flight software's `period_s`, an attribute it
 declares in seconds, after the models at each instant they share, so they sample that instant's
 state. The flight-software module runs in its own task at the same period, after the sensors, so it
-reads that instant's sensor output.
-The recorders run every `record_s`, after the rest, so truth and flight output are recorded from the
-same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
+reads that instant's sensor output. The recorders run every `record_s`, after the rest, so truth
+and flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
 `recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to `(array,
 units)`: `t_s` (s) first, then the vehicle's fields, then `fsw_fields`.
 

@@ -6,6 +6,7 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
 
+from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
@@ -121,7 +122,7 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     vehicle = scenario.vehicle
     scenario.run(_Guidance(), {}, duration_s=1.0)
     dynamics, sensors, _, _ = scenario._simulation.TaskList
-    assert dynamics.TaskModels[: len(vehicle.models())] == vehicle.models()
+    assert dynamics.TaskModels == vehicle.models()
     assert sensors.TaskModels == [vehicle.imu]
 
 
@@ -137,6 +138,7 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
         scenario.fidelity = fidelity
         scenario.disperse(np.random.default_rng(3), noise_seed=5)
         gyro[fidelity] = scenario.run(_Guidance(), {}, duration_s=600.0)["imu/gyro_P"][0]
+    assert np.std(gyro["hi"], axis=0).min() > 1e-6
     assert np.abs(gyro["lo"] - gyro["hi"]).max() < 1e-9
 
 
@@ -221,3 +223,34 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     gyro = datasets["imu/gyro_P"][0]
     assert np.array_equal(gyro[1::2], gyro[0:-1:2])
     assert not np.array_equal(gyro[2::2], gyro[1::2])
+
+
+class _Exact(ImuSpacecraft):
+    """An `ImuSpacecraft` without biases or noise, so its gyro reads the body rate it samples.
+
+    Attributes:
+        gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+        gyro_noise_density_rad_s_rthz: Gyro white-noise density, in rad/s/sqrt(Hz).
+        accel_noise_density_m_s2_rthz: Accelerometer white-noise density, in m/s^2/sqrt(Hz).
+    """
+
+    gyro_bias_P_rad_s = (0.0, 0.0, 0.0)
+    accel_bias_P_m_s2 = (0.0, 0.0, 0.0)
+    gyro_noise_density_rad_s_rthz = 0.0
+    accel_noise_density_m_s2_rthz = 0.0
+
+
+def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
+    """At each instant the dynamics steps first, so the gyro reads that instant's body rate.
+
+    The tumbling body's rate changes every step, so a sensor sampling before the dynamics would
+    read the previous step's rate. Basilisk's `ImuSensor` writes zeros on its first call, at t = 0,
+    so the comparison starts at the next sample.
+    """
+    scenario = Leo500(vehicle_type=_Exact)
+    scenario.record_s = 1.0
+    datasets = scenario.run(_Guidance(), {}, duration_s=60.0)
+    omega = datasets["truth/omega_BN_B"][0]
+    assert np.abs(np.diff(omega, axis=0)).max() > 1e-6
+    assert np.array_equal(datasets["imu/gyro_P"][0][1:], omega[1:])

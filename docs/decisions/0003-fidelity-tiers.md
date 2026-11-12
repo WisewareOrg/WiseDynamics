@@ -1,7 +1,7 @@
 # 0003 — Define each fidelity by its integrator and an accuracy budget, stepping at the flight software's period
 
 **Status:** accepted
-**Decided:** 2026-11-12 (issue 26, fidelity tiers, from the `spike/split-sensors` measurements)
+**Decided:** 2026-11-12 (issue 26, fidelity tiers)
 **Rev:** 1
 
 ## Revisions
@@ -42,8 +42,12 @@ density; a sample carries 1-sigma density / sqrt(period).
 
 ## Alternatives considered
 
-Measured on the IMU spacecraft through a 460-case paired Monte Carlo of the 1 Hz Python flight
-software, one orbit of Leo500 and Leo400, against RKF78 at 1 s:
+Measured on the IMU spacecraft through WiseGncDesign's dead-reckoner Monte Carlo: 460 dispersed
+cases of one orbit of Leo500 and Leo400, a 1 Hz Python flight software, the IMU sampled at its
+period so every row draws the same noise, on a 4-core laptop. Each accuracy is the worst over the
+cases, against RKF78 at 1 s at Basilisk's default tolerances. The batch times are that machine's,
+which drifted by up to 40% between identical runs. `tests/test_fidelity.py` re-derives each
+fidelity's accuracy on the nominal scenarios.
 
 | integrator, step | batch | truth position, worst | truth attitude, worst |
 |---|---|---|---|
@@ -71,7 +75,8 @@ software, one orbit of Leo500 and Leo400, against RKF78 at 1 s:
   quarter of its cost, and holds its error to its tolerance where a fixed step does not. Tightening
   RKF78 from Basilisk's default relative tolerance of 1e-4 to 1e-10 cost nothing measurable.
 - **A step chosen per fidelity from its budget**, longer than 1 s where the flight software's
-  period allows. Not taken: the 1 s maximum keeps every fidelity's step within what was measured.
+  period allows. Not taken: the 1 s maximum is chosen, and every measurement here is at a step of
+  at most 1 s.
 - **Sensors in the dynamics task.** Splitting them out cost nothing measurable (coupled and split
   matched within run-to-run noise), and coupled sensors change a case's noise with its fidelity.
 
@@ -90,6 +95,6 @@ A sensor samples only at the flight software's period. A sensor that samples fas
 software reads it, and integrates or averages between reads, needs its own period, which this
 design does not provide.
 
-A run file's `fidelity` attribute means a different configuration before and after this change; the
-file's `versions_wise_dynamics` attributes tell the two apart. A vehicle's noise parameters change
-name and meaning: the per-sample standard deviation a consumer read is now density / sqrt(period).
+The configuration a run file's `fidelity` attribute names is the one of the WiseDynamics version
+its `versions_wise_dynamics` attributes record. A vehicle's noise parameters are densities; the
+per-sample standard deviation at a sample period is density / sqrt(period).

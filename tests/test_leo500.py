@@ -75,7 +75,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
     dynamics, *_ = scenario._simulation.TaskList
-    assert dynamics.TaskModels[: len(vehicle.models())] == vehicle.models()
+    assert dynamics.TaskModels == vehicle.models()
     hub = vehicle.spacecraft.hub
     assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), Placed.sigma0_BN)
     assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), Placed.omega0_BN_B_rad_s)

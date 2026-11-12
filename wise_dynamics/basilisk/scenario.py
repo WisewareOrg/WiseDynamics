@@ -23,7 +23,7 @@ _MAX_STEP_NS = 1_000_000_000
 
 
 def _ralston_rk3(spacecraft: Any) -> Any:
-    """Ralston's third-order Runge-Kutta, the one of least truncation-error bound.
+    """Ralston's third-order Runge-Kutta.
 
     Args:
         spacecraft: The Basilisk dynamic object it integrates.
@@ -40,7 +40,7 @@ def _ralston_rk3(spacecraft: Any) -> Any:
 
 
 def _rkf78(spacecraft: Any) -> Any:
-    """Runge-Kutta-Fehlberg 7(8), holding each step to a relative 1e-10 and an absolute 1e-12.
+    """Runge-Kutta-Fehlberg 7(8) at the tolerances it sets.
 
     Args:
         spacecraft: The Basilisk dynamic object it integrates.
@@ -55,6 +55,7 @@ def _rkf78(spacecraft: Any) -> Any:
 
 
 _FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_rk3}
+"""Fidelity to the factory building its integrator for a spacecraft."""
 
 
 def _step_ns(fsw_ns: int, record_ns: int) -> int:
@@ -82,9 +83,8 @@ class Scenario:
     recording period in seconds. `run` reads them, and `fidelity`.
 
     Attributes:
-        fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft:
-            `"hi"` Runge-Kutta-Fehlberg 7(8) at a relative tolerance of 1e-10 and an absolute one
-            of 1e-12, `"med"` RK4 and `"lo"` Ralston's RK3.
+        fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft,
+            as the README's Scenarios section defines them.
     """
 
     fidelity: str = "lo"
@@ -133,23 +133,23 @@ class Scenario:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         self._executed = True
 
-        integrator_type = _FIDELITY[self.fidelity]
+        make_integrator = _FIDELITY[self.fidelity]
         fields = {}
         for vehicle in self.vehicles:
-            integrator = integrator_type(vehicle.spacecraft)
+            integrator = make_integrator(vehicle.spacecraft)
             vehicle.spacecraft.setIntegrator(integrator)
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
         fsw_ns = macros.sec2nano(fsw_module.period_s)
-        period_ns = macros.sec2nano(self.record_s)
-        recorders = {path: message.recorder(period_ns) for path, (message, _, _) in fields.items()}
+        record_ns = macros.sec2nano(self.record_s)
+        recorders = {path: message.recorder(record_ns) for path, (message, _, _) in fields.items()}
 
         tasks = (
-            (_DYNAMICS_TASK, _step_ns(fsw_ns, period_ns), _DYNAMICS_PRIORITY),
+            (_DYNAMICS_TASK, _step_ns(fsw_ns, record_ns), _DYNAMICS_PRIORITY),
             (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
             (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
-            (_RECORD_TASK, period_ns, _RECORD_PRIORITY),
+            (_RECORD_TASK, record_ns, _RECORD_PRIORITY),
         )
         process = self._simulation.CreateNewProcess(_PROCESS)
         for name, task_ns, priority in tasks:

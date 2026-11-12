@@ -62,7 +62,7 @@ _MARKS = (
     (
         "sim_fidelity",
         "level",
-        "integration fidelity: hi is RKF78, med RK4, lo Ralston's RK3; "
+        "integration fidelity: hi, med or lo, as the README's Scenarios section defines them; "
         f"default {_DEFAULT_FIDELITY}",
     ),
     (
