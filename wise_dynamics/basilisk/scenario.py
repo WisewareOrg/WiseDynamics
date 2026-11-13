@@ -102,6 +102,13 @@ class Scenario:
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
+    def stop_ground(self) -> None:
+        """Stop the ground's task: the ground `run` was given is not called again in this run.
+
+        The ground may call it from its own `UpdateState`; the rest of the run goes on.
+        """
+        self._simulation.disableTask(_GROUND_TASK)
+
     def run(
         self,
         fsw_module: Any,

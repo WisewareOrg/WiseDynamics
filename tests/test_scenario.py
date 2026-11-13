@@ -290,6 +290,41 @@ def test_the_ground_has_a_task_of_its_own_at_its_own_period():
     ]
 
 
+class _Stopping(_Marker):
+    """A ground that stops its own task at its call at a given time."""
+
+    def __init__(self, order: list[tuple[int, str]], scenario: Leo500, at_ns: int) -> None:
+        """Hold the shared list, the scenario that stops it and when.
+
+        Args:
+            order: The list every module notes `(time in ns, name)` into.
+            scenario: The scenario running it.
+            at_ns: The time of the call that stops it, in nanoseconds.
+        """
+        super().__init__("ground", order)
+        self.scenario, self.at_ns = scenario, at_ns
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Note the call, and stop the ground's task at `at_ns`.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
+        super().UpdateState(CurrentSimNanos)
+        if CurrentSimNanos == self.at_ns:
+            self.scenario.stop_ground()
+
+
+def test_a_ground_that_stops_is_not_called_again_while_the_flight_software_runs_on():
+    """After `stop_ground` at t = 1 s, the ground is never called again; the run goes on."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500()
+    ground = _Stopping(order, scenario, at_ns=1_000_000_000)
+    scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
+    assert [t for t, name in order if name == "ground"] == [0, 1_000_000_000]
+    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(4)]
+
+
 def test_without_a_ground_the_run_has_no_ground_process():
     """A run with no ground has the scenario process alone."""
     scenario = Leo500()

@@ -94,6 +94,8 @@ then `fsw_fields`.
 A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a process of its own,
 `ground_process`, whose priority is below the scenario process's, so at each instant they share it
 runs after every task of the scenario process: after the flight software, and after the recorders.
+`stop_ground()` stops the ground's task, so the ground is not called again in that run; the ground
+may call it from its own `UpdateState`, and the rest of the run goes on.
 
 ## pytest plugin
 
