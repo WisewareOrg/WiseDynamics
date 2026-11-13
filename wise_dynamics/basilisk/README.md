@@ -40,11 +40,10 @@ A vehicle lists the Basilisk modules it propagates in `models()` and its sensors
 sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands out
 sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`: dataset
 path to `(message, field, units)`. A vehicle may change what the recorders captured in
-`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run. `ImuSpacecraft`
-records the attitude as `truth/q_BN` and turns Basilisk's MRP into it, one batch of quaternions W X
-Y Z (Hamilton, body to N, W >= 0, no units), so an attitude leaves the simulation as a quaternion
-and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` returns a function giving the hub's
-`q_BN`, `r_N` and `v_N` as of the last write, the ground's stand-in for tracking.
+`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run; `ImuSpacecraft`'s
+turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude leaves the simulation as a
+quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
+for tracking.
 `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one HDF5 file, each dataset
 float64, or UTF-8 text for a string array, with a `units` attribute.
 
@@ -94,8 +93,7 @@ then `fsw_fields`.
 A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a process of its own,
 `ground_process`, whose priority is below the scenario process's, so at each instant they share it
 runs after every task of the scenario process: after the flight software, and after the recorders.
-`stop_ground()` stops the ground's task, so the ground is not called again in that run; the ground
-may call it from its own `UpdateState`, and the rest of the run goes on.
+The ground can end its own part of the run with `stop_ground()`.
 
 ## pytest plugin
 
@@ -226,8 +224,7 @@ plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yours
 `load_runs(test, notebook=None)` reads the test's run files in the active session back, finished or
 not, and prints `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>` when any
 case left a crash record. It returns one record per run file, sorted by case: `attrs` holds the root
-attributes and `datasets` maps each dataset path to `(values, units)`, a string dataset's values as
-`str`. `test` is the test function or method, or its node path such as `"TestA::test_x"`. It works
+attributes and `datasets` maps each dataset path to `(values, units)`. `test` is the test function or method, or its node path such as `"TestA::test_x"`. It works
 from a restarted kernel, reads the pointer on every call, raises `RuntimeError` naming
 `--sim-session` when no session is active, and raises `FileNotFoundError` naming the folder when the
 test has no results in the session.

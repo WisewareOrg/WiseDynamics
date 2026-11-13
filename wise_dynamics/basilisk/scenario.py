@@ -143,8 +143,9 @@ class Scenario:
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
-            then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples, as
-            each vehicle's `finish` leaves them.
+            one per dynamics step, so a run file holds one row per dynamics step, then one entry
+            per vehicle field and per `fsw_fields` entry, each of `N` samples, as each vehicle's
+            `finish` leaves them.
 
         Raises:
             RuntimeError: The scenario has already run.

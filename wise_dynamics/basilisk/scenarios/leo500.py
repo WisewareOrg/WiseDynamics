@@ -11,8 +11,11 @@ from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 __all__ = ["Leo500"]
 
 _ATTITUDE_ROTVEC_PER_DRAW = 4.0 / 1.14
-"""Rotation vector, in rad, per unit of the attitude draw: 4 / (1 + |sigma|^2) at the nominal MRP,
-whose |sigma|^2 is 0.14."""
+"""Rotation vector, in rad, per unit of the attitude draw, so a draw of 1-sigma 0.01 turns the body
+by 0.0351 rad per axis: the spread of an additive MRP step of 0.01 per axis about the nominal MRP
+(0.1, 0.2, -0.3). Such a step is the body rotation `4 B(sigma)^-1 d_sigma`, and
+`B^T B = (1 + |sigma|^2)^2 I` with `|sigma|^2 = 0.14` makes it isotropic at 4 / 1.14 times the
+step."""
 
 
 class Leo500(Scenario):
@@ -69,16 +72,11 @@ class Leo500(Scenario):
 
         The vehicle class draws its own dispersion from the same `rng` and builds the vehicle,
         which is then placed. The placement is `q0_BN` turned about the body axes by a rotation
-        vector of independent normal samples of 1-sigma 0.0351 rad per axis (`4 * 0.01 / 1.14`),
-        then `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus independent normal samples.
-        The new vehicle replaces `vehicle`, so readers and other handles on it are taken after
-        dispersing. `draws` records the placement's draws and the vehicle's.
-
-        The rotation vector's 1-sigma is that of an additive MRP step of 0.01 per axis about the
-        nominal MRP (0.1, 0.2, -0.3): such a step is the body rotation `4 B(sigma)^-1 d_sigma`, and
-        `B^T B = (1 + |sigma|^2)^2 I` with `|sigma|^2 = 0.14` makes it isotropic at `4 / 1.14` times
-        the step. The attitude is one `rng.normal(0.0, 0.01, size=3)` draw scaled by that factor, so
-        a subclass that overrides `q0_BN` keeps the same 0.0351 rad.
+        vector, one `rng.normal(0.0, 0.01, size=3)` draw scaled by `_ATTITUDE_ROTVEC_PER_DRAW`,
+        then `omega0_BN_B_rad_s` with 0.2 deg/s, its nominal plus independent normal samples. The
+        scale is fixed, so a subclass that overrides `q0_BN` keeps the same spread. The new vehicle
+        replaces `vehicle`, so readers and other handles on it are taken after dispersing. `draws`
+        records the placement's draws and the vehicle's.
 
         Args:
             rng: The generator the dispersions are drawn from.

@@ -213,9 +213,9 @@ class ImuSpacecraft(Vehicle):
             datasets: Dataset name to `(array, units)`, as the recorders captured them.
 
         Returns:
-            The datasets with `truth/q_BN`, which arrives as Basilisk's MRP, replaced in place by
-            the (N, 4) quaternions W X Y Z of the body frame relative to N (Hamilton, body to N),
-            W >= 0.
+            The datasets with `truth/q_BN`, which arrives as Basilisk's MRP, replaced in the
+            returned datasets by the (N, 4) quaternions W X Y Z of the body frame relative to N
+            (Hamilton, body to N), W >= 0.
         """
         finished = dict(datasets)
         mrp, units = datasets["truth/q_BN"]
@@ -235,10 +235,10 @@ class ImuSpacecraft(Vehicle):
         reader.subscribeTo(self.spacecraft.scStateOutMsg)
 
         def read() -> dict[str, np.ndarray]:
-            """The tracked state now.
+            """Read the hub's last `SCStatesMsg`.
 
             Returns:
-                `q_BN`, `r_N` and `v_N` from the hub's last `SCStatesMsg`.
+                `q_BN`, `r_N` and `v_N`, as `tracking` describes them.
             """
             state = reader()
             q = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)

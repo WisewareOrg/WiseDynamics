@@ -1,7 +1,7 @@
 # 0003 — Define each fidelity by its integrator and an accuracy budget, stepping at the flight software's period
 
 **Status:** accepted
-**Decided:** 2026-11-12 (issue 26, fidelity tiers; rev 2, issue 28, recording at every step)
+**Decided:** 2026-11-12 (issue 28, ground process)
 **Rev:** 2
 
 ## Revisions
@@ -102,8 +102,7 @@ at 1 Hz is mostly the flight software. A slower flight software makes a case che
 fidelity; a faster one steps every fidelity finer.
 
 A run file holds a row per step, so its size is the duration over the step, whatever the flight
-software records: about ten times the former 10 s recording at a 1 Hz flight software, and a finer
-step multiplies it. A faster flight software costs disk as well as time.
+software records. A faster flight software costs disk as well as time.
 
 A fidelity's budget holds for the scenarios the test runs. A scenario or vehicle with stiffer
 dynamics (faster spin, wheels, flexible modes) can break a budget at the 1 s step; the test then
