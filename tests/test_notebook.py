@@ -17,12 +17,14 @@ from pathlib import Path
 
 import h5py
 import nbformat
+import numpy as np
 import pytest
 from IPython.core.interactiveshell import InteractiveShell
 from nbclient import NotebookClient
 from nbclient.exceptions import CellExecutionError
 
 from wise_dynamics import notebook as wd_notebook
+from wise_dynamics.basilisk import ImuSpacecraft
 
 LOAD = "%load_ext wise_dynamics.notebook"
 NO_SESSION = "no Monte Carlo session is active: run pytest --sim-session <name>"
@@ -756,24 +758,27 @@ def test_load_runs_reads_the_active_session_and_reports_found_planned_and_crashe
     assert capsys.readouterr().out == "s: 3 of 4 cases, crashed: 2\n"
 
 
-def test_load_runs_returns_string_datasets_as_text(sim_notebook: Path):
-    """A string dataset comes back as an array of `str`, not of bytes.
+def test_a_string_dataset_round_trips_through_the_writer_and_load_runs(sim_notebook: Path):
+    """A string array `write_run_file` writes comes back from `load_runs` as `str`, units kept.
 
     Args:
         sim_notebook: The paired notebook, never run.
     """
-    _write_session(sim_notebook, "s", [0], 1)
-    run_file = next((sim_notebook.parent / "monte_carlo" / "s").rglob("run_0000.h5"))
-    with h5py.File(run_file, "a") as written:
-        text = written.create_dataset("tlm/state", data=["idle", "go"], dtype=h5py.string_dtype())
-        text.attrs["units"] = ""
+    _write_session(sim_notebook, "s", [], 1)
+    directory = next((sim_notebook.parent / "monte_carlo" / "s").rglob("planned.json")).parent
+    states = np.array(["idle", "propagated", ""])
+    ImuSpacecraft().write_run_file(
+        directory / "run_0000.h5",
+        {"t_s": (np.arange(3), "s"), "tlm/state": (states, "enum")},
+        {"case": 0},
+    )
 
     (run,) = wd_notebook.load_runs("TestA::test_x", sim_notebook)
 
     values, units = run["datasets"]["tlm/state"]
-    assert values.tolist() == ["idle", "go"]
+    assert values.tolist() == ["idle", "propagated", ""]
     assert values.dtype.kind == "U"
-    assert units == ""
+    assert units == "enum"
 
 
 def test_load_runs_follows_a_session_switch_within_one_process(

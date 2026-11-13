@@ -44,8 +44,9 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 51.0, 1.0))
     assert list(datasets) == ["t_s", *fields, "guidance/sigma_RN"]
+    widths = {"truth/q_BN": 4, "guidance/sigma_RN": 3}
     for name, (_, _, field_units) in fields.items():
-        assert len(datasets[name][0]) == 51
+        assert datasets[name][0].shape == (51, widths.get(name, 3)), name
         assert datasets[name][1] == field_units
     sigma_RN, units = datasets["guidance/sigma_RN"]
     assert units == "MRP"
@@ -266,12 +267,14 @@ def test_the_ground_runs_after_the_flight_software_at_every_shared_instant():
     assert order == [(k * 1_000_000_000, name) for k in range(4) for name in ("fsw", "ground")]
 
 
-def test_the_ground_has_a_task_of_its_own_at_its_own_period():
-    """The ground's task steps at the ground's period, in a process separate from the scenario's."""
+def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
+    """A 2 s ground is called every 2 s while the 1 s flight software runs every second."""
+    order: list[tuple[int, str]] = []
     scenario = Leo500()
-    scenario.run(_Marker("fsw", []), {}, duration_s=0.0, ground=_Marker("ground", [], period_s=2.0))
-    *_, ground = scenario._simulation.TaskList
-    assert ground.TaskData.TaskPeriod == 2_000_000_000
+    ground = _Marker("ground", order, period_s=2.0)
+    scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
+    assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
+    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(5)]
     assert [process.Name for process in scenario._simulation.procList] == [
         "scenario_process",
         "ground_process",

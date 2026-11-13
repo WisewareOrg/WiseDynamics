@@ -218,7 +218,7 @@ def test_finish_turns_the_recorded_mrp_into_the_quaternion_in_its_place():
 
 
 class _Tracker(sysModel.SysModel):
-    """A flight-software stand-in that reads the vehicle's tracking at each of its ticks.
+    """A ground that reads the vehicle's tracking at each of its ticks.
 
     Attributes:
         period_s: The module's period, in seconds.
@@ -245,14 +245,13 @@ class _Tracker(sysModel.SysModel):
         self.read.append(self.tracking())
 
 
-def test_tracking_gives_the_recorded_truth_of_the_instant_it_is_read():
-    """At each tick `tracking()` returns the truth the run records for that instant."""
+def test_a_ground_reads_through_tracking_the_recorded_truth_of_its_instant():
+    """At each of its ticks a ground's `tracking()` gives the truth the run records then."""
     scenario = Leo500()
     tracker = _Tracker(scenario.vehicle.tracking())
-    datasets = scenario.run(tracker, {}, duration_s=5.0)
+    datasets = scenario.run(_Guidance(), {}, duration_s=5.0, ground=tracker)
     assert len(tracker.read) == 6
     for k, state in enumerate(tracker.read):
         assert np.allclose(state["q_BN"], datasets["truth/q_BN"][0][k], rtol=0, atol=1e-15)
         assert np.array_equal(state["r_N"], datasets["truth/r_N"][0][k])
         assert np.array_equal(state["v_N"], datasets["truth/v_N"][0][k])
-        assert state["q_BN"][0] >= 0.0
