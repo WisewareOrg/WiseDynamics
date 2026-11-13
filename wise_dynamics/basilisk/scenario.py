@@ -86,8 +86,8 @@ class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
     A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles`, the vehicles `run` adds to the simulation in order, and `record_s`, the
-    recording period in seconds. `run` reads them, and `fidelity`.
+    sets `vehicles`, the vehicles `run` adds to the simulation in order. `run` reads them, and
+    `fidelity`.
 
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft,
@@ -118,7 +118,7 @@ class Scenario:
         that divides `fsw_module.period_s`. The sensor task, every `fsw_module.period_s`, holds each
         vehicle's `sensor_models` for that period, which so sample the state of that instant. The
         flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
-        sensors' output of that instant. The record task, every `record_s` from t = 0, holds one
+        sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
         `duration_s`.
@@ -138,19 +138,13 @@ class Scenario:
 
         Raises:
             RuntimeError: The scenario has already run.
-            ValueError: No step of at least 1 ms divides `fsw_module.period_s`, or `record_s` is
-                not a whole number of steps; raised before anything runs.
+            ValueError: No step of at least 1 ms divides `fsw_module.period_s`; raised before
+                anything runs.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         fsw_ns = macros.sec2nano(fsw_module.period_s)
-        record_ns = macros.sec2nano(self.record_s)
         step_ns = _step_ns(fsw_ns)
-        if record_ns % step_ns:
-            raise ValueError(
-                f"record_s {self.record_s} s is not a whole number of the {step_ns} ns step that "
-                f"period_s {fsw_module.period_s} s gives"
-            )
         self._executed = True
 
         make_integrator = _FIDELITY[self.fidelity]
@@ -161,13 +155,13 @@ class Scenario:
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
-        recorders = {path: message.recorder(record_ns) for path, (message, _, _) in fields.items()}
+        recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
 
         tasks = (
             (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
             (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
             (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
-            (_RECORD_TASK, record_ns, _RECORD_PRIORITY),
+            (_RECORD_TASK, step_ns, _RECORD_PRIORITY),
         )
         process = self._simulation.CreateNewProcess(_PROCESS, _PROCESS_PRIORITY)
         for name, task_ns, priority in tasks:

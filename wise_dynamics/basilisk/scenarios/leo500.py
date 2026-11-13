@@ -27,7 +27,6 @@ class Leo500(Scenario):
         true_anomaly_rad: True anomaly at t = 0, in radians.
         sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
-        record_s: The recording period, in seconds.
     """
 
     mu_m3_s2: dict[str, float] = {"earth": 3.986004360e14}
@@ -39,7 +38,6 @@ class Leo500(Scenario):
     true_anomaly_rad: float = 85.3 * D2R
     sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
-    record_s: float = 10.0
 
     def __init__(self, vehicle_type: type[ImuSpacecraft] = ImuSpacecraft) -> None:
         """Build a vehicle of `vehicle_type` and place it at the class attributes' placement.

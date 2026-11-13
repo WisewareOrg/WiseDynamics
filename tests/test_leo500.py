@@ -61,7 +61,6 @@ def test_the_scenario_is_its_class_attributes():
     assert Leo500.true_anomaly_rad == 85.3 * D2R
     assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
-    assert Leo500.record_s == 10.0
 
 
 def test_the_placement_reaches_the_basilisk_objects():

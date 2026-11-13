@@ -16,7 +16,6 @@ SHARED = (
     "true_anomaly_rad",
     "sigma0_BN",
     "omega0_BN_B_rad_s",
-    "record_s",
 )
 
 

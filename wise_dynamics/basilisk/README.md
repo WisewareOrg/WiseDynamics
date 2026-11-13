@@ -49,8 +49,8 @@ To add a scenario, add one module to `wise_dynamics/basilisk/scenarios/`, named 
 defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` registers it under the
 module's name. A module defining none or several raises `TypeError` when the package is imported.
 
-A scenario is a `Scenario` subclass whose class attributes are its environment, its placement and
-its recording period `record_s`, with units and frames in its class docstring. Its constructor takes
+A scenario is a `Scenario` subclass whose class attributes are its environment and its placement,
+with units and frames in its class docstring. Its constructor takes
 no required argument and one optional argument, the vehicle class to build in place of its own,
 which the `sim_vehicle` mark supplies; a scenario that does not accept it cannot be used with that
 mark. It builds its vehicle, places it, and holds it as `scenario.vehicle` and in
@@ -65,8 +65,7 @@ gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it pro
 budget on the truth position's distance from `hi`'s over one orbit, which `tests/test_fidelity.py`
 holds every scenario to. The step is not a fidelity's: every fidelity steps at the largest step of
 at most 1 s that divides the flight software's period. `run` refuses, with a `ValueError` before
-anything runs, a period no step of at least 1 ms divides, and a `record_s` that is not a whole
-number of steps.
+anything runs, a period no step of at least 1 ms divides.
 
 | fidelity | integrator | budget over one orbit |
 |---|---|---|
@@ -77,11 +76,11 @@ number of steps.
 [ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
 
 `run(fsw_module, fsw_fields, *, duration_s, ground=None)`, from `Scenario`, builds the simulation from
-`vehicles`, `fidelity` and `record_s`, and runs once. The vehicles' `models()` run every step.
+`vehicles` and `fidelity`, and runs once. The vehicles' `models()` run every step.
 Their `sensor_models` run in their own task at the flight software's `period_s`, an attribute it
 declares in seconds, after the models at each instant they share, so they sample that instant's
 state. The flight-software module runs in its own task at the same period, after the sensors, so it
-reads that instant's sensor output. The recorders run every `record_s`, after the rest, so truth
+reads that instant's sensor output. The recorders run at every dynamics step, after the rest, so truth
 and flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a
 flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
 empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,

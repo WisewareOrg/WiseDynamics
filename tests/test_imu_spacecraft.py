@@ -166,7 +166,6 @@ def test_the_noise_per_sample_is_the_density_over_the_root_of_the_sample_period(
         period_s: The flight software's period, and so the IMU's sample period, in seconds.
     """
     scenario = Leo500(vehicle_type=_Quiet)
-    scenario.record_s = period_s
     fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
     datasets = scenario.run(fsw, {}, duration_s=2000 * period_s)
     expected = 1e-3 / np.sqrt(period_s)
