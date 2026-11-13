@@ -14,6 +14,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
@@ -54,7 +55,7 @@ def NAME(SELFsim_case_index, sim_duration_s, sim_scenario, sim_run_file):
 # Case 5 of seed 0: run files recorded with this seeding reproduce only while these hold.
 CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
-    "sigma0_BN": [0.10274604175442446, 0.19692436106593408, -0.3223839260439085],
+    "q0_BN": [0.7341694811560888, 0.1623176545275744, 0.3508807591933471, -0.5581494824825755],
     "omega0_BN_B_rad_s": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
     "gyro_bias_P_rad_s": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
     "accel_bias_P_m_s2": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
@@ -112,8 +113,8 @@ def _read_runs(directory: Path) -> list[dict]:
         directory: The test's directory within the session.
 
     Returns:
-        One mapping per run file, in name order: its `name`, root `attrs`, `t_s` (s), `sigma_BN`
-        (MRP) and `omega_BN_B` (rad/s).
+        One mapping per run file, in name order: its `name`, root `attrs`, `t_s` (s), `q_BN`
+        (quaternion W X Y Z) and `omega_BN_B` (rad/s).
     """
     runs = []
     for path in sorted(directory.glob("run_*.h5")):
@@ -123,7 +124,7 @@ def _read_runs(directory: Path) -> list[dict]:
                     "name": path.name,
                     "attrs": {key: run_file.attrs[key] for key in run_file.attrs},
                     "t_s": run_file["t_s"][:],
-                    "sigma_BN": run_file["truth/sigma_BN"][:],
+                    "q_BN": run_file["truth/q_BN"][:],
                     "omega_BN_B": run_file["truth/omega_BN_B"][:],
                 }
             )
@@ -182,7 +183,7 @@ def _draws_of(run: dict) -> dict[str, np.ndarray]:
 
 
 _DISPERSION = (
-    ("sigma0_BN", Leo500.sigma0_BN, 0.01),
+    ("q0_BN", Leo500.q0_BN, 0.01),
     ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * np.pi / 180.0),
     ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
     ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
@@ -216,10 +217,12 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     """
     draws_stream, _ = _case_streams(seed, index)
     rng = np.random.default_rng(draws_stream)
-    return {
-        name: np.asarray(nominal) + rng.normal(0.0, std, size=3)
-        for name, nominal, std in _DISPERSION
-    }
+    turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
+    nominal = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
+    draws = {"q0_BN": (nominal * turn).as_quat(canonical=True, scalar_first=True)}
+    for name, nominal, std in _DISPERSION[1:]:
+        draws[name] = np.asarray(nominal) + rng.normal(0.0, std, size=3)
+    return draws
 
 
 def test_case_seeding_matches_recorded_runs(pytester: pytest.Pytester):
@@ -267,7 +270,7 @@ def test_each_case_records_the_standard_draws_its_vehicle_used(pytester: pytest.
         for name, value in expected.items():
             assert np.array_equal(draws[name], value), (index, name)
         assert np.array_equal(run["attrs"]["probe_gyro_bias_P_rad_s"], draws["gyro_bias_P_rad_s"])
-        assert np.array_equal(run["sigma_BN"][0], draws["sigma0_BN"])
+        assert np.allclose(run["q_BN"][0], draws["q0_BN"], rtol=0, atol=1e-12)
         assert np.allclose(run["omega_BN_B"][0], draws["omega0_BN_B_rad_s"], rtol=0, atol=1e-15)
     for name in _draws_of(runs[0]):
         assert not np.allclose(_draws_of(runs[0])[name], _draws_of(runs[1])[name])
@@ -559,13 +562,13 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
 
 
 def test_each_case_runs_for_sim_duration_s(pytester: pytest.Pytester):
-    """A case runs for its `sim_duration_s` mark, recording every 10 s.
+    """A case runs for its `sim_duration_s` mark, recording at every dynamics step.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
     (run,) = _run_session(pytester, runs=1, passed=1, duration_s=20)
-    assert run["t_s"].tolist() == [0.0, 10.0, 20.0]
+    assert run["t_s"].tolist() == [float(k) for k in range(21)]
 
 
 def test_a_pytest_run_without_xdist_works(pytester: pytest.Pytester):
@@ -1308,7 +1311,7 @@ def test_the_readme_scenario_runs_as_a_pytest_run(pytester: pytest.Pytester):
     assert len(files) == 2
     for path in files:
         with h5py.File(path, "r") as run_file:
-            assert run_file["t_s"][:].tolist() == [0.0, 10.0, 20.0]
+            assert run_file["t_s"][:].tolist() == [float(k) for k in range(21)]
             assert run_file["guidance/sigma_RN"].attrs["units"] == "MRP"
             assert run_file.attrs["versions_guidance"] == "1.0"
 

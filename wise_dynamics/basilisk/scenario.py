@@ -134,7 +134,8 @@ class Scenario:
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
-            then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples.
+            then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples, as
+            each vehicle's `finish` leaves them.
 
         Raises:
             RuntimeError: The scenario has already run.
@@ -191,4 +192,6 @@ class Scenario:
         datasets = {"t_s": (np.asarray(first.times()) / macros.sec2nano(1.0), "s")}
         for path, (_, field, units) in fields.items():
             datasets[path] = (np.array(getattr(recorders[path], field)), units)
+        for vehicle in self.vehicles:
+            datasets = vehicle.finish(datasets)
         return datasets

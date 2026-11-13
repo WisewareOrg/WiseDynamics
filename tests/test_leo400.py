@@ -14,7 +14,7 @@ SHARED = (
     "raan_rad",
     "arg_periapsis_rad",
     "true_anomaly_rad",
-    "sigma0_BN",
+    "q0_BN",
     "omega0_BN_B_rad_s",
 )
 

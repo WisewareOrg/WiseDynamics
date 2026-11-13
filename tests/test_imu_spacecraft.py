@@ -8,6 +8,7 @@ import inspect
 
 import numpy as np
 import pytest
+from Basilisk.architecture import sysModel
 from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import ImuSpacecraft
@@ -173,3 +174,83 @@ def test_the_noise_per_sample_is_the_density_over_the_root_of_the_sample_period(
     for noise in (gyro_noise, datasets["imu/accel_P"][0]):
         assert np.std(noise[1:]) == pytest.approx(expected, rel=0.05)
         assert abs(np.corrcoef(noise[1:-1, 0], noise[2:, 0])[0, 1]) < 0.1
+
+
+def test_a_run_records_the_attitude_as_the_quaternion_of_the_placed_state():
+    """`truth/q_BN` replaces `truth/sigma_BN`: unit quaternions W X Y Z with W >= 0, from t = 0.
+
+    The first row is the placement's quaternion, and no row is an MRP.
+    """
+    scenario = Leo500()
+    datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
+    assert "truth/sigma_BN" not in datasets
+    q, units = datasets["truth/q_BN"]
+    assert units == ""
+    assert q.shape == (21, 4)
+    assert np.allclose(np.linalg.norm(q, axis=1), 1.0, rtol=0, atol=1e-12)
+    assert (q[:, 0] >= 0.0).all()
+    assert np.allclose(q[0], scenario.initial_state()["q0_BN"], rtol=0, atol=1e-12)
+    assert list(datasets).index("truth/q_BN") == 1
+
+
+def test_finish_turns_the_recorded_mrp_into_the_quaternion_in_its_place():
+    """`finish` converts `truth/sigma_BN` in one batch, W >= 0, and leaves the rest as it is."""
+    sigma = np.array([[0.1, 0.2, -0.3], [0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    rate = np.ones((3, 3))
+    finished = ImuSpacecraft().finish(
+        {"t_s": (np.arange(3.0), "s"), "truth/sigma_BN": (sigma, "MRP"), "truth/omega": (rate, "x")}
+    )
+    assert list(finished) == ["t_s", "truth/q_BN", "truth/omega"]
+    q, units = finished["truth/q_BN"]
+    assert units == ""
+    expected_first = [
+        0.7543859649122805,
+        0.17543859649122806,
+        0.3508771929824561,
+        -0.5263157894736842,
+    ]
+    assert np.allclose(q[0], expected_first, rtol=0, atol=1e-15)
+    assert np.array_equal(q[1], [1.0, 0.0, 0.0, 0.0])
+    assert np.allclose(q[2], [0.6, -0.8, 0.0, 0.0], rtol=0, atol=1e-15)
+    assert finished["truth/omega"][0] is rate
+
+
+class _Tracker(sysModel.SysModel):
+    """A flight-software stand-in that reads the vehicle's tracking at each of its ticks.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
+
+    period_s = 1.0
+
+    def __init__(self, tracking) -> None:
+        """Hold the tracking function.
+
+        Args:
+            tracking: The vehicle's `tracking()`.
+        """
+        super().__init__()
+        self.tracking = tracking
+        self.read: list[dict[str, np.ndarray]] = []
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Read the tracking.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
+        self.read.append(self.tracking())
+
+
+def test_tracking_gives_the_recorded_truth_of_the_instant_it_is_read():
+    """At each tick `tracking()` returns the truth the run records for that instant."""
+    scenario = Leo500()
+    tracker = _Tracker(scenario.vehicle.tracking())
+    datasets = scenario.run(tracker, {}, duration_s=5.0)
+    assert len(tracker.read) == 6
+    for k, state in enumerate(tracker.read):
+        assert np.allclose(state["q_BN"], datasets["truth/q_BN"][0][k], rtol=0, atol=1e-15)
+        assert np.array_equal(state["r_N"], datasets["truth/r_N"][0][k])
+        assert np.array_equal(state["v_N"], datasets["truth/v_N"][0][k])
+        assert state["q_BN"][0] >= 0.0

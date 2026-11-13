@@ -43,10 +43,15 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     t_s, units = datasets["t_s"]
     assert units == "s"
     assert np.array_equal(t_s, np.arange(0.0, 51.0, 1.0))
-    assert list(datasets) == ["t_s", *fields, "guidance/sigma_RN"]
+    recorded = ["truth/q_BN" if name == "truth/sigma_BN" else name for name in fields]
+    assert list(datasets) == ["t_s", *recorded, "guidance/sigma_RN"]
     for name, (_, _, field_units) in fields.items():
-        assert datasets[name][0].shape == (51, 3)
-        assert datasets[name][1] == field_units
+        if name == "truth/sigma_BN":
+            assert datasets["truth/q_BN"][0].shape == (51, 4)
+            assert datasets["truth/q_BN"][1] == ""
+        else:
+            assert datasets[name][0].shape == (51, 3)
+            assert datasets[name][1] == field_units
     sigma_RN, units = datasets["guidance/sigma_RN"]
     assert units == "MRP"
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)

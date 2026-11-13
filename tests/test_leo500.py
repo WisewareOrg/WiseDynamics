@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.utilities import orbitalMotion
+from scipy.spatial.transform import Rotation
 
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
@@ -34,7 +35,7 @@ class Placed(Leo500):
         raan_rad: Right ascension of the ascending node, in radians.
         arg_periapsis_rad: Argument of periapsis, in radians.
         true_anomaly_rad: True anomaly at t = 0, in radians.
-        sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
+        q0_BN: Initial attitude, the quaternion W X Y Z of the body frame relative to N.
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
     """
 
@@ -44,7 +45,7 @@ class Placed(Leo500):
     raan_rad = 10.0 * D2R
     arg_periapsis_rad = 20.0 * D2R
     true_anomaly_rad = 40.0 * D2R
-    sigma0_BN = (0.05, -0.1, 0.2)
+    q0_BN = (0.5, 0.5, 0.5, 0.5)
     omega0_BN_B_rad_s = (0.01, -0.02, 0.03)
 
 
@@ -59,7 +60,9 @@ def test_the_scenario_is_its_class_attributes():
     assert Leo500.raan_rad == 48.2 * D2R
     assert Leo500.arg_periapsis_rad == 347.8 * D2R
     assert Leo500.true_anomaly_rad == 85.3 * D2R
-    assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
+    q0 = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
+    assert np.allclose(q0.as_mrp(), (0.1, 0.2, -0.3), rtol=0, atol=1e-15)
+    assert Leo500.q0_BN[0] > 0
     assert Leo500.omega0_BN_B_rad_s == (D2R, D2R, D2R)
 
 
@@ -76,7 +79,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     dynamics, *_ = scenario._simulation.TaskList
     assert dynamics.TaskModels == vehicle.models()
     hub = vehicle.spacecraft.hub
-    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), Placed.sigma0_BN)
+    assert np.allclose(np.array(hub.sigma_BNInit).flatten(), [1 / 3] * 3, rtol=0, atol=1e-15)
     assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), Placed.omega0_BN_B_rad_s)
     assert np.array_equal(np.array(hub.r_CN_NInit).flatten(), state["r0_N"])
     assert np.array_equal(np.array(hub.v_CN_NInit).flatten(), state["v0_N"])
@@ -105,9 +108,10 @@ def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_fr
     scenario.disperse(np.random.default_rng(7), noise_seed=11)
 
     rng = np.random.default_rng(7)
-    expected = {}
+    turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
+    nominal_attitude = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
+    expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}
     for name, nominal, std in (
-        ("sigma0_BN", Leo500.sigma0_BN, 0.01),
         ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * D2R),
         ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
         ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
@@ -117,14 +121,36 @@ def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_fr
     for name, value in expected.items():
         assert np.array_equal(scenario.draws[name], value), name
 
-    assert Leo500.sigma0_BN == (0.1, 0.2, -0.3)
     assert scenario.vehicle is not built
     assert scenario.vehicles == [scenario.vehicle]
     hub = scenario.vehicle.spacecraft.hub
-    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), expected["sigma0_BN"])
+    mrp = Rotation.from_quat(expected["q0_BN"], scalar_first=True).as_mrp()
+    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), mrp)
     assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), expected["omega0_BN_B_rad_s"])
     assert len(scenario.vehicle.spacecraft.gravField.gravBodies) == 1
     imu = scenario.vehicle.imu
     assert np.array_equal(np.array(imu.senRotBias).flatten(), expected["gyro_bias_P_rad_s"])
     assert np.array_equal(np.array(imu.senTransBias).flatten(), expected["accel_bias_P_m_s2"])
     assert imu.RNGSeed == 11
+
+
+def test_the_attitude_dispersion_matches_the_mrp_dispersion_it_replaces():
+    """The body rotation the dispersion gives has the old additive MRP dispersion's spread.
+
+    An additive MRP step of 1-sigma 0.01 per axis about the nominal MRP is a body rotation of
+    4 / (1 + |sigma|^2) times it, isotropic. The spread of the rotation vectors, relative to the
+    nominal attitude, of 1500 dispersed attitudes is compared with 1500 additive MRP draws.
+    """
+    nominal = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
+    old = Rotation.from_mrp(nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3)))
+    new = []
+    for case in range(1500):
+        scenario = Leo500()
+        scenario.disperse(np.random.default_rng(case), noise_seed=0)
+        new.append(Rotation.from_quat(scenario.draws["q0_BN"], scalar_first=True))
+    new = Rotation.concatenate(new)
+
+    old_std = (nominal.inv() * old).as_rotvec().std(axis=0)
+    new_std = (nominal.inv() * new).as_rotvec().std(axis=0)
+    assert new_std == pytest.approx(old_std, rel=0.07)
+    assert new_std.mean() == pytest.approx(4 * 0.01 / 1.14, rel=0.05)

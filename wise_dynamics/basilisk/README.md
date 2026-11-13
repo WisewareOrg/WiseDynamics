@@ -39,7 +39,12 @@ A vehicle lists the Basilisk modules it propagates in `models()` and its sensors
 `sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period:
 a sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands
 out sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`:
-dataset path to `(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from
+dataset path to `(message, field, units)`. A vehicle may change what the recorders captured in
+`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run. `ImuSpacecraft` turns
+Basilisk's attitude MRP into `truth/q_BN`, one batch of quaternions W X Y Z (Hamilton, body to N,
+W >= 0, no units), so an attitude leaves the simulation as a quaternion and Basilisk's MRP stays
+inside it. `ImuSpacecraft.tracking()` returns a function giving the hub's `q_BN`, `r_N` and `v_N` as
+of the last write, the ground's stand-in for tracking. `write_run_file(path, datasets, attrs=None)`, from
 `Vehicle`, writes one HDF5 file, each dataset float64, or UTF-8 text for a string array, with a
 `units` attribute.
 

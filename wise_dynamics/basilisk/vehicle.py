@@ -21,6 +21,17 @@ class Vehicle:
     `(message, field, units)` it records. A scenario places its `spacecraft`.
     """
 
+    def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:
+        """Turn what the recorders captured into what the run file holds.
+
+        Args:
+            datasets: Dataset name to `(array, units)`, as the recorders captured them.
+
+        Returns:
+            The datasets the run returns; by default the same ones.
+        """
+        return dict(datasets)
+
     def write_run_file(
         self,
         path: str | PathLike[str],
