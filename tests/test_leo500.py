@@ -134,23 +134,25 @@ def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_fr
     assert imu.RNGSeed == 11
 
 
-def test_the_attitude_dispersion_matches_the_mrp_dispersion_it_replaces():
-    """The body rotation the dispersion gives has the old additive MRP dispersion's spread.
+def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
+    """The body rotation the dispersion gives has an additive MRP dispersion's spread.
 
     An additive MRP step of 1-sigma 0.01 per axis about the nominal MRP is a body rotation of
     4 / (1 + |sigma|^2) times it, isotropic. The spread of the rotation vectors, relative to the
     nominal attitude, of 1500 dispersed attitudes is compared with 1500 additive MRP draws.
     """
     nominal = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
-    old = Rotation.from_mrp(nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3)))
-    new = []
+    additive = Rotation.from_mrp(
+        nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3))
+    )
+    dispersed = []
     for case in range(1500):
         scenario = Leo500()
         scenario.disperse(np.random.default_rng(case), noise_seed=0)
-        new.append(Rotation.from_quat(scenario.draws["q0_BN"], scalar_first=True))
-    new = Rotation.concatenate(new)
+        dispersed.append(Rotation.from_quat(scenario.draws["q0_BN"], scalar_first=True))
+    dispersed = Rotation.concatenate(dispersed)
 
-    old_std = (nominal.inv() * old).as_rotvec().std(axis=0)
-    new_std = (nominal.inv() * new).as_rotvec().std(axis=0)
-    assert new_std == pytest.approx(old_std, rel=0.07)
-    assert new_std.mean() == pytest.approx(4 * 0.01 / 1.14, rel=0.05)
+    additive_std = (nominal.inv() * additive).as_rotvec().std(axis=0)
+    dispersed_std = (nominal.inv() * dispersed).as_rotvec().std(axis=0)
+    assert dispersed_std == pytest.approx(additive_std, rel=0.07)
+    assert dispersed_std.mean() == pytest.approx(4 * 0.01 / 1.14, rel=0.05)

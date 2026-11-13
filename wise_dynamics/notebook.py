@@ -137,7 +137,8 @@ def load_runs(
 
     Returns:
         One record per run file, sorted by `attrs["case"]`: `attrs` holds the root attributes and
-        `datasets` maps each HDF5 dataset path to `(values, units)`.
+        `datasets` maps each HDF5 dataset path to `(values, units)`, a string dataset's values as
+        `str`.
 
     Raises:
         RuntimeError: No Monte Carlo session is active, the test does not collect from the

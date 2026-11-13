@@ -18,7 +18,8 @@ class Vehicle:
     scenario steps with the dynamics; `sensor_models(sample_period_s)`, which sets each sensor's
     per-sample noise for that period and lists the sensors a scenario samples at it; `readers()`,
     its sensor outputs by role; and `recorded_fields()`, run-file dataset path to the
-    `(message, field, units)` it records. A scenario places its `spacecraft`.
+    `(message, field, units)` it records. It may override `finish(datasets)` to change what the
+    recorders captured before the run returns it. A scenario places its `spacecraft`.
     """
 
     def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:

@@ -138,7 +138,8 @@ class Scenario:
                 flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
             ground: Optionally, any Basilisk module declaring `period_s`, its period in seconds,
-                run from t = 0 in `ground_process`.
+                run from t = 0 in `ground_process`, after every scenario task at each instant they
+                share.
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
