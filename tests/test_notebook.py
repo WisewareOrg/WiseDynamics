@@ -756,6 +756,26 @@ def test_load_runs_reads_the_active_session_and_reports_found_planned_and_crashe
     assert capsys.readouterr().out == "s: 3 of 4 cases, crashed: 2\n"
 
 
+def test_load_runs_returns_string_datasets_as_text(sim_notebook: Path):
+    """A string dataset comes back as an array of `str`, not of bytes.
+
+    Args:
+        sim_notebook: The paired notebook, never run.
+    """
+    _write_session(sim_notebook, "s", [0], 1)
+    run_file = next((sim_notebook.parent / "monte_carlo" / "s").rglob("run_0000.h5"))
+    with h5py.File(run_file, "a") as written:
+        text = written.create_dataset("tlm/state", data=["idle", "go"], dtype=h5py.string_dtype())
+        text.attrs["units"] = ""
+
+    (run,) = wd_notebook.load_runs("TestA::test_x", sim_notebook)
+
+    values, units = run["datasets"]["tlm/state"]
+    assert values.tolist() == ["idle", "go"]
+    assert values.dtype.kind == "U"
+    assert units == ""
+
+
 def test_load_runs_follows_a_session_switch_within_one_process(
     sim_notebook: Path, capsys: pytest.CaptureFixture[str]
 ):

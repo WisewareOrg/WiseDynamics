@@ -35,7 +35,8 @@ class Vehicle:
             path: The file to create. Its parent directories are created.
             datasets: Dataset name to `(array, units)`, as `Scenario.run` returns them. A name may
                 contain `/` to place the dataset in a group, for example `"truth/r_N"`. Each array
-                is written as float64 with a string attribute `units`.
+                is written as float64, or as variable-length UTF-8 strings when it holds
+                strings, with a string attribute `units`.
             attrs: Root attributes, name to value.
 
         Raises:
@@ -51,7 +52,13 @@ class Vehicle:
                 for name, value in (attrs or {}).items():
                     run_file.attrs[name] = value
                 for name, (data, units) in datasets.items():
-                    dataset = run_file.create_dataset(name, data=np.asarray(data, dtype=np.float64))
+                    array = np.asarray(data)
+                    if array.dtype.kind in "USO":
+                        dataset = run_file.create_dataset(
+                            name, data=array.astype(object), dtype=h5py.string_dtype()
+                        )
+                    else:
+                        dataset = run_file.create_dataset(name, data=array.astype(np.float64))
                     dataset.attrs["units"] = units
         except BaseException:
             path.unlink(missing_ok=True)

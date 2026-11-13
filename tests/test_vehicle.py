@@ -59,3 +59,22 @@ def test_a_failed_write_leaves_no_file(tmp_path: Path):
         vehicle.write_run_file(path, {"t_s": (np.zeros(1), "s")}, {"bad": None})
     assert not path.exists()
     vehicle.write_run_file(path, {"t_s": (np.zeros(1), "s")})
+
+
+def test_string_datasets_round_trip_as_text_with_their_units(tmp_path: Path):
+    """A string array is written as UTF-8 text and read back as the same strings, units kept.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
+    path = tmp_path / "run_0000.h5"
+    ImuSpacecraft().write_run_file(
+        path,
+        {"tlm/state": (np.array(["idle", "propagated", ""]), "enum"), "t_s": (np.arange(3), "s")},
+    )
+
+    with h5py.File(path, "r") as written:
+        assert h5py.check_string_dtype(written["tlm/state"].dtype) is not None
+        assert written["tlm/state"].asstr()[:].tolist() == ["idle", "propagated", ""]
+        assert written["tlm/state"].attrs["units"] == "enum"
+        assert written["t_s"].dtype == np.float64

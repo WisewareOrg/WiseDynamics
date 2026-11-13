@@ -10,6 +10,10 @@ from Basilisk.utilities import SimulationBaseClass, macros
 __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
+_GROUND_PROCESS = "ground_process"
+_GROUND_TASK = "ground_task"
+_PROCESS_PRIORITY = 2
+_GROUND_PROCESS_PRIORITY = 1
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -104,6 +108,7 @@ class Scenario:
         fsw_fields: Mapping[str, tuple[Any, str, str]],
         *,
         duration_s: float,
+        ground: Any = None,
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
@@ -124,6 +129,8 @@ class Scenario:
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
                 flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
+            ground: Optionally, any Basilisk module declaring `period_s`, its period in seconds,
+                run from t = 0 in `ground_process`.
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
@@ -162,7 +169,7 @@ class Scenario:
             (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
             (_RECORD_TASK, record_ns, _RECORD_PRIORITY),
         )
-        process = self._simulation.CreateNewProcess(_PROCESS)
+        process = self._simulation.CreateNewProcess(_PROCESS, _PROCESS_PRIORITY)
         for name, task_ns, priority in tasks:
             process.addTask(self._simulation.CreateNewTask(name, task_ns), priority)
         for vehicle in self.vehicles:
@@ -171,6 +178,15 @@ class Scenario:
             for sensor in vehicle.sensor_models(fsw_module.period_s):
                 self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
+        if ground is not None:
+            ground_process = self._simulation.CreateNewProcess(
+                _GROUND_PROCESS, _GROUND_PROCESS_PRIORITY
+            )
+            ground_task = self._simulation.CreateNewTask(
+                _GROUND_TASK, macros.sec2nano(ground.period_s)
+            )
+            ground_process.addTask(ground_task)
+            self._simulation.AddModelToTask(_GROUND_TASK, ground)
         for recorder in recorders.values():
             self._simulation.AddModelToTask(_RECORD_TASK, recorder)
         self._simulation.InitializeSimulation()

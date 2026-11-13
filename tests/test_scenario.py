@@ -259,6 +259,65 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     assert not np.array_equal(gyro[2::2], gyro[1::2])
 
 
+class _Marker(sysModel.SysModel):
+    """A module that notes its name and call time in a list shared with other modules.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
+
+    def __init__(self, name: str, order: list[tuple[int, str]], period_s: float = 1.0) -> None:
+        """Hold the name, the shared list and the period.
+
+        Args:
+            name: What the module notes.
+            order: The list every module notes `(time in ns, name)` into.
+            period_s: The module's period, in seconds.
+        """
+        super().__init__()
+        self.name, self.order, self.period_s = name, order, period_s
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Note the call.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
+        self.order.append((CurrentSimNanos, self.name))
+
+
+def test_the_ground_runs_after_the_flight_software_at_every_shared_instant():
+    """The ground, in its own process, is called after the flight software at each instant."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500()
+    scenario.run(
+        _Marker("fsw", order),
+        {},
+        duration_s=3.0,
+        ground=_Marker("ground", order),
+    )
+    assert order == [(k * 1_000_000_000, name) for k in range(4) for name in ("fsw", "ground")]
+
+
+def test_the_ground_has_a_task_of_its_own_at_its_own_period():
+    """The ground's task steps at the ground's period, in a process separate from the scenario's."""
+    scenario = Leo500()
+    scenario.run(_Marker("fsw", []), {}, duration_s=0.0, ground=_Marker("ground", [], period_s=2.0))
+    *_, ground = scenario._simulation.TaskList
+    assert ground.TaskData.TaskPeriod == 2_000_000_000
+    assert [process.Name for process in scenario._simulation.procList] == [
+        "scenario_process",
+        "ground_process",
+    ]
+
+
+def test_without_a_ground_the_run_has_no_ground_process():
+    """A run with no ground has the scenario process alone."""
+    scenario = Leo500()
+    scenario.run(_Guidance(), {}, duration_s=0.0)
+    assert [process.Name for process in scenario._simulation.procList] == ["scenario_process"]
+
+
 class _Exact(ImuSpacecraft):
     """An `ImuSpacecraft` without biases or noise, so its gyro reads the body rate it samples.
 

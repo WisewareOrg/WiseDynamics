@@ -40,7 +40,8 @@ A vehicle lists the Basilisk modules it propagates in `models()` and its sensors
 a sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands
 out sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`:
 dataset path to `(message, field, units)`. `write_run_file(path, datasets, attrs=None)`, from
-`Vehicle`, writes one HDF5 file, each dataset float64 with a `units` attribute.
+`Vehicle`, writes one HDF5 file, each dataset float64, or UTF-8 text for a string array, with a
+`units` attribute.
 
 ## Scenarios
 
@@ -75,7 +76,7 @@ number of steps.
 
 [ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
 
-`run(fsw_module, fsw_fields, *, duration_s)`, from `Scenario`, builds the simulation from
+`run(fsw_module, fsw_fields, *, duration_s, ground=None)`, from `Scenario`, builds the simulation from
 `vehicles`, `fidelity` and `record_s`, and runs once. The vehicles' `models()` run every step.
 Their `sensor_models` run in their own task at the flight software's `period_s`, an attribute it
 declares in seconds, after the models at each instant they share, so they sample that instant's
@@ -85,6 +86,10 @@ and flight output are recorded from the same instant. `fsw_fields` maps a datase
 flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
 empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
 then `fsw_fields`.
+
+A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a process of its own,
+`ground_process`, whose priority is below the scenario process's, so at each instant they share it
+runs after every task of the scenario process: after the flight software, and after the recorders.
 
 ## pytest plugin
 
@@ -215,7 +220,8 @@ plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yours
 `load_runs(test, notebook=None)` reads the test's run files in the active session back, finished or
 not, and prints `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>` when any
 case left a crash record. It returns one record per run file, sorted by case: `attrs` holds the
-root attributes and `datasets` maps each dataset path to `(values, units)`. `test` is the test
+root attributes and `datasets` maps each dataset path to `(values, units)`, a string dataset's
+values as `str`. `test` is the test
 function or method, or its node path such as `"TestA::test_x"`. It works from a restarted kernel,
 reads the pointer on every call, raises `RuntimeError` naming `--sim-session` when no session is
 active, and raises `FileNotFoundError` naming the folder when the test has no results in the
