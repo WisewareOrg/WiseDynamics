@@ -103,8 +103,7 @@ fidelity; a faster one steps every fidelity finer.
 
 A run file holds a row per step, so its size is the duration over the step, whatever the flight
 software records: about ten times the former 10 s recording at a 1 Hz flight software, and a finer
-step multiplies it. The recording period it replaces is why a faster flight software now costs
-disk as well as time.
+step multiplies it. A faster flight software costs disk as well as time.
 
 A fidelity's budget holds for the scenarios the test runs. A scenario or vehicle with stiffer
 dynamics (faster spin, wheels, flexible modes) can break a budget at the 1 s step; the test then
