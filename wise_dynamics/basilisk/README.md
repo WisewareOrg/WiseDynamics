@@ -224,7 +224,7 @@ plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yours
 `load_runs(test, notebook=None)` reads the test's run files in the active session back, finished or
 not, and prints `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>` when any
 case left a crash record. It returns one record per run file, sorted by case: `attrs` holds the root
-attributes and `datasets` maps each dataset path to `(values, units)`. `test` is the test function or method, or its node path such as `"TestA::test_x"`. It works
-from a restarted kernel, reads the pointer on every call, raises `RuntimeError` naming
-`--sim-session` when no session is active, and raises `FileNotFoundError` naming the folder when the
-test has no results in the session.
+attributes and `datasets` maps each dataset path to `(values, units)`. `test` is the test function
+or method, or its node path such as `"TestA::test_x"`. It works from a restarted kernel, reads the
+pointer on every call, raises `RuntimeError` naming `--sim-session` when no session is active, and
+raises `FileNotFoundError` naming the folder when the test has no results in the session.
