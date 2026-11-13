@@ -237,7 +237,11 @@ class ImuSpacecraft(Vehicle):
         reader.subscribeTo(self.spacecraft.scStateOutMsg)
 
         def read() -> dict[str, np.ndarray]:
-            """The tracked state now."""
+            """The tracked state now.
+
+            Returns:
+                `q_BN`, `r_N` and `v_N` from the hub's last `SCStatesMsg`.
+            """
             state = reader()
             q = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)
             return {"q_BN": q, "r_N": np.array(state.r_BN_N), "v_N": np.array(state.v_BN_N)}

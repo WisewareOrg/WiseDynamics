@@ -5,6 +5,7 @@ and its recorded fields.
 """
 
 import inspect
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -224,7 +225,7 @@ class _Tracker(sysModel.SysModel):
 
     period_s = 1.0
 
-    def __init__(self, tracking) -> None:
+    def __init__(self, tracking: Callable[[], dict[str, np.ndarray]]) -> None:
         """Hold the tracking function.
 
         Args:

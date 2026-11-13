@@ -248,11 +248,7 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
 
 
 class _Marker(sysModel.SysModel):
-    """A module that notes its name and call time in a list shared with other modules.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
+    """A module that notes its name and call time in a list shared with other modules."""
 
     def __init__(self, name: str, order: list[tuple[int, str]], period_s: float = 1.0) -> None:
         """Hold the name, the shared list and the period.

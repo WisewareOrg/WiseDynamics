@@ -121,7 +121,8 @@ class Scenario:
         sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
-        `duration_s`.
+        `duration_s`. A period that no step of at least 1 ms divides is refused with a
+        `ValueError` before anything runs.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -139,8 +140,6 @@ class Scenario:
 
         Raises:
             RuntimeError: The scenario has already run.
-            ValueError: No step of at least 1 ms divides `fsw_module.period_s`; raised before
-                anything runs.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
