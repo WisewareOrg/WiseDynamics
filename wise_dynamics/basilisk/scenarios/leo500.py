@@ -10,8 +10,9 @@ from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["Leo500"]
 
-_MRP_TO_ROTVEC = 4.0 / 1.14
-"""Rotation vector per unit of the old MRP dispersion: 4 / (1 + |sigma|^2) at |sigma|^2 = 0.14."""
+_ATTITUDE_ROTVEC_PER_DRAW = 4.0 / 1.14
+"""Rotation vector, in rad, per unit of the attitude draw: 4 / (1 + |sigma|^2) at the nominal MRP,
+whose |sigma|^2 is 0.14."""
 
 
 class Leo500(Scenario):
@@ -68,21 +69,22 @@ class Leo500(Scenario):
 
         The vehicle class draws its own dispersion from the same `rng` and builds the vehicle,
         which is then placed. The placement is `q0_BN` turned about the body axes by a rotation
-        vector, then `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus independent normal
-        samples. The rotation vector is the old MRP dispersion's: an additive MRP step `d_sigma`
-        is the body rotation `4 B(sigma)^-1 d_sigma`, and `B^T B = (1 + |sigma|^2)^2 I`, so the old
-        per-axis 1-sigma of 0.01 about the nominal MRP (0.1, 0.2, -0.3), `|sigma|^2 = 0.14`, is an
-        isotropic rotation of `4 * 0.01 / 1.14 = 0.0351` rad per axis. The attitude draw is the
-        same `rng.normal(0, 0.01, size=3)` call as before, scaled by `4 / 1.14`, so every other
-        draw of a case is unchanged. The new vehicle replaces `vehicle`, so readers and other
-        handles on it are taken after dispersing. `draws` records the placement's draws and the
-        vehicle's.
+        vector of independent normal samples of 1-sigma 0.0351 rad per axis (`4 * 0.01 / 1.14`),
+        then `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus independent normal samples.
+        The new vehicle replaces `vehicle`, so readers and other handles on it are taken after
+        dispersing. `draws` records the placement's draws and the vehicle's.
+
+        The rotation vector's 1-sigma is that of an additive MRP step of 0.01 per axis about the
+        nominal MRP (0.1, 0.2, -0.3): such a step is the body rotation `4 B(sigma)^-1 d_sigma`, and
+        `B^T B = (1 + |sigma|^2)^2 I` with `|sigma|^2 = 0.14` makes it isotropic at `4 / 1.14` times
+        the step. The attitude is one `rng.normal(0.0, 0.01, size=3)` draw scaled by that factor, so
+        a subclass that overrides `q0_BN` keeps the same 0.0351 rad.
 
         Args:
             rng: The generator the dispersions are drawn from.
             noise_seed: The new vehicle's sensor-noise seed.
         """
-        turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * _MRP_TO_ROTVEC)
+        turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * _ATTITUDE_ROTVEC_PER_DRAW)
         nominal = Rotation.from_quat(type(self).q0_BN, scalar_first=True)
         self.q0_BN = (nominal * turn).as_quat(canonical=True, scalar_first=True)
         self.omega0_BN_B_rad_s = np.asarray(type(self).omega0_BN_B_rad_s) + rng.normal(
@@ -103,8 +105,7 @@ class Leo500(Scenario):
         Returns:
             `q0_BN` (unit quaternion W X Y Z, body relative to N, shape `(4,)`), `r0_N` (position
             of the centre of mass in N, m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body
-            rate relative to N in
-            body axes, rad/s), each a float array, `(3,)` unless noted.
+            rate relative to N in body axes, rad/s), each a float array, `(3,)` unless noted.
         """
         elements = orbitalMotion.ClassicElements()
         elements.a, elements.e = self.semi_major_axis_m, self.eccentricity

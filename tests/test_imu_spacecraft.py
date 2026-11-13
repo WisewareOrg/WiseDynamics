@@ -132,7 +132,7 @@ def test_recorded_fields_name_the_run_file_datasets_with_their_units():
     """`recorded_fields` names each run-file dataset with its units."""
     fields = ImuSpacecraft().recorded_fields()
     assert {name: units for name, (_, _, units) in fields.items()} == {
-        "truth/sigma_BN": "MRP",
+        "truth/q_BN": "",
         "truth/omega_BN_B": "rad/s",
         "truth/r_N": "m",
         "truth/v_N": "m/s",
@@ -185,6 +185,7 @@ def test_a_run_records_the_attitude_as_the_quaternion_of_the_placed_state():
     scenario = Leo500()
     datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
     assert "truth/sigma_BN" not in datasets
+    assert set(scenario.vehicle.recorded_fields()) <= set(datasets)
     q, units = datasets["truth/q_BN"]
     assert units == ""
     assert q.shape == (21, 4)
@@ -195,11 +196,11 @@ def test_a_run_records_the_attitude_as_the_quaternion_of_the_placed_state():
 
 
 def test_finish_turns_the_recorded_mrp_into_the_quaternion_in_its_place():
-    """`finish` converts `truth/sigma_BN` in one batch, W >= 0, and leaves the rest as it is."""
+    """`finish` converts `truth/q_BN`, recorded as the MRP, in one batch, W >= 0, in place."""
     sigma = np.array([[0.1, 0.2, -0.3], [0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     rate = np.ones((3, 3))
     finished = ImuSpacecraft().finish(
-        {"t_s": (np.arange(3.0), "s"), "truth/sigma_BN": (sigma, "MRP"), "truth/omega": (rate, "x")}
+        {"t_s": (np.arange(3.0), "s"), "truth/q_BN": (sigma, ""), "truth/omega": (rate, "x")}
     )
     assert list(finished) == ["t_s", "truth/q_BN", "truth/omega"]
     q, units = finished["truth/q_BN"]

@@ -36,17 +36,17 @@ dispersion from `rng`, with the 1-sigmas its class attributes give, and returns 
 with it and what it drew.
 
 A vehicle lists the Basilisk modules it propagates in `models()` and its sensors in
-`sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period:
-a sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands
-out sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`:
-dataset path to `(message, field, units)`. A vehicle may change what the recorders captured in
-`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run. `ImuSpacecraft` turns
-Basilisk's attitude MRP into `truth/q_BN`, one batch of quaternions W X Y Z (Hamilton, body to N,
-W >= 0, no units), so an attitude leaves the simulation as a quaternion and Basilisk's MRP stays
-inside it. `ImuSpacecraft.tracking()` returns a function giving the hub's `q_BN`, `r_N` and `v_N` as
-of the last write, the ground's stand-in for tracking. `write_run_file(path, datasets, attrs=None)`, from
-`Vehicle`, writes one HDF5 file, each dataset float64, or UTF-8 text for a string array, with a
-`units` attribute.
+`sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period: a
+sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands out
+sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`: dataset
+path to `(message, field, units)`. A vehicle may change what the recorders captured in
+`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run. `ImuSpacecraft`
+records the attitude as `truth/q_BN` and turns Basilisk's MRP into it, one batch of quaternions W X
+Y Z (Hamilton, body to N, W >= 0, no units), so an attitude leaves the simulation as a quaternion
+and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` returns a function giving the hub's
+`q_BN`, `r_N` and `v_N` as of the last write, the ground's stand-in for tracking.
+`write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one HDF5 file, each dataset
+float64, or UTF-8 text for a string array, with a `units` attribute.
 
 ## Scenarios
 
@@ -55,15 +55,15 @@ defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` reg
 module's name. A module defining none or several raises `TypeError` when the package is imported.
 
 A scenario is a `Scenario` subclass whose class attributes are its environment and its placement,
-with units and frames in its class docstring. Its constructor takes
-no required argument and one optional argument, the vehicle class to build in place of its own,
-which the `sim_vehicle` mark supplies; a scenario that does not accept it cannot be used with that
-mark. It builds its vehicle, places it, and holds it as `scenario.vehicle` and in
-`scenario.vehicles`. `disperse(rng, *, noise_seed)` draws the scenario's placement from
-`rng`, as its docstring lists it, then has its vehicle class draw its own dispersion from the same
-`rng` and build a vehicle with `noise_seed`, places that vehicle, and records both sets of draws in
-`scenario.draws`. The new vehicle replaces `scenario.vehicle`, so readers and other handles on it
-are taken after dispersing. `initial_state()` returns the placement the vehicle starts from.
+with units and frames in its class docstring. Its constructor takes no required argument and one
+optional argument, the vehicle class to build in place of its own, which the `sim_vehicle` mark
+supplies; a scenario that does not accept it cannot be used with that mark. It builds its vehicle,
+places it, and holds it as `scenario.vehicle` and in `scenario.vehicles`. `disperse(rng, *,
+noise_seed)` draws the scenario's placement from `rng`, as its docstring lists it, then has its
+vehicle class draw its own dispersion from the same `rng` and build a vehicle with `noise_seed`,
+places that vehicle, and records both sets of draws in `scenario.draws`. The new vehicle replaces
+`scenario.vehicle`, so readers and other handles on it are taken after dispersing. `initial_state()`
+returns the placement the vehicle starts from.
 
 `scenario.fidelity`, an attribute from `Scenario` that defaults to `"lo"`, is the integrator `run`
 gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it propagates: each has a
@@ -78,15 +78,15 @@ anything runs, a period no step of at least 1 ms divides.
 | `med` | RK4 | 1 mm |
 | `lo` | Ralston's RK3 | 1 m |
 
-[ADR 0003 rev 1](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
+[ADR 0003 rev 2](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
 
-`run(fsw_module, fsw_fields, *, duration_s, ground=None)`, from `Scenario`, builds the simulation from
-`vehicles` and `fidelity`, and runs once. The vehicles' `models()` run every step.
-Their `sensor_models` run in their own task at the flight software's `period_s`, an attribute it
-declares in seconds, after the models at each instant they share, so they sample that instant's
-state. The flight-software module runs in its own task at the same period, after the sensors, so it
-reads that instant's sensor output. The recorders run at every dynamics step, after the rest, so truth
-and flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a
+`run(fsw_module, fsw_fields, *, duration_s, ground=None)`, from `Scenario`, builds the simulation
+from `vehicles` and `fidelity`, and runs once. The vehicles' `models()` run every step. Their
+`sensor_models` run in their own task at the flight software's `period_s`, an attribute it declares
+in seconds, after the models at each instant they share, so they sample that instant's state. The
+flight-software module runs in its own task at the same period, after the sensors, so it reads that
+instant's sensor output. The recorders run at every dynamics step, after the rest, so truth and
+flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a
 flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
 empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
 then `fsw_fields`.
@@ -223,10 +223,9 @@ plots of an earlier campaign, or any cell of a `.py` opened as a notebook, yours
 
 `load_runs(test, notebook=None)` reads the test's run files in the active session back, finished or
 not, and prints `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>` when any
-case left a crash record. It returns one record per run file, sorted by case: `attrs` holds the
-root attributes and `datasets` maps each dataset path to `(values, units)`, a string dataset's
-values as `str`. `test` is the test
-function or method, or its node path such as `"TestA::test_x"`. It works from a restarted kernel,
-reads the pointer on every call, raises `RuntimeError` naming `--sim-session` when no session is
-active, and raises `FileNotFoundError` naming the folder when the test has no results in the
-session.
+case left a crash record. It returns one record per run file, sorted by case: `attrs` holds the root
+attributes and `datasets` maps each dataset path to `(values, units)`, a string dataset's values as
+`str`. `test` is the test function or method, or its node path such as `"TestA::test_x"`. It works
+from a restarted kernel, reads the pointer on every call, raises `RuntimeError` naming
+`--sim-session` when no session is active, and raises `FileNotFoundError` naming the folder when the
+test has no results in the session.

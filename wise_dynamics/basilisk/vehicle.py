@@ -64,7 +64,7 @@ class Vehicle:
                     run_file.attrs[name] = value
                 for name, (data, units) in datasets.items():
                     array = np.asarray(data)
-                    if array.dtype.kind in "USO":
+                    if array.dtype.kind == "U":
                         dataset = run_file.create_dataset(
                             name, data=array.astype(object), dtype=h5py.string_dtype()
                         )

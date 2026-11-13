@@ -1,11 +1,15 @@
 # 0003 — Define each fidelity by its integrator and an accuracy budget, stepping at the flight software's period
 
 **Status:** accepted
-**Decided:** 2026-11-12 (issue 26, fidelity tiers)
-**Rev:** 1
+**Decided:** 2026-11-12 (issue 26, fidelity tiers; rev 2, issue 28, recording at every step)
+**Rev:** 2
 
 ## Revisions
 
+- **rev 2** — 2026-11-12 — the recording period is dropped: truth and the IMU are recorded at every
+  step, so a run refuses no recording period and the step follows the flight software's period
+  alone (issue 28, ground process). The step-dividing-both alternative becomes the recording-period
+  alternative.
 - **rev 1** — 2026-11-12 — first written (issue 26, fidelity tiers).
 
 ## Context
@@ -35,11 +39,13 @@ orbit, which a test holds every scenario to:
 | `lo` | Ralston's third-order Runge-Kutta | 1 m |
 
 Every fidelity steps at the largest step of at most 1 s that divides the flight software's period.
-Truth and the IMU are recorded at every step. A run refuses, before anything runs, a flight-software
-period that no step of at least 1 ms divides. The 1 s maximum is a chosen bound, not a measured
-one. A vehicle's sensors run in their own task at the flight software's period, after the dynamics and before the flight software,
-so a case draws the same sensor noise at every fidelity. A sensor's white noise is a density; a
-sample carries 1-sigma density / sqrt(period).
+Truth and the IMU are recorded at every step. The IMU and the flight software's own fields change
+only at its period, so their rows hold the last write between its ticks. A run refuses, before
+anything runs, a flight-software period that no step of at least 1 ms divides. The 1 s maximum is a
+chosen bound, not a measured one. A vehicle's sensors run in their own task at the flight
+software's period, after the dynamics and before the flight software, so a case draws the same
+sensor noise at every fidelity. A sensor's white noise is a density; a sample carries 1-sigma
+density / sqrt(period).
 
 ## Alternatives considered
 
@@ -94,6 +100,11 @@ The 1 Hz Leo500 Monte Carlo runs about 1.8 times faster at `lo` or `med` than at
 and every fidelity's truth is closer to the reference than the former `lo`'s. What remains of a case
 at 1 Hz is mostly the flight software. A slower flight software makes a case cheaper at every
 fidelity; a faster one steps every fidelity finer.
+
+A run file holds a row per step, so its size is the duration over the step, whatever the flight
+software records: about ten times the former 10 s recording at a 1 Hz flight software, and a finer
+step multiplies it. The recording period it replaces is why a faster flight software now costs
+disk as well as time.
 
 A fidelity's budget holds for the scenarios the test runs. A scenario or vehicle with stiffer
 dynamics (faster spin, wheels, flexible modes) can break a budget at the 1 s step; the test then

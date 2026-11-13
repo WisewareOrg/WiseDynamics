@@ -191,14 +191,14 @@ class ImuSpacecraft(Vehicle):
 
         Returns:
             Run-file dataset path to `(message, field, units)`: the hub's `SCStatesMsg` attitude
-            (Basilisk's MRP, which `finish` turns into `truth/q_BN`), rate (rad/s), position (m)
-            and velocity (m/s) under `truth/`, and the IMU's `IMUSensorMsg` gyro (rad/s) and
-            accelerometer (m/s^2) outputs under `imu/`.
+            (a quaternion in the run file, recorded as Basilisk's MRP and converted by `finish`),
+            rate (rad/s), position (m) and velocity (m/s) under `truth/`, and the IMU's
+            `IMUSensorMsg` gyro (rad/s) and accelerometer (m/s^2) outputs under `imu/`.
         """
         truth = self.spacecraft.scStateOutMsg
         imu = self.imu.sensorOutMsg
         return {
-            "truth/sigma_BN": (truth, "sigma_BN", "MRP"),
+            "truth/q_BN": (truth, "sigma_BN", ""),
             "truth/omega_BN_B": (truth, "omega_BN_B", "rad/s"),
             "truth/r_N": (truth, "r_BN_N", "m"),
             "truth/v_N": (truth, "v_BN_N", "m/s"),
@@ -213,16 +213,13 @@ class ImuSpacecraft(Vehicle):
             datasets: Dataset name to `(array, units)`, as the recorders captured them.
 
         Returns:
-            The datasets with `truth/sigma_BN` replaced, in its place, by `truth/q_BN`: (N, 4)
-            quaternions W X Y Z of the body frame relative to N (Hamilton, body to N), W >= 0.
+            The datasets with `truth/q_BN`, which arrives as Basilisk's MRP, replaced in place by the
+            (N, 4) quaternions W X Y Z of the body frame relative to N (Hamilton, body to N), W >= 0.
         """
-        finished = {}
-        for name, (array, units) in datasets.items():
-            if name == "truth/sigma_BN":
-                quaternion = Rotation.from_mrp(array).as_quat(canonical=True, scalar_first=True)
-                finished["truth/q_BN"] = (quaternion, "")
-            else:
-                finished[name] = (array, units)
+        finished = dict(datasets)
+        mrp, units = datasets["truth/q_BN"]
+        quaternion = Rotation.from_mrp(mrp).as_quat(canonical=True, scalar_first=True)
+        finished["truth/q_BN"] = (quaternion, units)
         return finished
 
     def tracking(self) -> Callable[[], dict[str, np.ndarray]]:
