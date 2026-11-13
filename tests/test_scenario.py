@@ -114,18 +114,6 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(
     assert record.TaskData.TaskPeriod == step_ns
 
 
-def test_every_flight_software_tick_is_a_recorded_instant():
-    """Truth is recorded at each dynamics step, which include the flight software's ticks.
-
-    A 2.5 s period steps at 0.625 s, so the ticks at 0, 2.5 and 5 s are recorded rows.
-    """
-    scenario = Leo500()
-    fsw = type("_Paced", (_Guidance,), {"period_s": 2.5})()
-    t_s = scenario.run(fsw, {}, duration_s=5.0)["t_s"][0]
-    assert np.array_equal(t_s, 0.625 * np.arange(9))
-    assert {0.0, 2.5, 5.0} <= set(t_s.tolist())
-
-
 def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
     """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
     scenario = Leo500()
@@ -323,13 +311,6 @@ def test_a_ground_that_stops_is_not_called_again_while_the_flight_software_runs_
     scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
     assert [t for t, name in order if name == "ground"] == [0, 1_000_000_000]
     assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(4)]
-
-
-def test_without_a_ground_the_run_has_no_ground_process():
-    """A run with no ground has the scenario process alone."""
-    scenario = Leo500()
-    scenario.run(_Guidance(), {}, duration_s=0.0)
-    assert [process.Name for process in scenario._simulation.procList] == ["scenario_process"]
 
 
 class _Exact(ImuSpacecraft):

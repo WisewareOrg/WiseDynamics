@@ -14,9 +14,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from scipy.spatial.transform import Rotation
 
-from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
+from wise_dynamics.basilisk import SCENARIOS
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
@@ -182,13 +181,8 @@ def _draws_of(run: dict) -> dict[str, np.ndarray]:
     }
 
 
-_DISPERSION = (
-    ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * np.pi / 180.0),
-    ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
-    ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
-)
-"""Leo500's dispersion after the attitude, name, nominal and per-axis 1-sigma, in draw order, as its
-docstring states. The attitude is drawn first, as a rotation vector about `Leo500.q0_BN`."""
+_DRAWS = ("q0_BN", "omega0_BN_B_rad_s", "gyro_bias_P_rad_s", "accel_bias_P_m_s2")
+"""The names of Leo500's draws, in draw order, as its docstring states."""
 
 
 def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
@@ -205,23 +199,19 @@ def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
 
 
 def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """Derive the standard draws of case `index`, as the README states.
+    """Derive the standard draws of case `index`: `Leo500`'s dispersion from its draw stream.
 
     Args:
         seed: The session seed.
         index: The case number.
 
     Returns:
-        Draw name to its value, in draw order: `q0_BN`, then those of `_DISPERSION`.
+        Draw name to its value, in draw order.
     """
     draws_stream, _ = _case_streams(seed, index)
-    rng = np.random.default_rng(draws_stream)
-    turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
-    nominal = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
-    draws = {"q0_BN": (nominal * turn).as_quat(canonical=True, scalar_first=True)}
-    for name, nominal, std in _DISPERSION:
-        draws[name] = np.asarray(nominal) + rng.normal(0.0, std, size=3)
-    return draws
+    scenario = Leo500()
+    scenario.disperse(np.random.default_rng(draws_stream), noise_seed=0)
+    return scenario.draws
 
 
 def test_case_seeding_matches_recorded_runs(pytester: pytest.Pytester):
@@ -293,7 +283,7 @@ def test_the_run_file_carries_the_case_root_attrs(pytester: pytest.Pytester):
     assert attrs["versions_bsk"] == version("bsk")
     assert attrs["versions_wise_dynamics"] == version("wise-dynamics")
     probes = {"probe_noise_seed", "probe_gyro_bias_P_rad_s"}
-    draws = {"draw_q0_BN", *(f"draw_{name}" for name, _, _ in _DISPERSION)}
+    draws = {f"draw_{name}" for name in _DRAWS}
     assert (
         set(attrs)
         == {

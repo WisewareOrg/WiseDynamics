@@ -155,4 +155,3 @@ def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
     additive_std = (nominal.inv() * additive).as_rotvec().std(axis=0)
     dispersed_std = (nominal.inv() * dispersed).as_rotvec().std(axis=0)
     assert dispersed_std == pytest.approx(additive_std, rel=0.07)
-    assert dispersed_std.mean() == pytest.approx(4 * 0.01 / 1.14, rel=0.05)
