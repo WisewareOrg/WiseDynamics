@@ -10,6 +10,10 @@ from Basilisk.utilities import SimulationBaseClass, macros
 __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
+_GROUND_PROCESS = "ground_process"
+_GROUND_TASK = "ground_task"
+_PROCESS_PRIORITY = 2
+_GROUND_PROCESS_PRIORITY = 1
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -82,8 +86,8 @@ class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
     A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles`, the vehicles `run` adds to the simulation in order, and `record_s`, the
-    recording period in seconds. `run` reads them, and `fidelity`.
+    sets `vehicles`, the vehicles `run` adds to the simulation in order. `run` reads them, and
+    `fidelity`.
 
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft,
@@ -98,12 +102,20 @@ class Scenario:
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
+    def stop_ground(self) -> None:
+        """Stop the ground's task: the ground `run` was given is not called again in this run.
+
+        The ground may call it from its own `UpdateState`; the rest of the run goes on.
+        """
+        self._simulation.disableTask(_GROUND_TASK)
+
     def run(
         self,
         fsw_module: Any,
         fsw_fields: Mapping[str, tuple[Any, str, str]],
         *,
         duration_s: float,
+        ground: Any = None,
     ) -> dict[str, tuple[np.ndarray, str]]:
         """Run the vehicles with one flight-software module and record them all.
 
@@ -113,10 +125,11 @@ class Scenario:
         that divides `fsw_module.period_s`. The sensor task, every `fsw_module.period_s`, holds each
         vehicle's `sensor_models` for that period, which so sample the state of that instant. The
         flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
-        sensors' output of that instant. The record task, every `record_s` from t = 0, holds one
+        sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
-        `duration_s`.
+        `duration_s`. A period that no step of at least 1 ms divides is refused with a
+        `ValueError` before anything runs.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -124,26 +137,23 @@ class Scenario:
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
                 flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
+            ground: Optionally, any Basilisk module declaring `period_s`, its period in seconds,
+                run from t = 0 in `ground_process`, after every scenario task at each instant they
+                share.
 
         Returns:
             Dataset path to `(array, units)`: `t_s`, the sample times in seconds as shape `(N,)`,
-            then one entry per vehicle field and per `fsw_fields` entry, each of `N` samples.
+            one per dynamics step, so a run file holds one row per dynamics step, then one entry
+            per vehicle field and per `fsw_fields` entry, each of `N` samples, as each vehicle's
+            `finish` leaves them.
 
         Raises:
             RuntimeError: The scenario has already run.
-            ValueError: No step of at least 1 ms divides `fsw_module.period_s`, or `record_s` is
-                not a whole number of steps; raised before anything runs.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
         fsw_ns = macros.sec2nano(fsw_module.period_s)
-        record_ns = macros.sec2nano(self.record_s)
         step_ns = _step_ns(fsw_ns)
-        if record_ns % step_ns:
-            raise ValueError(
-                f"record_s {self.record_s} s is not a whole number of the {step_ns} ns step that "
-                f"period_s {fsw_module.period_s} s gives"
-            )
         self._executed = True
 
         make_integrator = _FIDELITY[self.fidelity]
@@ -154,15 +164,15 @@ class Scenario:
             self._integrators.append(integrator)
             fields.update(vehicle.recorded_fields())
         fields.update(fsw_fields)
-        recorders = {path: message.recorder(record_ns) for path, (message, _, _) in fields.items()}
+        recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
 
         tasks = (
             (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
             (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
             (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
-            (_RECORD_TASK, record_ns, _RECORD_PRIORITY),
+            (_RECORD_TASK, step_ns, _RECORD_PRIORITY),
         )
-        process = self._simulation.CreateNewProcess(_PROCESS)
+        process = self._simulation.CreateNewProcess(_PROCESS, _PROCESS_PRIORITY)
         for name, task_ns, priority in tasks:
             process.addTask(self._simulation.CreateNewTask(name, task_ns), priority)
         for vehicle in self.vehicles:
@@ -171,6 +181,15 @@ class Scenario:
             for sensor in vehicle.sensor_models(fsw_module.period_s):
                 self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
+        if ground is not None:
+            ground_process = self._simulation.CreateNewProcess(
+                _GROUND_PROCESS, _GROUND_PROCESS_PRIORITY
+            )
+            ground_task = self._simulation.CreateNewTask(
+                _GROUND_TASK, macros.sec2nano(ground.period_s)
+            )
+            ground_process.addTask(ground_task)
+            self._simulation.AddModelToTask(_GROUND_TASK, ground)
         for recorder in recorders.values():
             self._simulation.AddModelToTask(_RECORD_TASK, recorder)
         self._simulation.InitializeSimulation()
@@ -181,4 +200,6 @@ class Scenario:
         datasets = {"t_s": (np.asarray(first.times()) / macros.sec2nano(1.0), "s")}
         for path, (_, field, units) in fields.items():
             datasets[path] = (np.array(getattr(recorders[path], field)), units)
+        for vehicle in self.vehicles:
+            datasets = vehicle.finish(datasets)
         return datasets

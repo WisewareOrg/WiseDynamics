@@ -34,18 +34,19 @@ def _guidance():
     return guidance, {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
 
 
-def test_a_run_records_the_vehicle_and_fsw_fields_on_the_record_cadence():
-    """A run records `t_s`, the vehicle's fields and the flight-software fields every `record_s`."""
+def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
+    """A run records `t_s`, the vehicle's fields and the flight-software fields at every step."""
     scenario = Leo500()
     fields = scenario.vehicle.recorded_fields()
     guidance, fsw_fields = _guidance()
     datasets = scenario.run(guidance, fsw_fields, duration_s=50.0)
     t_s, units = datasets["t_s"]
     assert units == "s"
-    assert np.array_equal(t_s, np.arange(0.0, 50.0 + 10.0, 10.0))
+    assert np.array_equal(t_s, np.arange(0.0, 51.0, 1.0))
     assert list(datasets) == ["t_s", *fields, "guidance/sigma_RN"]
+    widths = {"truth/q_BN": 4, "guidance/sigma_RN": 3}
     for name, (_, _, field_units) in fields.items():
-        assert datasets[name][0].shape == (6, 3)
+        assert datasets[name][0].shape == (51, widths.get(name, 3)), name
         assert datasets[name][1] == field_units
     sigma_RN, units = datasets["guidance/sigma_RN"]
     assert units == "MRP"
@@ -82,64 +83,36 @@ def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(
 
 
 @pytest.mark.parametrize(
-    ("period_s", "record_s", "step_ns"),
+    ("period_s", "step_ns"),
     [
-        (1.0, 10.0, 1_000_000_000),
-        (10.0, 10.0, 1_000_000_000),
-        (0.1, 10.0, 100_000_000),
-        (0.25, 10.0, 250_000_000),
-        (2.5, 10.0, 625_000_000),
-        (1 / 3, 9.99999999, 333_333_333),
+        (1.0, 1_000_000_000),
+        (10.0, 1_000_000_000),
+        (0.1, 100_000_000),
+        (0.25, 250_000_000),
+        (2.5, 625_000_000),
+        (1 / 3, 333_333_333),
     ],
 )
 def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(
-    period_s: float, record_s: float, step_ns: int
+    period_s: float, step_ns: int
 ):
     """The dynamics steps at the largest step of at most 1 s that divides the FSW's period.
 
     The sensors and the flight software then run at the flight software's period, and the
-    recorders at `record_s`, a whole number of steps, each on an instant the dynamics has just
-    reached.
+    recorders at every step, each on an instant the dynamics has just reached.
 
     Args:
         period_s: The flight software's period, in seconds.
-        record_s: The recording period, in seconds.
         step_ns: The dynamics task period the flight software's period gives, in nanoseconds.
     """
     scenario = Leo500()
-    scenario.record_s = record_s
     fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
     scenario.run(fsw, {}, duration_s=0.0)
     dynamics, sensors, flight, record = scenario._simulation.TaskList
     assert dynamics.TaskData.TaskPeriod == step_ns
     assert sensors.TaskData.TaskPeriod == round(period_s * 1e9)
     assert flight.TaskData.TaskPeriod == round(period_s * 1e9)
-    assert record.TaskData.TaskPeriod == round(record_s * 1e9)
-
-
-@pytest.mark.parametrize(
-    ("period_s", "record_s"),
-    [(1 / 3, 10.0), (1.0, 0.5), (1.0, 2.5)],
-)
-def test_a_record_period_that_is_not_a_whole_number_of_steps_is_refused(
-    period_s: float, record_s: float
-):
-    """Recording off the step's instants is refused, naming both periods, before anything runs.
-
-    The same scenario then runs once its `record_s` is the flight software's period, which is
-    always a whole number of steps.
-
-    Args:
-        period_s: The flight software's period, in seconds.
-        record_s: The recording period, in seconds, not a whole number of the step it gives.
-    """
-    scenario = Leo500()
-    scenario.record_s = record_s
-    fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
-    with pytest.raises(ValueError, match=rf"record_s {record_s} .* period_s {period_s}"):
-        scenario.run(fsw, {}, duration_s=0.0)
-    scenario.record_s = period_s
-    assert scenario.run(fsw, {}, duration_s=2.0)["t_s"][0][0] == 0.0
+    assert record.TaskData.TaskPeriod == step_ns
 
 
 def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
@@ -222,7 +195,7 @@ class _Stepping(sysModel.SysModel):
 
 
 def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_instant():
-    """The module runs at whole seconds only, and is recorded from its own instant.
+    """The module runs at whole seconds only, and is recorded from its own instant at every step.
 
     It reads the IMU output of that instant, and each recorded value is the one it wrote at that
     row's own time, t = 0 included.
@@ -235,7 +208,7 @@ def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_inst
     assert fsw.called_ns == [k * 1_000_000_000 for k in range(21)]
     assert fsw.read_ns == fsw.called_ns
     t_s, _ = datasets["t_s"]
-    assert t_s.tolist() == [0.0, 10.0, 20.0]
+    assert t_s.tolist() == [float(k) for k in range(21)]
     assert np.array_equal(datasets["fsw/time_tag"][0], t_s + 100.0)
 
 
@@ -246,7 +219,6 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     recorded at each odd second is the one written a second before.
     """
     scenario = Leo500()
-    scenario.record_s = 1.0
     paced = type("_Paced", (_Stepping,), {"period_s": 2.0})
     fsw = paced(scenario.vehicle.readers()["imu"])
     datasets = scenario.run(fsw, {}, duration_s=6.0)
@@ -257,6 +229,91 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     gyro = datasets["imu/gyro_P"][0]
     assert np.array_equal(gyro[1::2], gyro[0:-1:2])
     assert not np.array_equal(gyro[2::2], gyro[1::2])
+
+
+class _Marker(sysModel.SysModel):
+    """A module that notes its name and call time in a list shared with other modules."""
+
+    def __init__(self, name: str, order: list[tuple[int, str]], period_s: float = 1.0) -> None:
+        """Hold the name, the shared list and the period.
+
+        Args:
+            name: What the module notes.
+            order: The list every module notes `(time in ns, name)` into.
+            period_s: The module's period, in seconds.
+        """
+        super().__init__()
+        self.name, self.order, self.period_s = name, order, period_s
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Note the call.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
+        self.order.append((CurrentSimNanos, self.name))
+
+
+def test_the_ground_runs_after_the_flight_software_at_every_shared_instant():
+    """The ground, in its own process, is called after the flight software at each instant."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500()
+    scenario.run(
+        _Marker("fsw", order),
+        {},
+        duration_s=3.0,
+        ground=_Marker("ground", order),
+    )
+    assert order == [(k * 1_000_000_000, name) for k in range(4) for name in ("fsw", "ground")]
+
+
+def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
+    """A 2 s ground is called every 2 s while the 1 s flight software runs every second."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500()
+    ground = _Marker("ground", order, period_s=2.0)
+    scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
+    assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
+    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(5)]
+    assert [process.Name for process in scenario._simulation.procList] == [
+        "scenario_process",
+        "ground_process",
+    ]
+
+
+class _Stopping(_Marker):
+    """A ground that stops its own task at its call at a given time."""
+
+    def __init__(self, order: list[tuple[int, str]], scenario: Leo500, at_ns: int) -> None:
+        """Hold the shared list, the scenario that stops it and when.
+
+        Args:
+            order: The list every module notes `(time in ns, name)` into.
+            scenario: The scenario running it.
+            at_ns: The time of the call that stops it, in nanoseconds.
+        """
+        super().__init__("ground", order)
+        self.scenario, self.at_ns = scenario, at_ns
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Note the call, and stop the ground's task at `at_ns`.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+        """
+        super().UpdateState(CurrentSimNanos)
+        if CurrentSimNanos == self.at_ns:
+            self.scenario.stop_ground()
+
+
+def test_a_ground_that_stops_is_not_called_again_while_the_flight_software_runs_on():
+    """After `stop_ground` at t = 1 s, the ground is never called again; the run goes on."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500()
+    ground = _Stopping(order, scenario, at_ns=1_000_000_000)
+    scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
+    assert [t for t, name in order if name == "ground"] == [0, 1_000_000_000]
+    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(4)]
 
 
 class _Exact(ImuSpacecraft):
@@ -283,7 +340,6 @@ def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
     so the comparison starts at the next sample.
     """
     scenario = Leo500(vehicle_type=_Exact)
-    scenario.record_s = 1.0
     datasets = scenario.run(_Guidance(), {}, duration_s=60.0)
     omega = datasets["truth/omega_BN_B"][0]
     assert np.abs(np.diff(omega, axis=0)).max() > 1e-6

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import h5py
+import numpy as np
 import pytest
 
 try:
@@ -136,7 +137,8 @@ def load_runs(
 
     Returns:
         One record per run file, sorted by `attrs["case"]`: `attrs` holds the root attributes and
-        `datasets` maps each HDF5 dataset path to `(values, units)`.
+        `datasets` maps each HDF5 dataset path to `(values, units)`, a string dataset's values as
+        `str`.
 
     Raises:
         RuntimeError: No Monte Carlo session is active, the test does not collect from the
@@ -184,12 +186,26 @@ def load_runs(
             names: list[str] = []
             run_file.visit(names.append)
             datasets = {
-                name: (run_file[name][...], run_file[name].attrs["units"])
+                name: (_values(run_file[name]), run_file[name].attrs["units"])
                 for name in names
                 if isinstance(run_file[name], h5py.Dataset)
             }
             runs.append({"attrs": dict(run_file.attrs), "datasets": datasets})
     return runs
+
+
+def _values(dataset: h5py.Dataset) -> np.ndarray:
+    """A dataset's values, text as `str`.
+
+    Args:
+        dataset: The run-file dataset.
+
+    Returns:
+        Its array; a string dataset becomes an array of `str`.
+    """
+    if h5py.check_string_dtype(dataset.dtype) is not None:
+        return np.asarray(dataset.asstr()[...], dtype=str)
+    return dataset[...]
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:

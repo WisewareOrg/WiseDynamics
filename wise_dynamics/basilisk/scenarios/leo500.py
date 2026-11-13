@@ -3,11 +3,19 @@
 import numpy as np
 from Basilisk.utilities import orbitalMotion, simIncludeGravBody
 from Basilisk.utilities.macros import D2R
+from scipy.spatial.transform import Rotation
 
 from wise_dynamics.basilisk.scenario import Scenario
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import ImuSpacecraft
 
 __all__ = ["Leo500"]
+
+_ATTITUDE_ROTVEC_PER_DRAW = 4.0 / 1.14
+"""Rotation vector, in rad, per unit of the attitude draw, so a draw of 1-sigma 0.01 turns the body
+by 0.0351 rad per axis: the spread of an additive MRP step of 0.01 per axis about the nominal MRP
+(0.1, 0.2, -0.3). Such a step is the body rotation `4 B(sigma)^-1 d_sigma`, and
+`B^T B = (1 + |sigma|^2)^2 I` with `|sigma|^2 = 0.14` makes it isotropic at 4 / 1.14 times the
+step."""
 
 
 class Leo500(Scenario):
@@ -25,9 +33,9 @@ class Leo500(Scenario):
         raan_rad: Right ascension of the ascending node, in radians.
         arg_periapsis_rad: Argument of periapsis, in radians.
         true_anomaly_rad: True anomaly at t = 0, in radians.
-        sigma0_BN: Initial attitude, the MRP of the body frame relative to N.
+        q0_BN: Initial attitude, the unit quaternion W X Y Z of the body frame relative to N
+            (Hamilton, body to N): the one whose MRP is (0.1, 0.2, -0.3).
         omega0_BN_B_rad_s: Initial body rate relative to N, in body axes, in rad/s.
-        record_s: The recording period, in seconds.
     """
 
     mu_m3_s2: dict[str, float] = {"earth": 3.986004360e14}
@@ -37,9 +45,13 @@ class Leo500(Scenario):
     raan_rad: float = 48.2 * D2R
     arg_periapsis_rad: float = 347.8 * D2R
     true_anomaly_rad: float = 85.3 * D2R
-    sigma0_BN: tuple[float, float, float] = (0.1, 0.2, -0.3)
+    q0_BN: tuple[float, float, float, float] = (
+        0.7543859649122805,
+        0.17543859649122806,
+        0.3508771929824561,
+        -0.5263157894736842,
+    )
     omega0_BN_B_rad_s: tuple[float, float, float] = (1.0 * D2R, 1.0 * D2R, 1.0 * D2R)
-    record_s: float = 10.0
 
     def __init__(self, vehicle_type: type[ImuSpacecraft] = ImuSpacecraft) -> None:
         """Build a vehicle of `vehicle_type` and place it at the class attributes' placement.
@@ -59,17 +71,20 @@ class Leo500(Scenario):
         """Disperse this case: the placement first, then the vehicle's own dispersion.
 
         The vehicle class draws its own dispersion from the same `rng` and builds the vehicle,
-        which is then placed. The placement is `sigma0_BN` with per-axis 1-sigma 0.01 (a
-        dimensionless MRP), then `omega0_BN_B_rad_s` with 0.2 deg/s, each its nominal plus
-        independent normal samples. The new vehicle replaces `vehicle`, so readers and other
-        handles on it are taken after dispersing. `draws` records the placement's draws and the
-        vehicle's.
+        which is then placed. The placement is `q0_BN` turned about the body axes by a rotation
+        vector, one `rng.normal(0.0, 0.01, size=3)` draw scaled by `_ATTITUDE_ROTVEC_PER_DRAW`,
+        then `omega0_BN_B_rad_s` with 0.2 deg/s, its nominal plus independent normal samples. The
+        scale is fixed, so a subclass that overrides `q0_BN` keeps the same spread. The new vehicle
+        replaces `vehicle`, so readers and other handles on it are taken after dispersing. `draws`
+        records the placement's draws and the vehicle's.
 
         Args:
             rng: The generator the dispersions are drawn from.
             noise_seed: The new vehicle's sensor-noise seed.
         """
-        self.sigma0_BN = np.asarray(type(self).sigma0_BN) + rng.normal(0.0, 0.01, size=3)
+        turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * _ATTITUDE_ROTVEC_PER_DRAW)
+        nominal = Rotation.from_quat(type(self).q0_BN, scalar_first=True)
+        self.q0_BN = (nominal * turn).as_quat(canonical=True, scalar_first=True)
         self.omega0_BN_B_rad_s = np.asarray(type(self).omega0_BN_B_rad_s) + rng.normal(
             0.0, 0.2 * D2R, size=3
         )
@@ -77,7 +92,7 @@ class Leo500(Scenario):
         self.vehicle = self._placed(vehicle)
         self.vehicles = [self.vehicle]
         self.draws = {
-            "sigma0_BN": self.sigma0_BN,
+            "q0_BN": self.q0_BN,
             "omega0_BN_B_rad_s": self.omega0_BN_B_rad_s,
             **vehicle_draws,
         }
@@ -86,9 +101,9 @@ class Leo500(Scenario):
         """Compute the initial condition the placement gives the vehicle.
 
         Returns:
-            `sigma0_BN` (MRP, body relative to N), `r0_N` (position of the centre of mass in N,
-            m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body rate relative to N in
-            body axes, rad/s), each a float array of shape `(3,)`.
+            `q0_BN` (unit quaternion W X Y Z, body relative to N, shape `(4,)`), `r0_N` (position
+            of the centre of mass in N, m), `v0_N` (its velocity in N, m/s) and `omega0_BN_B` (body
+            rate relative to N in body axes, rad/s), each a float array, `(3,)` unless noted.
         """
         elements = orbitalMotion.ClassicElements()
         elements.a, elements.e = self.semi_major_axis_m, self.eccentricity
@@ -96,7 +111,7 @@ class Leo500(Scenario):
         elements.omega, elements.f = self.arg_periapsis_rad, self.true_anomaly_rad
         r_N, v_N = orbitalMotion.elem2rv(self.mu_m3_s2["earth"], elements)
         return {
-            "sigma0_BN": np.asarray(self.sigma0_BN, dtype=float),
+            "q0_BN": np.asarray(self.q0_BN, dtype=float),
             "r0_N": np.asarray(r_N, dtype=float),
             "v0_N": np.asarray(v_N, dtype=float),
             "omega0_BN_B": np.asarray(self.omega0_BN_B_rad_s, dtype=float),
@@ -121,6 +136,6 @@ class Leo500(Scenario):
         hub = vehicle.spacecraft.hub
         hub.r_CN_NInit = state["r0_N"]
         hub.v_CN_NInit = state["v0_N"]
-        hub.sigma_BNInit = state["sigma0_BN"]
+        hub.sigma_BNInit = Rotation.from_quat(state["q0_BN"], scalar_first=True).as_mrp()
         hub.omega_BN_BInit = state["omega0_BN_B"]
         return vehicle

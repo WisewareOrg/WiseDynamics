@@ -18,8 +18,20 @@ class Vehicle:
     scenario steps with the dynamics; `sensor_models(sample_period_s)`, which sets each sensor's
     per-sample noise for that period and lists the sensors a scenario samples at it; `readers()`,
     its sensor outputs by role; and `recorded_fields()`, run-file dataset path to the
-    `(message, field, units)` it records. A scenario places its `spacecraft`.
+    `(message, field, units)` it records. It may override `finish(datasets)` to change what the
+    recorders captured before the run returns it. A scenario places its `spacecraft`.
     """
+
+    def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:
+        """Turn what the recorders captured into what the run file holds.
+
+        Args:
+            datasets: Dataset name to `(array, units)`, as the recorders captured them.
+
+        Returns:
+            The datasets the run returns; by default the same ones.
+        """
+        return dict(datasets)
 
     def write_run_file(
         self,
@@ -35,7 +47,8 @@ class Vehicle:
             path: The file to create. Its parent directories are created.
             datasets: Dataset name to `(array, units)`, as `Scenario.run` returns them. A name may
                 contain `/` to place the dataset in a group, for example `"truth/r_N"`. Each array
-                is written as float64 with a string attribute `units`.
+                is written as float64, or as variable-length UTF-8 strings when it holds
+                strings, with a string attribute `units`.
             attrs: Root attributes, name to value.
 
         Raises:
@@ -51,7 +64,13 @@ class Vehicle:
                 for name, value in (attrs or {}).items():
                     run_file.attrs[name] = value
                 for name, (data, units) in datasets.items():
-                    dataset = run_file.create_dataset(name, data=np.asarray(data, dtype=np.float64))
+                    array = np.asarray(data)
+                    if array.dtype.kind == "U":
+                        dataset = run_file.create_dataset(
+                            name, data=array.astype(object), dtype=h5py.string_dtype()
+                        )
+                    else:
+                        dataset = run_file.create_dataset(name, data=array.astype(np.float64))
                     dataset.attrs["units"] = units
         except BaseException:
             path.unlink(missing_ok=True)

@@ -4,12 +4,14 @@ The vehicle is a rigid hub carrying an IMU at its centre of mass with identity m
 biases and white noise specified as a density.
 """
 
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 from Basilisk.architecture import messaging
 from Basilisk.simulation import imuSensor
 from Basilisk.simulation import spacecraft as bsk_spacecraft
+from scipy.spatial.transform import Rotation
 
 from wise_dynamics.basilisk.vehicle import Vehicle
 
@@ -189,16 +191,57 @@ class ImuSpacecraft(Vehicle):
 
         Returns:
             Run-file dataset path to `(message, field, units)`: the hub's `SCStatesMsg` attitude
-            (MRP), rate (rad/s), position (m) and velocity (m/s) under `truth/`, and the IMU's
+            (a quaternion in the run file, recorded as Basilisk's MRP and converted by `finish`),
+            rate (rad/s), position (m) and velocity (m/s) under `truth/`, and the IMU's
             `IMUSensorMsg` gyro (rad/s) and accelerometer (m/s^2) outputs under `imu/`.
         """
         truth = self.spacecraft.scStateOutMsg
         imu = self.imu.sensorOutMsg
         return {
-            "truth/sigma_BN": (truth, "sigma_BN", "MRP"),
+            "truth/q_BN": (truth, "sigma_BN", ""),
             "truth/omega_BN_B": (truth, "omega_BN_B", "rad/s"),
             "truth/r_N": (truth, "r_BN_N", "m"),
             "truth/v_N": (truth, "v_BN_N", "m/s"),
             "imu/gyro_P": (imu, "AngVelPlatform", "rad/s"),
             "imu/accel_P": (imu, "AccelPlatform", "m/s^2"),
         }
+
+    def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:
+        """Replace the recorded attitude MRP with the quaternion, converted in one batch.
+
+        Args:
+            datasets: Dataset name to `(array, units)`, as the recorders captured them.
+
+        Returns:
+            The datasets with `truth/q_BN`, which arrives as Basilisk's MRP, replaced in the
+            returned datasets by the (N, 4) quaternions W X Y Z of the body frame relative to N
+            (Hamilton, body to N), W >= 0.
+        """
+        finished = dict(datasets)
+        mrp, units = datasets["truth/q_BN"]
+        quaternion = Rotation.from_mrp(mrp).as_quat(canonical=True, scalar_first=True)
+        finished["truth/q_BN"] = (quaternion, units)
+        return finished
+
+    def tracking(self) -> Callable[[], dict[str, np.ndarray]]:
+        """A stand-in for tracking: the vehicle's true state, as a flight software never sees it.
+
+        Returns:
+            A function giving the state as of the last time the hub's state was written: `q_BN`
+            (the quaternion W X Y Z, W >= 0), `r_N` (m) and `v_N` (m/s), each from the hub's
+            `SCStatesMsg`.
+        """
+        reader = messaging.SCStatesMsgReader()
+        reader.subscribeTo(self.spacecraft.scStateOutMsg)
+
+        def read() -> dict[str, np.ndarray]:
+            """Read the hub's last `SCStatesMsg`.
+
+            Returns:
+                `q_BN`, `r_N` and `v_N`, as `tracking` describes them.
+            """
+            state = reader()
+            q = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)
+            return {"q_BN": q, "r_N": np.array(state.r_BN_N), "v_N": np.array(state.v_BN_N)}
+
+        return read
