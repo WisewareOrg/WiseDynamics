@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from Basilisk.architecture import sysModel
 
 from wise_dynamics.basilisk import FswHost
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
@@ -128,14 +129,61 @@ def test_an_exception_in_the_build_surfaces_whole_from_run(where: str):
     assert host.failure is build.raised
     assert raised.traceback[-1].name == "_maybe_fail"
     assert raised.traceback[-2].name == where
+    assert raised.value.__suppress_context__
 
 
-def test_a_command_for_a_role_with_no_writer_fails_the_run():
-    """A tick returning a command for a role the vehicle has no writer for fails, naming it."""
+def test_a_command_for_a_role_with_no_writer_fails_the_run_at_that_tick():
+    """A tick commanding a role with no writer fails, naming it; the build is not ticked again."""
     scenario = Leo500()
-    host = FswHost(_Stub(commands={"wheel": 0.1}), scenario.vehicle)
+    build = _Stub(commands={"wheel": 0.1})
+    host = FswHost(build, scenario.vehicle)
 
     with pytest.raises(ValueError, match="wheel") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
+    assert build.events == ["boot", HALF_SECOND_NS]
+
+
+class _Raising(sysModel.SysModel):
+    """A module that raises `_Boom` at its first update after t = 0.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+    """
+
+    period_s = 0.5
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Raise `_Boom` after t = 0.
+
+        Args:
+            CurrentSimNanos: The current simulation time, in nanoseconds.
+
+        Raises:
+            _Boom: At the first update after t = 0.
+        """
+        if CurrentSimNanos > 0:
+            raise _Boom("not the host's")
+
+
+@pytest.mark.parametrize("hosted", [False, True], ids=["plain-fsw-module", "host-with-no-failure"])
+def test_an_error_no_host_kept_passes_from_run_as_basilisk_raised_it(hosted: bool):
+    """With no kept failure, `run` raises Basilisk's own error, not one the host stored.
+
+    The raising module is the flight-software module itself, or the ground beside an `FswHost`.
+
+    Args:
+        hosted: Whether the flight software is an `FswHost`, with the raising module as ground.
+    """
+    scenario = Leo500()
+    host = FswHost(_Stub(), scenario.vehicle) if hosted else None
+
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        if hosted:
+            scenario.run(host, {}, duration_s=2.0, ground=_Raising())
+        else:
+            scenario.run(_Raising(), {}, duration_s=2.0)
+
+    if hosted:
+        assert host.failure is None
