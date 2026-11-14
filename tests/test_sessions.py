@@ -555,6 +555,41 @@ def test_a_campaign_deletes_its_own_run_and_crash_files_numbered_at_or_above_its
     ]
 
 
+def test_a_campaign_deletes_any_run_file_of_its_cases_numbered_at_or_above_its_plan(
+    pytester: pytest.Pytester,
+):
+    """Any `run_NNNN.*` file of a case at or above the plan goes, whatever its suffix.
+
+    A consumer's own per-case files, such as `run_0005.prm.json`, are cleared with the run files.
+    A case below the plan keeps them, and a file not named for a case stays.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    directory = _campaign(pytester, 2)
+    directory.mkdir(parents=True)
+    for name in (
+        "run_0001.prm.json",
+        "run_0002.prm.json",
+        "run_0005.prm.json",
+        "run_0005.prm.dat",
+        "run_0006.anything.txt",
+        "notes.txt",
+    ):
+        (directory / name).write_bytes(b"old")
+
+    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[0]").assert_outcomes(
+        passed=1
+    )
+
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "notes.txt",
+        "planned.json",
+        "run_0000.h5",
+        "run_0001.prm.json",
+    ]
+
+
 def test_a_collect_only_run_deletes_no_leftover_files(pytester: pytest.Pytester):
     """`--collect-only` clears nothing: only a run that writes `planned.json` clears leftovers.
 
