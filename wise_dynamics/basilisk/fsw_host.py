@@ -103,10 +103,10 @@ class FswHost(sysModel.SysModel):
         self._t_ns = CurrentSimNanos
         try:
             messages = {role: reader() for role, reader in self._readers.items()}
-            commands = self._build.tick(CurrentSimNanos, messages)
-            if commands:
+            commanded = sorted(self._build.tick(CurrentSimNanos, messages))
+            if commanded:
                 raise ValueError(
-                    f"the build commanded roles {sorted(commands)}, which have no writer; "
+                    f"the build commanded roles {commanded}, which have no writer; "
                     "the writer roles are []"
                 )
         except BaseException as error:

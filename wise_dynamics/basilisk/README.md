@@ -107,8 +107,7 @@ vehicle's `readers()` once, when it is built.
 At reset the host calls `boot()`. Each later instant of its task, from one period after the reset,
 it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
 nanoseconds and `{role: payload}`, the payloads as the readers give them, unconverted. A payload is
-a view of its reader's buffer, which the next read overwrites, so a build copies what it keeps past
-its tick. `tick` returns a mapping, `{}` when it commands nothing; a command for a role the vehicle
+valid only during its tick: it is a view of its reader's buffer, which the next read overwrites. `tick` returns a mapping, `{}` when it commands nothing; a command for a role the vehicle
 has no writer for fails the tick with a `ValueError` naming the role, and no vehicle has writers.
 
 An exception raised by `boot` or `tick`, or the `ValueError` above, is kept whole in

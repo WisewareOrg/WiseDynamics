@@ -570,6 +570,7 @@ def test_a_campaign_deletes_any_run_file_of_its_cases_numbered_at_or_above_its_p
     directory.mkdir(parents=True)
     for name in (
         "run_0001.prm.json",
+        "run_0002.prm.json",
         "run_0005.prm.json",
         "run_0005.prm.dat",
         "run_0006.anything.txt",
