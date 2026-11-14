@@ -44,9 +44,11 @@ class FswHost(sysModel.SysModel):
     whose time lies after the last tick reads every reader of the vehicle once and calls
     `build.tick(t_ns, {role: payload})`, so the first tick is one period after the reset; the call
     Basilisk makes at the reset time ticks nothing. A command the tick returns for a role with no
-    writer fails the tick; until a vehicle declares writers, any command fails. An exception from
-    `boot` or `tick` is kept whole in `failure` and re-raised, and `Scenario.run` raises that same
-    exception in place of Basilisk's director error.
+    writer fails the tick; until a vehicle declares writers, any command fails. A reader subscribed
+    to no message fails the reset before `boot`, and one whose message is unwritten at the first
+    tick fails that tick before `tick`. An exception from `boot` or `tick`, or from either check, is
+    kept whole in `failure` and re-raised, and `Scenario.run` raises that same exception in place of
+    Basilisk's director error.
 
     Attributes:
         failure: The exception `boot` or a tick raised, kept whole, else `None`.
@@ -65,6 +67,7 @@ class FswHost(sysModel.SysModel):
         self._build = build
         self._readers = vehicle.readers()
         self._t_ns = 0
+        self._inputs_written = False
         self.failure = None
 
     @property
@@ -73,16 +76,23 @@ class FswHost(sysModel.SysModel):
         return self._build.period_s
 
     def Reset(self, CurrentSimNanos: int) -> None:
-        """Boot the build and take the reset time as the last tick.
+        """Check every reader is subscribed, boot the build; take the reset time as the last tick.
 
         Args:
             CurrentSimNanos: The reset time, in nanoseconds, as Basilisk passes it.
 
         Raises:
+            RuntimeError: Naming the roles whose readers are subscribed to no message, before
+                `boot`, kept whole in `failure`.
             BaseException: Whatever `boot` raised, kept whole in `failure`.
         """
         self._t_ns = CurrentSimNanos
         try:
+            unlinked = sorted(
+                role for role, reader in self._readers.items() if not reader.isLinked()
+            )
+            if unlinked:
+                raise RuntimeError(f"roles {unlinked} are not subscribed to any message")
             self._build.boot()
         except BaseException as error:
             self.failure = error
@@ -95,6 +105,8 @@ class FswHost(sysModel.SysModel):
             CurrentSimNanos: The current simulation time, in nanoseconds, as Basilisk passes it.
 
         Raises:
+            RuntimeError: At the first tick, naming the roles whose messages have not been
+                written, before `tick`, kept whole in `failure`.
             ValueError: Naming the roles the tick commanded that have no writer, kept whole in
                 `failure`.
             BaseException: Whatever `tick` raised, kept whole in `failure`.
@@ -103,6 +115,14 @@ class FswHost(sysModel.SysModel):
             return
         self._t_ns = CurrentSimNanos
         try:
+            if not self._inputs_written:
+                unwritten = sorted(
+                    role for role, reader in self._readers.items() if not reader.isWritten()
+                )
+                if unwritten:
+                    t = CurrentSimNanos / 1e9
+                    raise RuntimeError(f"roles {unwritten} have not been written at t = {t} s")
+                self._inputs_written = True
             messages = {role: reader() for role, reader in self._readers.items()}
             commands = self._build.tick(CurrentSimNanos, messages)
             commanded = sorted(commands)

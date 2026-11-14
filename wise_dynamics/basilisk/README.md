@@ -116,7 +116,11 @@ needs the message type resolves it by name through `Basilisk.architecture.messag
 writer for fails the tick with a `ValueError` naming the role; until a vehicle declares writers,
 any command fails.
 
-An exception raised by `boot` or `tick`, or the `ValueError` above, is kept whole in
+A reader subscribed to no message fails the reset before `boot()`, and a reader whose message is
+not yet written at the first tick fails that tick before `tick`, each with a `RuntimeError` naming
+the roles.
+
+An exception raised by `boot` or `tick`, or any of these errors, is kept whole in
 `host.failure` and stops the simulation. `run` then raises that same exception object, its
 traceback reaching into the build, in place of the SWIG director error Basilisk raises.
 

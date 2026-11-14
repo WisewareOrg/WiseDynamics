@@ -5,9 +5,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from Basilisk.architecture import sysModel
+from Basilisk.architecture import messaging, sysModel
 
-from wise_dynamics.basilisk import FswHost
+from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 HALF_SECOND_NS = 500_000_000
@@ -187,3 +187,61 @@ def test_an_error_no_host_kept_passes_from_run_as_basilisk_raised_it(hosted: boo
 
     if hosted:
         assert host.failure is None
+
+
+class _Unsubscribed(ImuSpacecraft):
+    """An `ImuSpacecraft` with one more reader, `spare`, subscribed to nothing."""
+
+    def readers(self) -> dict[str, Any]:
+        """Build the vehicle's readers and an unsubscribed `spare`.
+
+        Returns:
+            Role `imu` as `ImuSpacecraft` gives it, and role `spare`, subscribed to nothing.
+        """
+        return {**super().readers(), "spare": messaging.IMUSensorMsgReader()}
+
+
+class _Unwritten(ImuSpacecraft):
+    """An `ImuSpacecraft` with one more reader, `spare`, subscribed to a message never written."""
+
+    def readers(self) -> dict[str, Any]:
+        """Build the vehicle's readers and a `spare` whose message is never written.
+
+        Returns:
+            Role `imu` as `ImuSpacecraft` gives it, and role `spare`, subscribed to a stand-alone
+            message kept on the vehicle and never written.
+        """
+        self.spare_msg = messaging.IMUSensorMsg()
+        spare = messaging.IMUSensorMsgReader()
+        spare.subscribeTo(self.spare_msg)
+        return {**super().readers(), "spare": spare}
+
+
+def test_a_role_subscribed_to_nothing_fails_the_reset_before_boot():
+    """`run` raises the host's error naming the unsubscribed role; the build never boots."""
+    scenario = Leo500(vehicle_type=_Unsubscribed)
+    build = _Stub()
+    host = FswHost(build, scenario.vehicle)
+
+    with pytest.raises(
+        RuntimeError, match=r"roles \['spare'\] are not subscribed to any message"
+    ) as raised:
+        scenario.run(host, {}, duration_s=2.0)
+
+    assert host.failure is raised.value
+    assert build.events == []
+
+
+def test_a_role_never_written_by_the_first_tick_fails_it_before_the_build_ticks():
+    """`run` raises the host's error naming the unwritten role and the first tick's time."""
+    scenario = Leo500(vehicle_type=_Unwritten)
+    build = _Stub()
+    host = FswHost(build, scenario.vehicle)
+
+    with pytest.raises(
+        RuntimeError, match=r"roles \['spare'\] have not been written at t = 0.5 s"
+    ) as raised:
+        scenario.run(host, {}, duration_s=2.0)
+
+    assert host.failure is raised.value
+    assert build.events == ["boot"]
