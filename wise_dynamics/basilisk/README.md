@@ -108,6 +108,9 @@ At reset the host calls `boot()`. Each later instant of its task, from one perio
 it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
 nanoseconds and `{role: payload}`, the payloads as the readers give them, unconverted. A payload is
 valid only during its tick: it is a view of its reader's buffer, which the next read overwrites.
+Its class is whichever SWIG type Basilisk returns, which may be a simulation module's alias of
+`messaging.<Name>Payload`, such as `imuSensor`'s, without that class's `__dtype__`; a build that
+needs the message type resolves it by name through `Basilisk.architecture.messaging`.
 
 `tick` returns a mapping, `{}` when it commands nothing. A command for a role the vehicle has no
 writer for fails the tick with a `ValueError` naming the role; until a vehicle declares writers,
