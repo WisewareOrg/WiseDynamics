@@ -51,7 +51,7 @@ class FswHost(sysModel.SysModel):
     Basilisk's director error.
 
     Attributes:
-        failure: The exception `boot` or a tick raised, kept whole, else `None`.
+        failure: The exception `boot`, a tick or a reader check raised, kept whole, else `None`.
     """
 
     failure: BaseException | None

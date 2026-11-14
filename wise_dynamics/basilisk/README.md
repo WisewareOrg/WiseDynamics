@@ -117,8 +117,8 @@ writer for fails the tick with a `ValueError` naming the role; until a vehicle d
 any command fails.
 
 A reader subscribed to no message fails the reset before `boot()`, and a reader whose message is
-not yet written at the first tick fails that tick before `tick`, each with a `RuntimeError` naming
-the roles.
+unwritten at the first tick fails that tick before `tick`, each with a `RuntimeError` naming the
+roles.
 
 An exception raised by `boot` or `tick`, or any of these errors, is kept whole in
 `host.failure` and stops the simulation. `run` then raises that same exception object, its
