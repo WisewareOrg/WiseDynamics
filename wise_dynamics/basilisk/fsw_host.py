@@ -28,7 +28,8 @@ class FswBuild(Protocol):
         Args:
             t_ns: The simulation time, in Basilisk's integer nanoseconds.
             messages_by_role: The vehicle's readings, role to the message payload its reader
-                gives, unconverted.
+                gives, unconverted. Each payload is valid only during this tick, a view of its
+                reader's buffer that the next read overwrites, so copy what you keep.
 
         Returns:
             Actuator commands by role, `{}` when it commands nothing.
@@ -98,12 +99,13 @@ class FswHost(sysModel.SysModel):
                 `failure`.
             BaseException: Whatever `tick` raised, kept whole in `failure`.
         """
-        if not CurrentSimNanos > self._t_ns:
+        if CurrentSimNanos <= self._t_ns:
             return
         self._t_ns = CurrentSimNanos
         try:
             messages = {role: reader() for role, reader in self._readers.items()}
-            commanded = sorted(self._build.tick(CurrentSimNanos, messages))
+            commands = self._build.tick(CurrentSimNanos, messages)
+            commanded = sorted(commands)
             if commanded:
                 raise ValueError(
                     f"the build commanded roles {commanded}, which have no writer; "
