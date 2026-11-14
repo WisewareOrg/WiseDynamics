@@ -151,9 +151,9 @@ class Scenario:
 
         Raises:
             RuntimeError: The scenario has already run.
-            fsw_module.failure: When `fsw_module` is an `FswHost` that kept a failure, that same
-                exception, raised whole in place of Basilisk's error.
-            BaseException: What the simulation raised, when no `FswHost` kept a failure.
+            fsw_module.failure: Whatever `fsw_module.failure` holds, when `fsw_module` is an
+                `FswHost` that kept one, raised whole in place of Basilisk's error.
+            BaseException: Whatever the simulation raised otherwise, unchanged.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")

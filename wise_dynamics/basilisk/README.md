@@ -107,8 +107,11 @@ vehicle's `readers()` once, when it is built.
 At reset the host calls `boot()`. Each later instant of its task, from one period after the reset,
 it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
 nanoseconds and `{role: payload}`, the payloads as the readers give them, unconverted. A payload is
-valid only during its tick: it is a view of its reader's buffer, which the next read overwrites. `tick` returns a mapping, `{}` when it commands nothing; a command for a role the vehicle
-has no writer for fails the tick with a `ValueError` naming the role, and no vehicle has writers.
+valid only during its tick: it is a view of its reader's buffer, which the next read overwrites.
+
+`tick` returns a mapping, `{}` when it commands nothing. A command for a role the vehicle has no
+writer for fails the tick with a `ValueError` naming the role; until a vehicle declares writers,
+any command fails.
 
 An exception raised by `boot` or `tick`, or the `ValueError` above, is kept whole in
 `host.failure` and stops the simulation. `run` then raises that same exception object, its
@@ -179,8 +182,8 @@ A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.cras
 rerunning one case by its node id replaces only its result. A campaign of N cases also deletes, when
 it is collected, every `run_<NNNN>.*` file of its test's cases numbered N and above, a consumer's own
 per-case files among them, so the leftovers of an earlier, larger campaign are cleared; nothing else
-is. A case
-that fails in setup or call without having written its run file leaves `run_<NNNN>.crash.json`,
+is. A case that fails in setup or call without having written its run file leaves
+`run_<NNNN>.crash.json`,
 `{"exception": ..., "traceback": ...}`; so does a case whose pytest-xdist worker dies, such as a
 segfault. A case that wrote its run file and then failed keeps the run file, unless its worker
 died: then the crash record replaces the run file.

@@ -43,7 +43,7 @@ class FswHost(sysModel.SysModel):
     whose time lies after the last tick reads every reader of the vehicle once and calls
     `build.tick(t_ns, {role: payload})`, so the first tick is one period after the reset; the call
     Basilisk makes at the reset time ticks nothing. A command the tick returns for a role with no
-    writer fails the tick; the vehicle has no writers, so any command fails. An exception from
+    writer fails the tick; until a vehicle declares writers, any command fails. An exception from
     `boot` or `tick` is kept whole in `failure` and re-raised, and `Scenario.run` raises that same
     exception in place of Basilisk's director error.
 
