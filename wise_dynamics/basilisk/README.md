@@ -16,11 +16,12 @@ raises.
 | `wise_dynamics/notebook.py` | the `%%monte_carlo` notebook magic and `load_runs` (the `notebook` extra) |
 | `wise_dynamics/basilisk/vehicle.py` | `Vehicle`: the run file every vehicle writes |
 | `wise_dynamics/basilisk/scenario.py` | `Scenario`: the simulation every scenario runs once and records |
+| `wise_dynamics/basilisk/fsw_host.py` | `FswHost`: the module hosting any flight-software build, and `FswBuild`, what a build provides |
 | `wise_dynamics/basilisk/vehicles/` | one `Vehicle` subclass per module, the module named for the class; `VEHICLES` registers each under the module's name |
 | `wise_dynamics/basilisk/scenarios/` | one `Scenario` subclass per module, named for the scenario |
 
-Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft`, `SCENARIOS` and `VEHICLES` from
-`wise_dynamics.basilisk`, and a scenario class from its own module,
+Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft`, `FswHost`, `FswBuild`, `SCENARIOS` and
+`VEHICLES` from `wise_dynamics.basilisk`, and a scenario class from its own module,
 `wise_dynamics.basilisk.scenarios.<name>`. A test picks one scenario with the `sim_scenario` mark, a
 name in `SCENARIOS`, and the scenario builds its own vehicle unless the `sim_vehicle` mark names
 another.
@@ -94,6 +95,25 @@ A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a 
 `ground_process`, whose priority is below the scenario process's, so at each instant they share it
 runs after every task of the scenario process: after the flight software, and after the recorders.
 The ground can end its own part of the run with `stop_ground()`.
+
+## Flight-software host
+
+`FswHost(build, vehicle)` is a Basilisk module that hosts any build of a flight software in the
+flight-software slot: a consumer builds it and passes it to `run` as `fsw_module`. A build provides
+what `FswBuild` lists: `period_s`, its period in seconds, which is the host's; `boot()`; and
+`tick(t_ns, messages_by_role)`, which returns actuator commands by role. The host takes the
+vehicle's `readers()` once, when it is built.
+
+At reset the host calls `boot()`. Each later instant of its task, from one period after the reset,
+it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
+nanoseconds and `{role: payload}`, the payloads as the readers give them, unconverted. A payload is
+a view of its reader's buffer, which the next read overwrites, so a build copies what it keeps past
+its tick. `tick` returns a mapping, `{}` when it commands nothing; a command for a role the vehicle
+has no writer for fails the tick with a `ValueError` naming the role, and no vehicle has writers.
+
+An exception raised by `boot` or `tick`, or the `ValueError` above, is kept whole in
+`host.failure` and stops the simulation. `run` then raises that same exception object, its
+traceback reaching into the build, in place of the SWIG director error Basilisk raises.
 
 ## pytest plugin
 

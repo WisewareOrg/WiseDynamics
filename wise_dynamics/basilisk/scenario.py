@@ -7,6 +7,8 @@ import numpy as np
 from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk.fsw_host import FswHost
+
 __all__ = ["Scenario"]
 
 _PROCESS = "scenario_process"
@@ -149,6 +151,9 @@ class Scenario:
 
         Raises:
             RuntimeError: The scenario has already run.
+            fsw_module.failure: When `fsw_module` is an `FswHost` that kept a failure, that same
+                exception, raised whole in place of Basilisk's error.
+            BaseException: What the simulation raised, when no `FswHost` kept a failure.
         """
         if self._executed:
             raise RuntimeError("this scenario has already run; build a new one for another run")
@@ -192,9 +197,14 @@ class Scenario:
             self._simulation.AddModelToTask(_GROUND_TASK, ground)
         for recorder in recorders.values():
             self._simulation.AddModelToTask(_RECORD_TASK, recorder)
-        self._simulation.InitializeSimulation()
-        self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
-        self._simulation.ExecuteSimulation()
+        try:
+            self._simulation.InitializeSimulation()
+            self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
+            self._simulation.ExecuteSimulation()
+        except BaseException:
+            if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
+                raise fsw_module.failure from None
+            raise
 
         first = next(iter(recorders.values()))
         datasets = {"t_s": (np.asarray(first.times()) / macros.sec2nano(1.0), "s")}
