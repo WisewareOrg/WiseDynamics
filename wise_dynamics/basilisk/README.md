@@ -158,8 +158,9 @@ their node ids, so a consumer finds a test's folder by its node id instead of pa
 
 A case that starts deletes its own previous `run_<NNNN>.h5` and `run_<NNNN>.crash.json`, so
 rerunning one case by its node id replaces only its result. A campaign of N cases also deletes, when
-it is collected, its test's run files and crash records numbered N and above, so the leftovers of an
-earlier, larger campaign are cleared; nothing else is. A case
+it is collected, every `run_<NNNN>.*` file of its test's cases numbered N and above, a consumer's own
+per-case files among them, so the leftovers of an earlier, larger campaign are cleared; nothing else
+is. A case
 that fails in setup or call without having written its run file leaves `run_<NNNN>.crash.json`,
 `{"exception": ..., "traceback": ...}`; so does a case whose pytest-xdist worker dies, such as a
 segfault. A case that wrote its run file and then failed keeps the run file, unless its worker
