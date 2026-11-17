@@ -245,3 +245,74 @@ def test_a_role_never_written_by_the_first_tick_fails_it_before_the_build_ticks(
 
     assert host.failure is raised.value
     assert build.events == ["boot"]
+
+
+class _Commanded(ImuSpacecraft):
+    """An `ImuSpacecraft` with one writer, role `spare`, a stand-alone `ArrayMotorTorqueMsg`."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Build the vehicle and the stand-alone message its writer is.
+
+        Args:
+            **kwargs: As `ImuSpacecraft` takes them.
+        """
+        super().__init__(**kwargs)
+        self.spare_cmd = messaging.ArrayMotorTorqueMsg()
+
+    def writers(self) -> dict[str, Any]:
+        """Hand out the vehicle's writers.
+
+        Returns:
+            Role `spare`: the stand-alone message `spare_cmd`.
+        """
+        return {"spare": self.spare_cmd}
+
+
+def _torque(value: float) -> Any:
+    """An `ArrayMotorTorqueMsgPayload` whose first torque is `value`.
+
+    Args:
+        value: The first wheel's torque, in N*m.
+
+    Returns:
+        The payload.
+    """
+    payload = messaging.ArrayMotorTorqueMsgPayload()
+    payload.motorTorque = [value] + [0.0] * (messaging.MAX_EFF_CNT - 1)
+    return payload
+
+
+def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host():
+    """Each tick's command is in its writer's message from that tick's instant, by the host."""
+    scenario = Leo500(vehicle_type=_Commanded)
+    host = FswHost(_Stub(commands={"spare": _torque(0.25)}), scenario.vehicle)
+    command = scenario.vehicle.spare_cmd
+    reader = messaging.ArrayMotorTorqueMsgReader()
+    reader.subscribeTo(command)
+
+    datasets = scenario.run(host, {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
+
+    t_s, _ = datasets["t_s"]
+    torque, _ = datasets["cmd"]
+    assert torque[t_s == 0.0, 0].tolist() == [0.0]
+    assert set(torque[t_s >= 0.5, 0]) == {0.25}
+    assert reader.timeWritten() == 4 * HALF_SECOND_NS
+    assert reader.moduleID() == host.moduleID
+
+
+def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_write():
+    """Commanding roles with no writer fails, naming them and the writer roles; none is written."""
+    scenario = Leo500(vehicle_type=_Commanded)
+    commands = {"spare": _torque(0.25), "wheel": _torque(0.5), "arm": _torque(1.0)}
+    host = FswHost(_Stub(commands=commands), scenario.vehicle)
+    reader = messaging.ArrayMotorTorqueMsgReader()
+    reader.subscribeTo(scenario.vehicle.spare_cmd)
+
+    with pytest.raises(
+        ValueError,
+        match=r"roles \['arm', 'wheel'\], which have no writer; the writer roles are \['spare'\]",
+    ) as raised:
+        scenario.run(host, {}, duration_s=2.0)
+
+    assert host.failure is raised.value
+    assert not reader.isWritten()
