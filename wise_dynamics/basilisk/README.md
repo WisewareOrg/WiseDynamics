@@ -41,11 +41,10 @@ A vehicle lists the Basilisk modules it propagates in `models()` and its sensors
 sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands out
 sensor readers by role in `readers()`, and may hand out actuator writers by role in `writers()`:
 each the stand-alone Basilisk message its device subscribes to, none by default. It declares what
-it records in `recorded_fields()`: dataset
-path to `(message, field, units)`. A vehicle may change what the recorders captured in
-`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run; `ImuSpacecraft`'s
-turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude leaves the simulation as a
-quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
+it records in `recorded_fields()`: dataset path to `(message, field, units)`. A vehicle may change
+what the recorders captured in `finish(datasets)`, which `Scenario.run` calls on each vehicle after
+the run; `ImuSpacecraft`'s turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude
+leaves the simulation as a quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
 for tracking. `ImuWheelSpacecraft`, registered as `imu_wheel_spacecraft`, is `ImuSpacecraft` with
 one balanced reaction wheel, Basilisk's Honeywell HR16 from its `rwFactory`: its writer is role
 `wheel`, an `ArrayMotorTorqueMsg` whose first torque, in N*m, drives the wheel, and it records the
