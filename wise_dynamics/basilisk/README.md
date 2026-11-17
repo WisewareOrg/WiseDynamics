@@ -126,8 +126,7 @@ before the next dynamics step. A role absent from a tick keeps its last command,
 message keeps its last payload. A tick commanding any role the vehicle has no writer for fails
 with a `ValueError` naming those roles and the writer roles, before any of its commands is
 written. A command its writer rejects, such as a payload of another message, fails the tick with
-the writer's own error; the tick's commands written before it stay written, since the run has
-failed.
+the writer's own error.
 
 A reader subscribed to no message fails the reset before `boot()`, and a reader whose message is
 unwritten at the first tick fails that tick before `tick`, each with a `RuntimeError` naming the

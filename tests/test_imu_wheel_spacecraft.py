@@ -1,8 +1,8 @@
 """`ImuWheelSpacecraft`: the IMU spacecraft with one reaction wheel, commanded through its writer.
 
 The tests cover its nominal wheel, how its keywords reach Basilisk's wheel, its writer and what it
-records, and a commanded torque spinning the wheel as Basilisk's wheel model says, its spin momentum
-recorded in truth.
+records, and a commanded torque spinning the wheel as Basilisk's wheel model says, read from the
+spin momentum it records in truth.
 """
 
 import inspect
@@ -96,20 +96,35 @@ def _wheel_momentum(datasets: Mapping[str, tuple[np.ndarray, str]], vehicle: Any
     return wheel.Js * (omega + rate @ axis)
 
 
+class _Tilted(ImuWheelSpacecraft):
+    """`ImuWheelSpacecraft` with its wheel on the body x axis, spinning at the start.
+
+    Attributes:
+        wheel_spin_axis_B: Nominal spin axis of the wheel in body axes.
+        wheel_speed_rad_s: Nominal initial speed of the wheel relative to the hub, in rad/s.
+    """
+
+    wheel_spin_axis_B = (1.0, 0.0, 0.0)
+    wheel_speed_rad_s = 10.0
+
+
+@pytest.mark.parametrize("vehicle_type", [ImuWheelSpacecraft, _Tilted], ids=["nominal", "tilted"])
 def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says(
-    commanding: Callable[..., Any], torque: Callable[[float], Any]
+    commanding: Callable[..., Any], torque: Callable[[float], Any], vehicle_type: type
 ):
     """The wheel's spin momentum gains the torque times the time since the tick that wrote it.
 
     For a balanced wheel Basilisk integrates Js (dOmega/dt + gsHat . domega/dt) = u, so the spin
     momentum Js (Omega + gsHat . omega_BN_B) gains u per second from the first tick, at 0.5 s:
     the command acts from the tick that wrote it, and the recorded speed is that of its instant.
+    It holds on the nominal wheel, and on one off the z axis already spinning.
 
     Args:
         commanding: The stub build that commands what it is given.
         torque: Builds a wheel torque command.
+        vehicle_type: The wheel vehicle flown.
     """
-    scenario = Leo500(vehicle_type=ImuWheelSpacecraft)
+    scenario = Leo500(vehicle_type=vehicle_type)
     host = FswHost(commanding({"wheel": torque(TORQUE_N_M)}), scenario.vehicle)
 
     datasets = scenario.run(host, {}, duration_s=4.0)
