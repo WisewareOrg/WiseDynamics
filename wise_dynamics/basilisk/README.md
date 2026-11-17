@@ -47,9 +47,11 @@ the run; `ImuSpacecraft`'s turns the recorded MRP into the quaternion `truth/q_B
 leaves the simulation as a quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
 for tracking. `ImuWheelSpacecraft`, registered as `imu_wheel_spacecraft`, is `ImuSpacecraft` with
 one balanced reaction wheel, Basilisk's Honeywell HR16 from its `rwFactory`: its writer is role
-`wheel`, an `ArrayMotorTorqueMsg` whose first torque, in N*m, drives the wheel, and it records the
-wheel's speed relative to the hub, in rad/s, as `truth/wheel_speed`. Its class docstring gives the
-wheel's nominal parameters, which are not dispersed.
+`wheel`, an `ArrayMotorTorqueMsg` whose first torque, in N*m, drives the wheel. It records the
+wheel's speed relative to the hub, in rad/s, as `truth/wheel_speed`, and its angular momentum about
+its spin axis, Js (Omega + gsHat_B . omega_BN_B) in N*m*s, as `truth/wheel_momentum`, which a
+commanded torque changes at its rate. Its class docstring gives the wheel's nominal parameters,
+which are not dispersed.
 `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one HDF5 file, each dataset
 float64, or UTF-8 text for a string array, with a `units` attribute.
 
@@ -123,7 +125,9 @@ unconverted. The host writes each to its role's writer at the tick's time, so th
 before the next dynamics step. A role absent from a tick keeps its last command, since a Basilisk
 message keeps its last payload. A tick commanding any role the vehicle has no writer for fails
 with a `ValueError` naming those roles and the writer roles, before any of its commands is
-written.
+written. A command its writer rejects, such as a payload of another message, fails the tick with
+the writer's own error; the tick's commands written before it stay written, since the run has
+failed.
 
 A reader subscribed to no message fails the reset before `boot()`, and a reader whose message is
 unwritten at the first tick fails that tick before `tick`, each with a `RuntimeError` naming the

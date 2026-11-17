@@ -1,11 +1,12 @@
 """`ImuWheelSpacecraft`: the IMU spacecraft with one reaction wheel, commanded through its writer.
 
 The tests cover its nominal wheel, how its keywords reach Basilisk's wheel, its writer and what it
-records, and a commanded torque spinning the wheel as Basilisk's wheel model says.
+records, and a commanded torque spinning the wheel as Basilisk's wheel model says, its spin momentum
+recorded in truth.
 """
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
@@ -17,61 +18,8 @@ from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 from wise_dynamics.basilisk.vehicles import VEHICLES
 from wise_dynamics.basilisk.vehicles.imu_wheel_spacecraft import ImuWheelSpacecraft
 
-HALF_SECOND_NS = 500_000_000
-
 TORQUE_N_M = 0.1
 """The commanded wheel torque, below the wheel's limit."""
-
-
-def _torque(value: float) -> Any:
-    """An `ArrayMotorTorqueMsgPayload` commanding the first wheel's torque `value`.
-
-    Args:
-        value: The torque, in N*m.
-
-    Returns:
-        The payload.
-    """
-    payload = messaging.ArrayMotorTorqueMsgPayload()
-    payload.motorTorque = [value] + [0.0] * (messaging.MAX_EFF_CNT - 1)
-    return payload
-
-
-class _Commanding:
-    """A build commanding `commands` at each of its first `ticks` ticks and nothing after.
-
-    Attributes:
-        period_s: The build's period, in seconds.
-    """
-
-    period_s = 0.5
-
-    def __init__(self, commands: Mapping[str, Any], ticks: int) -> None:
-        """Set the commands and for how many ticks they are returned.
-
-        Args:
-            commands: What each of the first `ticks` ticks returns.
-            ticks: The ticks returning `commands`; later ticks return `{}`.
-        """
-        self.commands = commands
-        self.ticks = ticks
-        self.ticked = 0
-
-    def boot(self) -> None:
-        """Start, with nothing to do."""
-
-    def tick(self, t_ns: int, messages_by_role: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Return `commands` for the first `ticks` ticks, `{}` after.
-
-        Args:
-            t_ns: The tick's simulation time, in nanoseconds.
-            messages_by_role: The vehicle's readings by role.
-
-        Returns:
-            The tick's commands.
-        """
-        self.ticked += 1
-        return self.commands if self.ticked <= self.ticks else {}
 
 
 def test_it_is_registered_and_is_the_imu_spacecraft_with_a_nominal_wheel():
@@ -148,15 +96,21 @@ def _wheel_momentum(datasets: Mapping[str, tuple[np.ndarray, str]], vehicle: Any
     return wheel.Js * (omega + rate @ axis)
 
 
-def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says():
+def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says(
+    commanding: Callable[..., Any], torque: Callable[[float], Any]
+):
     """The wheel's spin momentum gains the torque times the time since the tick that wrote it.
 
     For a balanced wheel Basilisk integrates Js (dOmega/dt + gsHat . domega/dt) = u, so the spin
     momentum Js (Omega + gsHat . omega_BN_B) gains u per second from the first tick, at 0.5 s:
     the command acts from the tick that wrote it, and the recorded speed is that of its instant.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+        torque: Builds a wheel torque command.
     """
     scenario = Leo500(vehicle_type=ImuWheelSpacecraft)
-    host = FswHost(_Commanding({"wheel": _torque(TORQUE_N_M)}, ticks=8), scenario.vehicle)
+    host = FswHost(commanding({"wheel": torque(TORQUE_N_M)}), scenario.vehicle)
 
     datasets = scenario.run(host, {}, duration_s=4.0)
 
@@ -165,39 +119,30 @@ def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says():
     assert units == "rad/s"
     assert omega.shape == t_s.shape
     assert np.all(omega[t_s > 0.5] > 0.0)
-    gained = (
-        _wheel_momentum(datasets, scenario.vehicle) - _wheel_momentum(datasets, scenario.vehicle)[0]
-    )
+    momentum, units = datasets["truth/wheel_momentum"]
+    assert units == "N*m*s"
+    assert momentum.shape == t_s.shape
+    np.testing.assert_allclose(momentum, _wheel_momentum(datasets, scenario.vehicle), rtol=1e-12)
     expected = TORQUE_N_M * np.clip(t_s - 0.5, 0.0, None)
-    np.testing.assert_allclose(gained, expected, rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(momentum - momentum[0], expected, rtol=1e-9, atol=1e-12)
 
 
-def test_a_tick_with_no_command_leaves_the_last_one_in_force():
-    """Commanded at the first tick only, the wheel keeps its torque for the rest of the run."""
+def test_a_tick_with_no_command_leaves_the_last_one_in_force(
+    commanding: Callable[..., Any], torque: Callable[[float], Any]
+):
+    """Commanded at the first tick only, the wheel keeps its torque for the rest of the run.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+        torque: Builds a wheel torque command.
+    """
     scenario = Leo500(vehicle_type=ImuWheelSpacecraft)
-    host = FswHost(_Commanding({"wheel": _torque(TORQUE_N_M)}, ticks=1), scenario.vehicle)
+    host = FswHost(commanding({"wheel": torque(TORQUE_N_M)}, ticks=1), scenario.vehicle)
 
     datasets = scenario.run(host, {}, duration_s=4.0)
 
     t_s, _ = datasets["t_s"]
-    gained = (
-        _wheel_momentum(datasets, scenario.vehicle) - _wheel_momentum(datasets, scenario.vehicle)[0]
-    )
+    momentum, _ = datasets["truth/wheel_momentum"]
     np.testing.assert_allclose(
-        gained, TORQUE_N_M * np.clip(t_s - 0.5, 0.0, None), rtol=1e-9, atol=1e-12
+        momentum - momentum[0], TORQUE_N_M * np.clip(t_s - 0.5, 0.0, None), rtol=1e-9, atol=1e-12
     )
-
-
-def test_a_command_for_a_role_the_vehicle_has_no_writer_for_fails_naming_it():
-    """A tick commanding a role besides `wheel` fails, naming it and the writer role `wheel`."""
-    scenario = Leo500(vehicle_type=ImuWheelSpacecraft)
-    commands = {"wheel": _torque(TORQUE_N_M), "thruster": _torque(1.0)}
-    host = FswHost(_Commanding(commands, ticks=8), scenario.vehicle)
-
-    with pytest.raises(
-        ValueError,
-        match=r"roles \['thruster'\], which have no writer; the writer roles are \['wheel'\]",
-    ) as raised:
-        scenario.run(host, {}, duration_s=2.0)
-
-    assert host.failure is raised.value

@@ -7,6 +7,7 @@ The wheel is Basilisk's `reactionWheelStateEffector` holding one Honeywell HR16 
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 from Basilisk.architecture import messaging
 from Basilisk.simulation import reactionWheelStateEffector
 from Basilisk.utilities import macros, simIncludeRW
@@ -24,7 +25,8 @@ class ImuWheelSpacecraft(ImuSpacecraft):
     limits are the factory's HR16 values. The wheel is not dispersed: `dispersed` draws only the
     IMU's biases, as `ImuSpacecraft`'s does. Besides `ImuSpacecraft`'s, a vehicle holds `wheel`, the
     Basilisk `ReactionWheelStateEffector`, and `wheel_command`, the stand-alone
-    `ArrayMotorTorqueMsg` the wheel reads its torque from, its first element.
+    `ArrayMotorTorqueMsg` the wheel reads its torque from, its first element. Its run file holds
+    the wheel's speed, `truth/wheel_speed`, and its spin momentum, `truth/wheel_momentum`.
 
     Attributes:
         wheel_spin_axis_B: Nominal spin axis of the wheel in body axes, a unit vector.
@@ -117,16 +119,22 @@ class ImuWheelSpacecraft(ImuSpacecraft):
         }
 
     def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:
-        """Finish as `ImuSpacecraft` does, and keep the one wheel's speed.
+        """Finish as `ImuSpacecraft` does, keep the one wheel's speed, and add its spin momentum.
 
         Args:
             datasets: Dataset name to `(array, units)`, as the recorders captured them.
 
         Returns:
             `ImuSpacecraft`'s finished datasets, with `truth/wheel_speed` cut from the
-            `RWSpeedMsg`'s (N, 36) array to the wheel's (N,) speed.
+            `RWSpeedMsg`'s (N, 36) array to the wheel's (N,) speed, and `truth/wheel_momentum`, the
+            wheel's angular momentum about its spin axis, Js (Omega + gsHat_B . omega_BN_B), (N,)
+            in N*m*s.
         """
         finished = super().finish(datasets)
         speeds, units = finished["truth/wheel_speed"]
+        rate, _ = finished["truth/omega_BN_B"]
+        [wheel] = self.wheel.ReactionWheelData
+        axis = np.array(wheel.gsHat_B).flatten()
         finished["truth/wheel_speed"] = (speeds[:, 0], units)
+        finished["truth/wheel_momentum"] = (wheel.Js * (speeds[:, 0] + rate @ axis), "N*m*s")
         return finished
