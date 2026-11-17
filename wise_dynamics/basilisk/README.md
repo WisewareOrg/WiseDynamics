@@ -46,7 +46,11 @@ path to `(message, field, units)`. A vehicle may change what the recorders captu
 `finish(datasets)`, which `Scenario.run` calls on each vehicle after the run; `ImuSpacecraft`'s
 turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude leaves the simulation as a
 quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
-for tracking.
+for tracking. `ImuWheelSpacecraft`, registered as `imu_wheel_spacecraft`, is `ImuSpacecraft` with
+one balanced reaction wheel, Basilisk's Honeywell HR16 from its `rwFactory`: its writer is role
+`wheel`, an `ArrayMotorTorqueMsg` whose first torque, in N*m, drives the wheel, and it records the
+wheel's speed relative to the hub, in rad/s, as `truth/wheel_speed`. Its class docstring gives the
+wheel's nominal parameters, which are not dispersed.
 `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one HDF5 file, each dataset
 float64, or UTF-8 text for a string array, with a `units` attribute.
 
