@@ -47,14 +47,17 @@ class FswHost(sysModel.SysModel):
     `build.tick(t_ns, {role: payload})` and writes each returned command to its role's writer at
     that time, so the device reads it before the next dynamics step. The first tick is one period
     after the reset; the call Basilisk makes at the reset time ticks nothing. A tick commanding any
-    role with no writer fails before any of its commands is written. A reader subscribed
-    to no message fails the reset before `boot`, and one whose message is unwritten at the first
-    tick fails that tick before `tick`. An exception from `boot` or `tick`, or from either check, is
-    kept whole in `failure` and re-raised, and `Scenario.run` raises that same exception in place of
-    Basilisk's director error.
+    role with no writer fails before any of its commands is written. A command its writer rejects,
+    such as a payload of another message, fails the tick with the writer's own error; the tick's
+    commands written before it stay written, since the run has failed. A reader subscribed to no
+    message fails the reset before `boot`, and one whose message is unwritten at the first tick
+    fails that tick before `tick`. An exception from `boot` or `tick`, from a write, or from either
+    check, is kept whole in `failure` and re-raised, and `Scenario.run` raises that same exception
+    in place of Basilisk's director error.
 
     Attributes:
-        failure: The exception `boot`, a tick or a reader check raised, kept whole, else `None`.
+        failure: The exception `boot`, a tick, a write or a reader check raised, kept whole, else
+            `None`.
     """
 
     failure: BaseException | None
@@ -114,7 +117,8 @@ class FswHost(sysModel.SysModel):
                 written, before `tick`, kept whole in `failure`.
             ValueError: Naming the roles the tick commanded that have no writer, and the writer
                 roles, before any command is written, kept whole in `failure`.
-            BaseException: Whatever `tick` raised, kept whole in `failure`.
+            BaseException: Whatever `tick` or a writer raised, kept whole in `failure`; a writer's
+                error leaves the tick's commands written before it written.
         """
         if CurrentSimNanos <= self._t_ns:
             return

@@ -1,6 +1,6 @@
 """`FswHost`: a build ticked at its period, fed by role, and kept whole when it fails."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
@@ -18,11 +18,12 @@ class _Boom(Exception):
 
 
 class _Stub:
-    """A build that logs its boot and each tick, and returns what it is told to.
+    """A build that logs its boot and each tick, and commands nothing.
 
     It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; and each
-    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`. Each tick returns `commands`.
-    It raises `_Boom` in `fail_in`, `"boot"` or `"tick"`, and keeps it in `raised`.
+    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`. It raises `_Boom` in
+    `fail_in`, `"boot"` or `"tick"`, and keeps it in `raised`. The `commanding` fixture's build
+    commands.
 
     Attributes:
         period_s: The build's period, in seconds.
@@ -30,17 +31,15 @@ class _Stub:
 
     period_s = 0.5
 
-    def __init__(self, commands: Mapping[str, Any] | None = None, fail_in: str | None = None):
-        """Set what the build returns and where it fails.
+    def __init__(self, fail_in: str | None = None):
+        """Set where the build fails.
 
         Args:
-            commands: What each tick returns; `{}` when not given.
             fail_in: `"boot"` or `"tick"` to raise `_Boom` there, else `None`.
         """
         self.events: list[str | int] = []
         self.gyro: dict[int, list[float]] = {}
         self.roles: list[list[str]] = []
-        self.commands = {} if commands is None else commands
         self.fail_in = fail_in
         self.raised: _Boom | None = None
 
@@ -57,13 +56,13 @@ class _Stub:
             messages_by_role: The vehicle's readings by role.
 
         Returns:
-            `commands`.
+            `{}`.
         """
         self.events.append(t_ns)
         self.roles.append(sorted(messages_by_role))
         self.gyro[t_ns] = list(messages_by_role["imu"].AngVelPlatform)
         self._maybe_fail("tick")
-        return self.commands
+        return {}
 
     def _maybe_fail(self, where: str) -> None:
         """Raise `_Boom` when `where` is where the build is told to fail.
@@ -132,17 +131,23 @@ def test_an_exception_in_the_build_surfaces_whole_from_run(where: str):
     assert raised.value.__suppress_context__
 
 
-def test_a_command_for_a_role_with_no_writer_fails_the_run_at_that_tick():
-    """A tick commanding a role with no writer fails, naming it; the build is not ticked again."""
+def test_a_command_for_a_role_with_no_writer_fails_the_run_at_that_tick(
+    commanding: Callable[..., Any],
+):
+    """A tick commanding a role with no writer fails, naming it; the build is not ticked again.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+    """
     scenario = Leo500()
-    build = _Stub(commands={"wheel": 0.1})
+    build = commanding({"wheel": 0.1})
     host = FswHost(build, scenario.vehicle)
 
     with pytest.raises(ValueError, match="wheel") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
-    assert build.events == ["boot", HALF_SECOND_NS]
+    assert build.ticked == 1
 
 
 class _Raising(sysModel.SysModel):
@@ -268,24 +273,17 @@ class _Commanded(ImuSpacecraft):
         return {"spare": self.spare_cmd}
 
 
-def _torque(value: float) -> Any:
-    """An `ArrayMotorTorqueMsgPayload` whose first torque is `value`.
+def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host(
+    commanding: Callable[..., Any], torque: Callable[[float], Any]
+):
+    """Each tick's command is in its writer's message from that tick's instant, by the host.
 
     Args:
-        value: The first wheel's torque, in N*m.
-
-    Returns:
-        The payload.
+        commanding: The stub build that commands what it is given.
+        torque: Builds a wheel torque command.
     """
-    payload = messaging.ArrayMotorTorqueMsgPayload()
-    payload.motorTorque = [value] + [0.0] * (messaging.MAX_EFF_CNT - 1)
-    return payload
-
-
-def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host():
-    """Each tick's command is in its writer's message from that tick's instant, by the host."""
     scenario = Leo500(vehicle_type=_Commanded)
-    host = FswHost(_Stub(commands={"spare": _torque(0.25)}), scenario.vehicle)
+    host = FswHost(commanding({"spare": torque(0.25)}), scenario.vehicle)
     command = scenario.vehicle.spare_cmd
     reader = messaging.ArrayMotorTorqueMsgReader()
     reader.subscribeTo(command)
@@ -293,18 +291,25 @@ def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host():
     datasets = scenario.run(host, {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
 
     t_s, _ = datasets["t_s"]
-    torque, _ = datasets["cmd"]
-    assert torque[t_s == 0.0, 0].tolist() == [0.0]
-    assert set(torque[t_s >= 0.5, 0]) == {0.25}
+    written, _ = datasets["cmd"]
+    assert written[t_s == 0.0, 0].tolist() == [0.0]
+    assert set(written[t_s >= 0.5, 0]) == {0.25}
     assert reader.timeWritten() == 4 * HALF_SECOND_NS
     assert reader.moduleID() == host.moduleID
 
 
-def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_write():
-    """Commanding roles with no writer fails, naming them and the writer roles; none is written."""
+def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_write(
+    commanding: Callable[..., Any], torque: Callable[[float], Any]
+):
+    """Commanding roles with no writer fails, naming them and the writer roles; none is written.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+        torque: Builds a wheel torque command.
+    """
     scenario = Leo500(vehicle_type=_Commanded)
-    commands = {"spare": _torque(0.25), "wheel": _torque(0.5), "arm": _torque(1.0)}
-    host = FswHost(_Stub(commands=commands), scenario.vehicle)
+    commands = {"spare": torque(0.25), "wheel": torque(0.5), "arm": torque(1.0)}
+    host = FswHost(commanding(commands), scenario.vehicle)
     reader = messaging.ArrayMotorTorqueMsgReader()
     reader.subscribeTo(scenario.vehicle.spare_cmd)
 
@@ -316,3 +321,49 @@ def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_
 
     assert host.failure is raised.value
     assert not reader.isWritten()
+
+
+def test_a_role_absent_from_a_tick_keeps_its_last_command(
+    commanding: Callable[..., Any], torque: Callable[[float], Any]
+):
+    """Commanded at the first tick only, the writer's message holds that command to the end.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+        torque: Builds a wheel torque command.
+    """
+    scenario = Leo500(vehicle_type=_Commanded)
+    build = commanding({"spare": torque(0.25)}, ticks=1)
+    command = scenario.vehicle.spare_cmd
+
+    datasets = scenario.run(
+        FswHost(build, scenario.vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0
+    )
+
+    t_s, _ = datasets["t_s"]
+    written, _ = datasets["cmd"]
+    assert build.ticked == 4
+    assert set(written[t_s >= 0.5, 0]) == {0.25}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [0.25, messaging.IMUSensorMsgPayload()],
+    ids=["not-a-payload", "another-message-s-payload"],
+)
+def test_a_command_its_writer_rejects_fails_the_run_kept_whole(
+    commanding: Callable[..., Any], payload: Any
+):
+    """The writer's own error fails the tick, kept whole in `failure` and raised from `run`.
+
+    Args:
+        commanding: The stub build that commands what it is given.
+        payload: A command the `ArrayMotorTorqueMsg` writer cannot take.
+    """
+    scenario = Leo500(vehicle_type=_Commanded)
+    host = FswHost(commanding({"spare": payload}), scenario.vehicle)
+
+    with pytest.raises(TypeError, match="ArrayMotorTorqueMsgPayload") as raised:
+        scenario.run(host, {}, duration_s=2.0)
+
+    assert host.failure is raised.value
