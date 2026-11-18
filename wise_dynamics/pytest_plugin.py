@@ -249,8 +249,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Write each collected test's planned case count and node path into the session's folder.
 
-    The count is the test's `sim_runs` after the cap, not the number of cases selected. The run
-    files and crash records the test's folder holds for cases from that count up are deleted.
+    The count is the test's `sim_runs` after the cap, not the number of cases selected. Every
+    `run_<NNNN>.*` file the test's folder holds for cases from that count up is deleted.
 
     A `--collect-only` run writes nothing, and neither does a pytest-xdist controller, which
     collects nothing; each worker writes the same content. A test with no active Monte Carlo
@@ -596,7 +596,7 @@ def _active_session(config: pytest.Config) -> Path:
 
 
 def _delete_leftovers(directory: Path, runs: int) -> None:
-    """Delete a test's run files and crash records of cases numbered `runs` or higher.
+    """Delete a test's `run_<NNNN>.*` files of cases numbered `runs` or higher.
 
     Args:
         directory: The test's directory in the session.
