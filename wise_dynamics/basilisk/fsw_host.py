@@ -32,7 +32,9 @@ class FswBuild(Protocol):
                 reader's buffer that the next read overwrites, so copy what you keep.
 
         Returns:
-            Actuator commands by role, `{}` when it commands nothing.
+            Actuator commands by role, `{}` when it commands nothing: each a payload of the
+            message type the role's writer carries. A role absent from a tick keeps its last
+            command, since its message keeps its last payload.
         """
         ...
 
@@ -41,17 +43,21 @@ class FswHost(sysModel.SysModel):
     """Hosts one flight-software build: boots it at reset, then ticks it at its period.
 
     `Reset` calls `build.boot()` and takes the reset time as the last tick. Each `UpdateState`
-    whose time lies after the last tick reads every reader of the vehicle once and calls
-    `build.tick(t_ns, {role: payload})`, so the first tick is one period after the reset; the call
-    Basilisk makes at the reset time ticks nothing. A command the tick returns for a role with no
-    writer fails the tick; until a vehicle declares writers, any command fails. A reader subscribed
+    whose time lies after the last tick reads every reader of the vehicle once, calls
+    `build.tick(t_ns, {role: payload})` and writes each returned command to its role's writer at
+    that time, so the device reads it before the next dynamics step. The first tick is one period
+    after the reset; the call Basilisk makes at the reset time ticks nothing. A tick commanding any
+    role with no writer fails before any of its commands is written. A command its writer rejects,
+    such as a payload of another message, fails the tick with the writer's own error; which of the
+    tick's other commands were written is not said, since the run has failed. A reader subscribed
     to no message fails the reset before `boot`, and one whose message is unwritten at the first
-    tick fails that tick before `tick`. An exception from `boot` or `tick`, or from either check, is
-    kept whole in `failure` and re-raised, and `Scenario.run` raises that same exception in place of
-    Basilisk's director error.
+    tick fails that tick before `tick`. An exception from `boot` or `tick`, from a write, or from
+    either check, is kept whole in `failure` and re-raised, and `Scenario.run` raises that same
+    exception in place of Basilisk's director error.
 
     Attributes:
-        failure: The exception `boot`, a tick or a reader check raised, kept whole, else `None`.
+        failure: The exception `boot`, a tick, a write or a reader check raised, kept whole, else
+            `None`.
     """
 
     failure: BaseException | None
@@ -61,11 +67,13 @@ class FswHost(sysModel.SysModel):
 
         Args:
             build: The build to host.
-            vehicle: The vehicle whose `readers()` feed the build, taken once.
+            vehicle: The vehicle whose `readers()` feed the build and whose `writers()` take its
+                commands, each taken once.
         """
         super().__init__()
         self._build = build
         self._readers = vehicle.readers()
+        self._writers = vehicle.writers()
         self._t_ns = 0
         self._inputs_written = False
         self.failure = None
@@ -99,7 +107,7 @@ class FswHost(sysModel.SysModel):
             raise
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
-        """Tick the build with every reading by role, when the time lies after the last tick.
+        """Tick the build with every reading by role and write its commands, after the last tick.
 
         Args:
             CurrentSimNanos: The current simulation time, in nanoseconds, as Basilisk passes it.
@@ -107,9 +115,9 @@ class FswHost(sysModel.SysModel):
         Raises:
             RuntimeError: At the first tick, naming the roles whose messages have not been
                 written, before `tick`, kept whole in `failure`.
-            ValueError: Naming the roles the tick commanded that have no writer, kept whole in
-                `failure`.
-            BaseException: Whatever `tick` raised, kept whole in `failure`.
+            ValueError: Naming the roles the tick commanded that have no writer, and the writer
+                roles, before any command is written, kept whole in `failure`.
+            BaseException: Whatever `tick` or a writer raised, kept whole in `failure`.
         """
         if CurrentSimNanos <= self._t_ns:
             return
@@ -125,12 +133,14 @@ class FswHost(sysModel.SysModel):
                 self._inputs_written = True
             messages = {role: reader() for role, reader in self._readers.items()}
             commands = self._build.tick(CurrentSimNanos, messages)
-            commanded = sorted(commands)
-            if commanded:
+            unwritable = sorted(set(commands) - set(self._writers))
+            if unwritable:
                 raise ValueError(
-                    f"the build commanded roles {commanded}, which have no writer; "
-                    "the writer roles are []"
+                    f"the build commanded roles {unwritable}, which have no writer; "
+                    f"the writer roles are {sorted(self._writers)}"
                 )
+            for role, payload in commands.items():
+                self._writers[role].write(payload, CurrentSimNanos, self.moduleID)
         except BaseException as error:
             self.failure = error
             raise

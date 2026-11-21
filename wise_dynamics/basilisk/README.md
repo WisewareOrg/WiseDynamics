@@ -39,12 +39,19 @@ with it and what it drew.
 A vehicle lists the Basilisk modules it propagates in `models()` and its sensors in
 `sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period: a
 sensor's white noise is a density, and a sample carries 1-sigma density / sqrt(period). It hands out
-sensor readers by role in `readers()`, and declares what it records in `recorded_fields()`: dataset
-path to `(message, field, units)`. A vehicle may change what the recorders captured in
-`finish(datasets)`, which `Scenario.run` calls on each vehicle after the run; `ImuSpacecraft`'s
-turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude leaves the simulation as a
-quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
-for tracking.
+sensor readers by role in `readers()`, and may hand out actuator writers by role in `writers()`:
+each the stand-alone Basilisk message its device subscribes to, none by default. It declares what
+it records in `recorded_fields()`: dataset path to `(message, field, units)`. A vehicle may change
+what the recorders captured in `finish(datasets)`, which `Scenario.run` calls on each vehicle after
+the run; `ImuSpacecraft`'s turns the recorded MRP into the quaternion `truth/q_BN`, so an attitude
+leaves the simulation as a quaternion and Basilisk's MRP stays inside it. `ImuSpacecraft.tracking()` is the ground's stand-in
+for tracking. `ImuWheelSpacecraft`, registered as `imu_wheel_spacecraft`, is `ImuSpacecraft` with
+one balanced reaction wheel, Basilisk's Honeywell HR16 from its `rwFactory`: its writer is role
+`wheel`, an `ArrayMotorTorqueMsg` whose first torque, in N*m, drives the wheel. It records the
+wheel's speed relative to the hub, in rad/s, as `truth/wheel_speed`, and its angular momentum about
+its spin axis, Js (Omega + gsHat_B . omega_BN_B) in N*m*s, as `truth/wheel_momentum`, which a
+commanded torque changes at its rate. Its class docstring gives the wheel's nominal parameters,
+which are not dispersed.
 `write_run_file(path, datasets, attrs=None)`, from `Vehicle`, writes one HDF5 file, each dataset
 float64, or UTF-8 text for a string array, with a `units` attribute.
 
@@ -102,7 +109,7 @@ The ground can end its own part of the run with `stop_ground()`.
 flight-software slot: a consumer builds it and passes it to `run` as `fsw_module`. A build provides
 what `FswBuild` lists: `period_s`, its period in seconds, which is the host's; `boot()`; and
 `tick(t_ns, messages_by_role)`, which returns actuator commands by role. The host takes the
-vehicle's `readers()` once, when it is built.
+vehicle's `readers()` and `writers()` once, when it is built.
 
 At reset the host calls `boot()`. Each later instant of its task, from one period after the reset,
 it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
@@ -112,9 +119,14 @@ Its class is whichever SWIG type Basilisk returns, which may be a simulation mod
 `messaging.<Name>Payload`, such as `imuSensor`'s, without that class's `__dtype__`; a build that
 needs the message type resolves it by name through `Basilisk.architecture.messaging`.
 
-`tick` returns a mapping, `{}` when it commands nothing. A command for a role the vehicle has no
-writer for fails the tick with a `ValueError` naming the role; until a vehicle declares writers,
-any command fails.
+`tick` returns a mapping, `{}` when it commands nothing: for each role it commands, a payload of
+the message type that role's writer carries, such as `messaging.ArrayMotorTorqueMsgPayload`,
+unconverted. The host writes each to its role's writer at the tick's time, so the device reads it
+before the next dynamics step. A role absent from a tick keeps its last command, since a Basilisk
+message keeps its last payload. A tick commanding any role the vehicle has no writer for fails
+with a `ValueError` naming those roles and the writer roles, before any of its commands is
+written. A command its writer rejects, such as a payload of another message, fails the tick with
+the writer's own error.
 
 A reader subscribed to no message fails the reset before `boot()`, and a reader whose message is
 unwritten at the first tick fails that tick before `tick`, each with a `RuntimeError` naming the
