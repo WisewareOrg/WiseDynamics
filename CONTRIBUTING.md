@@ -28,4 +28,4 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
   interrogate, pydoclint and ty, at the versions wise-ci pins), then `uv run pytest`, the full
   suite.
 
-The same commands run locally after `uv sync`.
+The same commands run locally after `uv sync --all-extras`.
