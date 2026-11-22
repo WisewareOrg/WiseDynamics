@@ -201,7 +201,7 @@ def pytest_configure_node(node: Any) -> None:
     """
     try:
         handed = {"directory": str(_active_session(node.config)), "error": None}
-    except pytest.UsageError as error:
+    except (pytest.UsageError, sessions.NoSessionError) as error:
         handed = {"directory": None, "error": str(error)}
     node.workerinput[_WORKER_SESSION] = handed
 
@@ -234,7 +234,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
-    except pytest.UsageError as error:
+    except (pytest.UsageError, sessions.NoSessionError) as error:
         metafunc.parametrize("sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True)
         return
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
@@ -257,7 +257,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         return
     planned: dict[Path, tuple[int, str]] = {}
     for item in session.items:
-        if "sim_case_index" in item.fixturenames and _case_of(item) is not None:
+        if isinstance(item, pytest.Function) and "sim_case_index" in item.fixturenames and _case_of(item) is not None:
             settings = _settings(item)
             planned[settings.directory] = (settings.runs, item.nodeid.partition("[")[0])
     for directory, (runs, nodeid) in planned.items():
@@ -483,8 +483,8 @@ def sim_run_file(
 def _settings(node: pytest.Function) -> _Settings:
     """Resolve a test's configuration from its marks, the defaults and the cap.
 
-    Resolving the run directory raises `pytest.UsageError` through `_active_session` when no
-    session is active or its name is invalid.
+    Resolving the run directory raises `NoSessionError` through `_active_session` when no session
+    is active, and `pytest.UsageError` when its name is invalid.
 
     Args:
         node: The test function, or one of its parametrized items.
@@ -529,7 +529,8 @@ def _settings(node: pytest.Function) -> _Settings:
 def _run_dir(node: pytest.Function) -> Path:
     """Build a test's run directory in the session its runs land in.
 
-    `_active_session` raises `pytest.UsageError` when no session is active or its name is invalid.
+    `_active_session` raises `NoSessionError` when no session is active, and `pytest.UsageError`
+    when its name is invalid.
 
     Args:
         node: The test function, or one of its parametrized items.
@@ -552,7 +553,8 @@ def _active_session(config: pytest.Config) -> Path:
         The `scratch` session's directory when the run is capped, else the active session's.
 
     Raises:
-        pytest.UsageError: A full run has no active session, or its name is invalid.
+        NoSessionError: A full run has no active session.
+        pytest.UsageError: A full run's session name is invalid.
     """
     if _SESSION not in config.stash:
         workerinput = getattr(config, "workerinput", None)
