@@ -44,6 +44,11 @@ dev = [
     "ruff>=0.17.0",
 ]
 
+[tool.uv]
+# bsk caps Pillow at 12.2.0, below its security fixes. Basilisk never imports Pillow; matplotlib
+# and bokeh, which do, accept 13. Drop the override once a Basilisk release lifts the cap.
+override-dependencies = ["pillow>=13"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
