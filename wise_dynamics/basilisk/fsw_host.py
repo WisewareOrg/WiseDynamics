@@ -96,9 +96,7 @@ class FswHost(sysModel.SysModel):
         """
         self._t_ns = CurrentSimNanos
         try:
-            unlinked = sorted(
-                role for role, reader in self._readers.items() if not reader.isLinked()
-            )
+            unlinked = sorted(role for role, reader in self._readers.items() if not reader.isLinked())
             if unlinked:
                 raise RuntimeError(f"roles {unlinked} are not subscribed to any message")
             self._build.boot()
@@ -124,9 +122,7 @@ class FswHost(sysModel.SysModel):
         self._t_ns = CurrentSimNanos
         try:
             if not self._inputs_written:
-                unwritten = sorted(
-                    role for role, reader in self._readers.items() if not reader.isWritten()
-                )
+                unwritten = sorted(role for role, reader in self._readers.items() if not reader.isWritten())
                 if unwritten:
                     t = CurrentSimNanos / 1e9
                     raise RuntimeError(f"roles {unwritten} have not been written at t = {t} s")

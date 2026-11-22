@@ -187,12 +187,8 @@ class Scenario:
                 self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
         if ground is not None:
-            ground_process = self._simulation.CreateNewProcess(
-                _GROUND_PROCESS, _GROUND_PROCESS_PRIORITY
-            )
-            ground_task = self._simulation.CreateNewTask(
-                _GROUND_TASK, macros.sec2nano(ground.period_s)
-            )
+            ground_process = self._simulation.CreateNewProcess(_GROUND_PROCESS, _GROUND_PROCESS_PRIORITY)
+            ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
             ground_process.addTask(ground_task)
             self._simulation.AddModelToTask(_GROUND_TASK, ground)
         for recorder in recorders.values():

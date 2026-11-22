@@ -61,9 +61,7 @@ class ImuSpacecraft(Vehicle):
     accel_bias_std_P_m_s2: float = 1e-4
 
     @classmethod
-    def dispersed(
-        cls, rng: np.random.Generator, *, noise_seed: int
-    ) -> tuple["ImuSpacecraft", dict[str, np.ndarray]]:
+    def dispersed(cls, rng: np.random.Generator, *, noise_seed: int) -> tuple["ImuSpacecraft", dict[str, np.ndarray]]:
         """A vehicle built with biases drawn from `rng`, and what was drawn.
 
         Each bias is its nominal plus independent normal samples per axis of its 1-sigma, the gyro
@@ -77,10 +75,8 @@ class ImuSpacecraft(Vehicle):
             The vehicle, and `gyro_bias_P_rad_s` and `accel_bias_P_m_s2` as drawn.
         """
         draws = {
-            "gyro_bias_P_rad_s": np.asarray(cls.gyro_bias_P_rad_s)
-            + rng.normal(0.0, cls.gyro_bias_std_P_rad_s, size=3),
-            "accel_bias_P_m_s2": np.asarray(cls.accel_bias_P_m_s2)
-            + rng.normal(0.0, cls.accel_bias_std_P_m_s2, size=3),
+            "gyro_bias_P_rad_s": np.asarray(cls.gyro_bias_P_rad_s) + rng.normal(0.0, cls.gyro_bias_std_P_rad_s, size=3),
+            "accel_bias_P_m_s2": np.asarray(cls.accel_bias_P_m_s2) + rng.normal(0.0, cls.accel_bias_std_P_m_s2, size=3),
         }
         return cls(**draws, noise_seed=noise_seed), draws
 
@@ -111,15 +107,9 @@ class ImuSpacecraft(Vehicle):
         """
         nominal = type(self)
         self.mass_kg = nominal.mass_kg if mass_kg is None else mass_kg
-        self.inertia_B_kg_m2 = (
-            nominal.inertia_B_kg_m2 if inertia_B_kg_m2 is None else inertia_B_kg_m2
-        )
-        self.gyro_bias_P_rad_s = (
-            nominal.gyro_bias_P_rad_s if gyro_bias_P_rad_s is None else gyro_bias_P_rad_s
-        )
-        self.accel_bias_P_m_s2 = (
-            nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
-        )
+        self.inertia_B_kg_m2 = nominal.inertia_B_kg_m2 if inertia_B_kg_m2 is None else inertia_B_kg_m2
+        self.gyro_bias_P_rad_s = nominal.gyro_bias_P_rad_s if gyro_bias_P_rad_s is None else gyro_bias_P_rad_s
+        self.accel_bias_P_m_s2 = nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
         self.gyro_noise_density_rad_s_rthz = (
             nominal.gyro_noise_density_rad_s_rthz
             if gyro_noise_density_rad_s_rthz is None

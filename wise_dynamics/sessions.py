@@ -184,9 +184,7 @@ def current_session() -> Path:
             text=True,
         )
         if listed.returncode or not report.exists():
-            raise RuntimeError(
-                f"pytest could not report the session:\n{listed.stdout}{listed.stderr}"
-            )
+            raise RuntimeError(f"pytest could not report the session:\n{listed.stdout}{listed.stderr}")
         found = json.loads(report.read_text())
     if found is None:
         raise NoSessionError(NO_SESSION)

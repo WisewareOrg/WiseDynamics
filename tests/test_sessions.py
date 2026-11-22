@@ -99,9 +99,7 @@ def test_session_directory_is_the_root_joined_to_the_pointers_name(pytester: pyt
     """
     _point(pytester, "alpha-1.2\n")
 
-    assert _sessions().session_directory(pytester.parseconfig()) == (
-        pytester.path / "monte_carlo" / "alpha-1.2"
-    )
+    assert _sessions().session_directory(pytester.parseconfig()) == (pytester.path / "monte_carlo" / "alpha-1.2")
 
 
 def test_session_directory_follows_the_sim_out_ini_setting(pytester: pytest.Pytester):
@@ -113,15 +111,11 @@ def test_session_directory_follows_the_sim_out_ini_setting(pytester: pytest.Pyte
     pytester.makeini("[pytest]\nsim_out = ini_out\n")
     _point(pytester, "beta", root="ini_out")
 
-    assert _sessions().session_directory(pytester.parseconfig()) == (
-        pytester.path / "ini_out" / "beta"
-    )
+    assert _sessions().session_directory(pytester.parseconfig()) == (pytester.path / "ini_out" / "beta")
 
 
 @pytest.mark.parametrize("content", [None, "", "  \n"], ids=["missing", "empty", "blank"])
-def test_session_directory_with_no_active_session_raises_a_usage_error(
-    pytester: pytest.Pytester, content: str | None
-):
+def test_session_directory_with_no_active_session_raises_a_usage_error(pytester: pytest.Pytester, content: str | None):
     """A missing, empty or blank pointer raises `UsageError` with the no-session message.
 
     Args:
@@ -261,9 +255,7 @@ def test_rerunning_one_case_replaces_only_its_own_result(pytester: pytest.Pytest
     pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=2)
     before = {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")}
 
-    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
-        passed=1
-    )
+    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(passed=1)
 
     after = {path.name: path.stat().st_mtime_ns for path in directory.glob("run_*.h5")}
     assert sorted(after) == ["run_0000.h5", "run_0001.h5"]
@@ -534,9 +526,7 @@ def test_a_campaign_deletes_its_own_run_and_crash_files_numbered_at_or_above_its
     ):
         path.write_bytes(b"old")
 
-    pytester.runpytest_subprocess(
-        *FULL, *workers, "test_scenario.py::test_case[0]"
-    ).assert_outcomes(passed=1)
+    pytester.runpytest_subprocess(*FULL, *workers, "test_scenario.py::test_case[0]").assert_outcomes(passed=1)
 
     assert sorted(path.name for path in directory.iterdir()) == [
         "planned.json",
@@ -578,9 +568,7 @@ def test_a_campaign_deletes_any_run_file_of_its_cases_numbered_at_or_above_its_p
     ):
         (directory / name).write_bytes(b"old")
 
-    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[0]").assert_outcomes(
-        passed=1
-    )
+    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[0]").assert_outcomes(passed=1)
 
     assert sorted(path.name for path in directory.iterdir()) == [
         "notes.txt",
@@ -680,9 +668,7 @@ def test_an_empty_wise_dynamics_capped_leaves_the_pointers_session(
     monkeypatch.setenv("WISE_DYNAMICS_CAPPED", "")
     _point(pytester, "alpha\n")
 
-    assert _sessions().session_directory(pytester.parseconfig()) == (
-        pytester.path / "monte_carlo" / "alpha"
-    )
+    assert _sessions().session_directory(pytester.parseconfig()) == (pytester.path / "monte_carlo" / "alpha")
 
 
 @pytest.fixture

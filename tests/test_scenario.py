@@ -61,9 +61,7 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
         ("lo", svIntegrators.svIntegratorRungeKutta3),
     ],
 )
-def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(
-    fidelity: str, integrator_type: type
-):
+def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(fidelity: str, integrator_type: type):
     """Each fidelity gives the vehicle that runs its integrator; `hi` states its tolerances.
 
     Args:
@@ -93,9 +91,7 @@ def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(
         (1 / 3, 333_333_333),
     ],
 )
-def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(
-    period_s: float, step_ns: int
-):
+def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s: float, step_ns: int):
     """The dynamics steps at the largest step of at most 1 s that divides the FSW's period.
 
     The sensors and the flight software then run at the flight software's period, and the
@@ -202,9 +198,7 @@ def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_inst
     """
     scenario = Leo500()
     fsw = _Stepping(scenario.vehicle.readers()["imu"])
-    datasets = scenario.run(
-        fsw, {"fsw/time_tag": (fsw.output_msg, "timeTag", "s")}, duration_s=20.0
-    )
+    datasets = scenario.run(fsw, {"fsw/time_tag": (fsw.output_msg, "timeTag", "s")}, duration_s=20.0)
     assert fsw.called_ns == [k * 1_000_000_000 for k in range(21)]
     assert fsw.read_ns == fsw.called_ns
     t_s, _ = datasets["t_s"]

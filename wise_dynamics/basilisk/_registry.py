@@ -27,9 +27,7 @@ def subclasses_by_module[T](package: types.ModuleType, base: type[T]) -> dict[st
         defined = [
             value
             for value in vars(module).values()
-            if isinstance(value, type)
-            and issubclass(value, base)
-            and value.__module__ == module.__name__
+            if isinstance(value, type) and issubclass(value, base) and value.__module__ == module.__name__
         ]
         if len(defined) != 1:
             raise TypeError(

@@ -228,9 +228,7 @@ def test_a_role_subscribed_to_nothing_fails_the_reset_before_boot():
     build = _Stub()
     host = FswHost(build, scenario.vehicle)
 
-    with pytest.raises(
-        RuntimeError, match=r"roles \['spare'\] are not subscribed to any message"
-    ) as raised:
+    with pytest.raises(RuntimeError, match=r"roles \['spare'\] are not subscribed to any message") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
@@ -243,9 +241,7 @@ def test_a_role_never_written_by_the_first_tick_fails_it_before_the_build_ticks(
     build = _Stub()
     host = FswHost(build, scenario.vehicle)
 
-    with pytest.raises(
-        RuntimeError, match=r"roles \['spare'\] have not been written at t = 0.5 s"
-    ) as raised:
+    with pytest.raises(RuntimeError, match=r"roles \['spare'\] have not been written at t = 0.5 s") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
@@ -336,9 +332,7 @@ def test_a_role_absent_from_a_tick_keeps_its_last_command(
     build = commanding({"spare": torque(0.25)}, ticks=1)
     command = scenario.vehicle.spare_cmd
 
-    datasets = scenario.run(
-        FswHost(build, scenario.vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0
-    )
+    datasets = scenario.run(FswHost(build, scenario.vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
 
     t_s, _ = datasets["t_s"]
     written, _ = datasets["cmd"]
@@ -351,9 +345,7 @@ def test_a_role_absent_from_a_tick_keeps_its_last_command(
     [0.25, messaging.IMUSensorMsgPayload()],
     ids=["not-a-payload", "another-message-s-payload"],
 )
-def test_a_command_its_writer_rejects_fails_the_run_kept_whole(
-    commanding: Callable[..., Any], payload: Any
-):
+def test_a_command_its_writer_rejects_fails_the_run_kept_whole(commanding: Callable[..., Any], payload: Any):
     """The writer's own error fails the tick, kept whole in `failure` and raised from `run`.
 
     Args:

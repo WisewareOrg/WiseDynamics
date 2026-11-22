@@ -45,10 +45,7 @@ def test_a_scenario_class_a_module_imports_is_not_counted(
     Args:
         make_package: Builds a one-module package from source.
     """
-    source = (
-        "from wise_dynamics.basilisk.scenarios.leo500 import Leo500\n"
-        "class Mine(Leo500):\n    pass\n"
-    )
+    source = "from wise_dynamics.basilisk.scenarios.leo500 import Leo500\nclass Mine(Leo500):\n    pass\n"
     package = make_package(source)
     assert scenarios_package._scenarios_in(package) == {"mod": package.mod.Mine}
 
@@ -64,8 +61,6 @@ def test_the_package_exports_no_scenario_class():
     """`wise_dynamics.basilisk.__all__` names no `Scenario` subclass but `Scenario` itself."""
     exported = [getattr(basilisk, name) for name in basilisk.__all__]
     scenarios = [
-        value
-        for value in exported
-        if isinstance(value, type) and issubclass(value, Scenario) and value is not Scenario
+        value for value in exported if isinstance(value, type) and issubclass(value, Scenario) and value is not Scenario
     ]
     assert scenarios == []

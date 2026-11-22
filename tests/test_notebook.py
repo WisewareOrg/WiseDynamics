@@ -93,8 +93,7 @@ def _env(session: Path) -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("CI", "WISE_DYNAMICS_CAPPED", "JPY_SESSION_NAME")
-        and not key.startswith("PYTEST_")
+        if key not in ("CI", "WISE_DYNAMICS_CAPPED", "JPY_SESSION_NAME") and not key.startswith("PYTEST_")
     }
     env["JPY_SESSION_NAME"] = str(session)
     return env
@@ -139,9 +138,7 @@ def _marker_test(name: str, marker: Path) -> str:
     return f"from pathlib import Path\n\n\ndef {name}():\n    {write}\n"
 
 
-def _write_notebook(
-    directory: Path, cells: list[nbformat.NotebookNode], paired: bool = True
-) -> Path:
+def _write_notebook(directory: Path, cells: list[nbformat.NotebookNode], paired: bool = True) -> Path:
     """Save a notebook, with a `pyproject.toml` that makes `directory` the pytest rootdir.
 
     Args:
@@ -224,9 +221,7 @@ def _write_session(
         (directory / f"run_{case:04d}.crash.json").write_text(json.dumps(record))
 
 
-def _execute(
-    directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str]
-) -> nbformat.NotebookNode:
+def _execute(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str]) -> nbformat.NotebookNode:
     """Run `cells` in order in a new kernel in `directory`, started with exactly `env`.
 
     Args:
@@ -262,10 +257,7 @@ def _run(directory: Path, cells: list[nbformat.NotebookNode], env: dict[str, str
         `CellExecutionError`.
     """
     notebook = _execute(directory, cells, env)
-    return [
-        "".join(out.text for out in cell.outputs if out.output_type == "stream")
-        for cell in notebook.cells
-    ]
+    return ["".join(out.text for out in cell.outputs if out.output_type == "stream") for cell in notebook.cells]
 
 
 @pytest.fixture
@@ -464,9 +456,7 @@ def test_a_notebook_with_nothing_to_mark_is_not_rewritten(
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
-def test_a_cell_defining_no_test_is_refused(
-    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_a_cell_defining_no_test_is_refused(shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A saved cell that neither defines nor creates a test raises, after its code has run.
 
     Args:
@@ -484,9 +474,7 @@ def test_a_cell_defining_no_test_is_refused(
     assert (tmp_path / "ran").exists()
 
 
-def test_no_path_source_is_refused_asking_for_the_path(
-    shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch
-):
+def test_no_path_source_is_refused_asking_for_the_path(shell: InteractiveShell, monkeypatch: pytest.MonkeyPatch):
     """With no argument, no `JPY_SESSION_NAME` and no `__vsc_ipynb_file__`, the magic asks for one.
 
     Args:
@@ -608,9 +596,7 @@ def test_the_magic_runs_only_its_cells_tests_in_workers_and_raises_on_failure(tm
     marks = tmp_path / "marks"
     marks.mkdir()
     sentinel = tmp_path / "sentinel"
-    body = (
-        _marker_test("test_this_cell", marks / "this") + "\n\ndef test_fails():\n    assert False\n"
-    )
+    body = _marker_test("test_this_cell", marks / "this") + "\n\ndef test_fails():\n    assert False\n"
     cells = [
         _code(LOAD),
         _code(
@@ -681,11 +667,7 @@ def test_a_real_campaign_runs_in_workers_and_a_second_kernel_loads_it(tmp_path: 
     env = _env(path)
     notebook = _execute(tmp_path, campaign, env)
     streams = "".join(out.text for out in notebook.cells[1].outputs if out.output_type == "stream")
-    meter = [
-        out.data["text/plain"]
-        for out in notebook.cells[1].outputs
-        if out.output_type == "display_data"
-    ]
+    meter = [out.data["text/plain"] for out in notebook.cells[1].outputs if out.output_type == "display_data"]
 
     output = _run(tmp_path, [_code(LOAD), _code(SUMMARY, active="ipynb")], env)[1]
     (line,) = [line for line in output.splitlines() if line.startswith("SUMMARY ")]
@@ -781,9 +763,7 @@ def test_a_string_dataset_round_trips_through_the_writer_and_load_runs(sim_noteb
     assert units == "enum"
 
 
-def test_load_runs_follows_a_session_switch_within_one_process(
-    sim_notebook: Path, capsys: pytest.CaptureFixture[str]
-):
+def test_load_runs_follows_a_session_switch_within_one_process(sim_notebook: Path, capsys: pytest.CaptureFixture[str]):
     """Pointing at another session between two calls makes the second call read that session.
 
     Args:

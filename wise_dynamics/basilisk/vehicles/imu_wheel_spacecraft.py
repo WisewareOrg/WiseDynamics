@@ -57,17 +57,11 @@ class ImuWheelSpacecraft(ImuSpacecraft):
         """
         super().__init__(**imu_spacecraft)
         nominal = type(self)
-        self.wheel_spin_axis_B = (
-            nominal.wheel_spin_axis_B if wheel_spin_axis_B is None else wheel_spin_axis_B
-        )
+        self.wheel_spin_axis_B = nominal.wheel_spin_axis_B if wheel_spin_axis_B is None else wheel_spin_axis_B
         self.wheel_max_momentum_N_m_s = (
-            nominal.wheel_max_momentum_N_m_s
-            if wheel_max_momentum_N_m_s is None
-            else wheel_max_momentum_N_m_s
+            nominal.wheel_max_momentum_N_m_s if wheel_max_momentum_N_m_s is None else wheel_max_momentum_N_m_s
         )
-        self.wheel_speed_rad_s = (
-            nominal.wheel_speed_rad_s if wheel_speed_rad_s is None else wheel_speed_rad_s
-        )
+        self.wheel_speed_rad_s = nominal.wheel_speed_rad_s if wheel_speed_rad_s is None else wheel_speed_rad_s
 
         self._wheels = simIncludeRW.rwFactory()
         self._wheels.create(

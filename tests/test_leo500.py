@@ -142,9 +142,7 @@ def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
     nominal attitude, of 1500 dispersed attitudes is compared with 1500 additive MRP draws.
     """
     nominal = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
-    additive = Rotation.from_mrp(
-        nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3))
-    )
+    additive = Rotation.from_mrp(nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3)))
     dispersed = []
     for case in range(1500):
         scenario = Leo500()

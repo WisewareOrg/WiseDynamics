@@ -55,8 +55,7 @@ _MARKS = (
     (
         "sim_vehicle",
         "name",
-        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's"
-        " own",
+        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's own",
     ),
     ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
@@ -122,8 +121,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         const="",
         default=None,
         metavar="name",
-        help="with a name, make it the active Monte Carlo session; without, list the sessions; "
-        "either way no test runs",
+        help="with a name, make it the active Monte Carlo session; without, list the sessions; either way no test runs",
     )
     parser.addini(
         "sim_out",
@@ -217,9 +215,7 @@ def pytest_testnodedown(node: Any, error: object) -> None:
         error: The error that ended the worker, if any.
     """
     workeroutput = getattr(node, "workeroutput", None) or {}
-    node.config.stash[_WRITTEN_DIRS].update(
-        Path(path) for path in workeroutput.get(_WORKER_DIRS, ())
-    )
+    node.config.stash[_WRITTEN_DIRS].update(Path(path) for path in workeroutput.get(_WORKER_DIRS, ()))
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -239,9 +235,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
     except pytest.UsageError as error:
-        metafunc.parametrize(
-            "sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True
-        )
+        metafunc.parametrize("sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True)
         return
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
 
@@ -298,12 +292,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     """
     report = yield
     case = _case_of(item)
-    if (
-        case is not None
-        and report.when in ("setup", "call")
-        and report.failed
-        and call.excinfo is not None
-    ):
+    if case is not None and report.when in ("setup", "call") and report.failed and call.excinfo is not None:
         directory = _run_dir(item)
         if not sessions.run_path(directory, case).is_file():
             _write_crash(directory, case, call.excinfo.exconly(), str(report.longrepr))
@@ -423,9 +412,7 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
     else:
         scenario = scenario_type(vehicle_type=_vehicle_type(settings.vehicle))
     scenario.fidelity = settings.fidelity
-    scenario.disperse(
-        np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
-    )
+    scenario.disperse(np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0]))
     return scenario
 
 
@@ -460,14 +447,8 @@ def sim_run_file(
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
-        **{
-            f"versions_wise_dynamics_{name}": value
-            for name, value in request.config.stash[_PROVENANCE].items()
-        },
-        **{
-            f"versions_caller_{name}": value
-            for name, value in request.config.stash[_CALLER].items()
-        },
+        **{f"versions_wise_dynamics_{name}": value for name, value in request.config.stash[_PROVENANCE].items()},
+        **{f"versions_caller_{name}": value for name, value in request.config.stash[_CALLER].items()},
     }
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
@@ -475,9 +456,7 @@ def sim_run_file(
     path = sessions.run_path(directory, sim_case_index)
     config = request.config
 
-    def write(
-        datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None
-    ) -> Path:
+    def write(datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None) -> Path:
         """Write the run file.
 
         Args:
@@ -531,11 +510,7 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_runs: expected an integer of at least 1, got {runs!r}")
     if fidelity not in _FIDELITIES:
         raise ValueError(f"sim_fidelity: expected one of {_FIDELITIES}, got {fidelity!r}")
-    if (
-        not isinstance(duration_s, numbers.Real)
-        or isinstance(duration_s, bool)
-        or not duration_s > 0
-    ):
+    if not isinstance(duration_s, numbers.Real) or isinstance(duration_s, bool) or not duration_s > 0:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
     vehicle = values.get("sim_vehicle")
     if vehicle is not None:
@@ -583,9 +558,7 @@ def _active_session(config: pytest.Config) -> Path:
         workerinput = getattr(config, "workerinput", None)
         if workerinput is None:
             config.stash[_SESSION] = (
-                sessions.sim_root(config) / sessions.SCRATCH
-                if _capped(config)
-                else sessions.session_directory(config)
+                sessions.sim_root(config) / sessions.SCRATCH if _capped(config) else sessions.session_directory(config)
             )
         else:
             handed = workerinput[_WORKER_SESSION]
@@ -664,9 +637,7 @@ def _write_crash(directory: Path, case: int, exception: str, traceback: str) -> 
         traceback: The failure's full report.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    sessions.crash_path(directory, case).write_text(
-        json.dumps({"exception": exception, "traceback": traceback})
-    )
+    sessions.crash_path(directory, case).write_text(json.dumps({"exception": exception, "traceback": traceback}))
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:
@@ -754,8 +725,7 @@ def _provenance() -> dict[str, str | bool]:
     url = info.get("url", "")
     if not (info.get("dir_info", {}).get("editable") and url.startswith("file://")):
         raise pytest.UsageError(
-            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
-            f"{_INSTALL_HINT}"
+            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n{_INSTALL_HINT}"
         )
     path = url2pathname(urlparse(url).path)
     try:
@@ -784,9 +754,7 @@ def _git_state(path: str | Path) -> tuple[str, bool]:
     """
     git = ["git", "-C", str(path)]
     commit = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
-    status = subprocess.run(
-        [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
-    )
+    status = subprocess.run([*git, "status", "--porcelain"], check=True, capture_output=True, text=True)
     return commit.stdout.strip(), bool(status.stdout.strip())
 
 
@@ -836,9 +804,7 @@ def _scenario_type(name: str) -> "type[Scenario]":
     try:
         return SCENARIOS[name]
     except KeyError:
-        raise ValueError(
-            f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
-        ) from None
+        raise ValueError(f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}") from None
 
 
 def _vehicle_type(name: str) -> "type[Vehicle]":
