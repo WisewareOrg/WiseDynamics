@@ -115,8 +115,10 @@ def test_session_directory_follows_the_sim_out_ini_setting(pytester: pytest.Pyte
 
 
 @pytest.mark.parametrize("content", [None, "", "  \n"], ids=["missing", "empty", "blank"])
-def test_session_directory_with_no_active_session_raises_a_usage_error(pytester: pytest.Pytester, content: str | None):
-    """A missing, empty or blank pointer raises `UsageError` with the no-session message.
+def test_session_directory_with_no_active_session_raises_no_session_error(
+    pytester: pytest.Pytester, content: str | None
+):
+    """A missing, empty or blank pointer raises `NoSessionError` with the no-session message.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -126,10 +128,19 @@ def test_session_directory_with_no_active_session_raises_a_usage_error(pytester:
         _point(pytester, content)
     config = pytester.parseconfig()
 
-    with pytest.raises(pytest.UsageError) as raised:
+    with pytest.raises(_sessions().NoSessionError) as raised:
         _sessions().session_directory(config)
 
     assert str(raised.value) == NO_SESSION
+
+
+def test_no_session_error_is_exported_and_is_not_a_pytest_usage_error():
+    """`NoSessionError` stays in `__all__` but no longer subclasses pytest's `@final` `UsageError`."""
+    sessions = _sessions()
+
+    assert "NoSessionError" in sessions.__all__
+    assert issubclass(sessions.NoSessionError, Exception)
+    assert not issubclass(sessions.NoSessionError, pytest.UsageError)
 
 
 @pytest.mark.parametrize("name", ["..", "SESSION"])

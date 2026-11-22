@@ -1463,6 +1463,74 @@ def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
     assert not (pytester.path / "monte_carlo").exists()
 
 
+@pytest.mark.parametrize("xdist", [("-p", "no:xdist"), ("-n", "2")], ids=["serial", "xdist"])
+def test_with_no_pointer_the_run_exits_one_and_stops_on_no_usage_error(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """With no active session the run exits 1 (tests failed), not 4 (usage error), on every path.
+
+    The errors come from worker configuration, collection and `pytest_collection_finish`
+    degrading to the `no-session` case, not from any of them stopping the run.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
+
+    result = pytester.runpytest_subprocess(*FULL, *xdist)
+
+    result.assert_outcomes(passed=1, errors=2)
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    assert "UsageError" not in result.stdout.str() + result.stderr.str()
+    assert not (pytester.path / "monte_carlo").exists()
+
+    collected = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
+    assert collected.ret == pytest.ExitCode.OK
+
+
+CUSTOM_ITEM_CONFTEST = """
+import pytest
+
+
+class Check(pytest.Item):
+    def runtest(self):
+        pass
+
+
+class CheckFile(pytest.File):
+    def collect(self):
+        yield Check.from_parent(self, name="check")
+
+
+def pytest_collect_file(parent, file_path):
+    if file_path.suffix == ".check":
+        return CheckFile.from_parent(parent, path=file_path)
+"""
+
+
+def test_a_non_function_item_does_not_stop_collection_finish(pytester: pytest.Pytester):
+    """A plain `pytest.Item`, which has no `fixturenames`, collects alongside a Monte Carlo test.
+
+    The custom item passes, the Monte Carlo test still gets its `planned.json`, and the run exits 0.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    session = _point(pytester)
+    pytester.makeconftest(CUSTOM_ITEM_CONFTEST)
+    pytester.makefile(".check", example="")
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+
+    result = pytester.runpytest_subprocess(*FULL, *SERIAL)
+
+    assert "AttributeError" not in result.stdout.str() + result.stderr.str()
+    result.assert_outcomes(passed=2)
+    assert result.ret == pytest.ExitCode.OK
+    planned = session / "test_scenario" / "test_case" / "planned.json"
+    assert json.loads(planned.read_text()) == {"runs": 1, "nodeid": "test_scenario.py::test_case"}
+
+
 def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pytester):
     """Workers use the session the controller handed them, whatever the pointer says later.
 
