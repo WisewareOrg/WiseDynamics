@@ -273,7 +273,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         item: The test item about to be set up.
     """
     case = _case_of(item)
-    if case is not None:
+    if isinstance(item, pytest.Function) and case is not None:
         directory = _run_dir(item)
         sessions.run_path(directory, case).unlink(missing_ok=True)
         sessions.crash_path(directory, case).unlink(missing_ok=True)
@@ -292,7 +292,13 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     """
     report = yield
     case = _case_of(item)
-    if case is not None and report.when in ("setup", "call") and report.failed and call.excinfo is not None:
+    if (
+        isinstance(item, pytest.Function)
+        and case is not None
+        and report.when in ("setup", "call")
+        and report.failed
+        and call.excinfo is not None
+    ):
         directory = _run_dir(item)
         if not sessions.run_path(directory, case).is_file():
             _write_crash(directory, case, call.excinfo.exconly(), str(report.longrepr))
@@ -553,8 +559,9 @@ def _active_session(config: pytest.Config) -> Path:
         The `scratch` session's directory when the run is capped, else the active session's.
 
     Raises:
-        NoSessionError: A full run has no active session.
-        pytest.UsageError: A full run's session name is invalid.
+        pytest.UsageError: A pytest-xdist worker was handed no session. `session_directory`'s
+            `NoSessionError`, for a full run with no active session, and its `pytest.UsageError`,
+            for an invalid name, pass through.
     """
     if _SESSION not in config.stash:
         workerinput = getattr(config, "workerinput", None)

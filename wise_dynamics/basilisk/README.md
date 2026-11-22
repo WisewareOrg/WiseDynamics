@@ -62,9 +62,11 @@ defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` reg
 module's name. A module defining none or several raises `TypeError` when the package is imported.
 
 A scenario is a `Scenario` subclass whose class attributes are its environment and its placement,
-with units and frames in its class docstring. Its constructor takes no required argument and one
-optional argument, the vehicle class to build in place of its own, which the `sim_vehicle` mark
-supplies; a scenario that does not accept it cannot be used with that mark. It builds its vehicle,
+with units and frames in its class docstring. It names its vehicle's class as `Scenario`'s type
+parameter, as `Leo500(Scenario[ImuSpacecraft])` does, so a type checker knows `scenario.vehicle`'s
+class. Its constructor takes no required argument and one optional argument, the vehicle class to
+build in place of its own, which the `sim_vehicle` mark supplies; a scenario that does not accept
+it cannot be used with that mark. It builds its vehicle,
 places it, and holds it as `scenario.vehicle` and in `scenario.vehicles`. `disperse(rng, *,
 noise_seed)` draws the scenario's placement from `rng`, as its docstring lists it, then has its
 vehicle class draw its own dispersion from the same `rng` and build a vehicle with `noise_seed`,

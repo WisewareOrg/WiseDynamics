@@ -150,8 +150,8 @@ def session_directory(config: pytest.Config) -> Path:
         directory may not exist yet.
 
     Raises:
-        NoSessionError: The pointer is missing or empty.
-        pytest.UsageError: The name the pointer holds is invalid.
+        NoSessionError: The pointer is missing or empty. A name the pointer holds that is invalid
+            raises `pytest.UsageError` through `check_name`.
     """
     root = sim_root(config)
     if os.environ.get(CAPPED_ENV):

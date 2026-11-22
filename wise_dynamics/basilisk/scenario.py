@@ -8,6 +8,7 @@ from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
 from wise_dynamics.basilisk.fsw_host import FswHost
+from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__ = ["Scenario"]
 
@@ -84,25 +85,48 @@ def _step_ns(fsw_ns: int) -> int:
     return fsw_ns // count
 
 
-class Scenario:
+class Scenario[V: Vehicle]:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
-    A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles`, the vehicles `run` adds to the simulation in order. `run` reads them, and
-    `fidelity`.
+    `V` is the class of the scenario's vehicle. A subclass's constructor calls
+    `super().__init__()`, builds its vehicles and places them, and sets `vehicle` and `vehicles`,
+    the vehicles `run` adds to the simulation in order. `run` reads them, and `fidelity`.
 
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft,
             as the README's Scenarios section defines them.
+        vehicle: The scenario's vehicle, which a subclass sets and `disperse` replaces.
+        vehicles: The vehicles `run` adds to the simulation, in order, which a subclass sets.
+        draws: What `disperse` drew and applied, name to value, which a subclass sets.
     """
 
     fidelity: str = "lo"
+    vehicle: V
+    vehicles: list[Vehicle]
+    draws: dict[str, np.ndarray]
 
-    def __init__(self) -> None:
-        """Create the empty Basilisk simulation `run` builds into."""
+    def __init__(self, vehicle_type: type[V] | None = None) -> None:
+        """Create the empty Basilisk simulation `run` builds into.
+
+        Args:
+            vehicle_type: The vehicle class a subclass builds in place of its own, which the
+                `sim_vehicle` mark supplies; `Scenario` itself builds no vehicle and ignores it.
+        """
         self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
+
+    def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> None:
+        """Disperse this case: draw the placement and the vehicle's dispersion, and replace `vehicle`.
+
+        Args:
+            rng: The generator the dispersions are drawn from.
+            noise_seed: The new vehicle's sensor-noise seed.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
 
     def stop_ground(self) -> None:
         """Stop the ground's task: the ground `run` was given is not called again in this run.

@@ -18,7 +18,7 @@ by 0.0351 rad per axis: the spread of an additive MRP step of 0.01 per axis abou
 step."""
 
 
-class Leo500(Scenario):
+class Leo500(Scenario[ImuSpacecraft]):
     """A vehicle tumbling on a classical-element orbit about a point-mass Earth.
 
     The inertial frame N is Earth-centred, with no rotation and no epoch: point-mass gravity has

@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+import types
 from pathlib import Path
 from typing import Any
 
@@ -114,9 +114,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
     ipython.register_magic_function(monte_carlo, "cell", "monte_carlo")
 
 
-def load_runs(
-    test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
-) -> list[dict[str, Any]]:
+def load_runs(test: str | types.FunctionType, notebook: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Read back the run files of a notebook test in the session its runs land in, finished or not.
 
     It prints one line, `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>`
@@ -213,7 +211,11 @@ def pytest_collection_finish(session: pytest.Session) -> None:
             name: str | None = _active_session(session.config).name
         except NoSessionError:
             name = None
-        directories = [] if name is None else sorted({str(_run_dir(item)) for item in session.items})
+        directories = (
+            []
+            if name is None
+            else sorted({str(_run_dir(item)) for item in session.items if isinstance(item, pytest.Function)})
+        )
         Path(report).write_text(json.dumps({"session": name, "directories": directories}))
 
 
