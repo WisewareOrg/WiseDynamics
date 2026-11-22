@@ -38,7 +38,7 @@ jobs:
           version: "0.13.9"
 
       - run: uv sync --locked --all-extras
-      - uses: WisewareOrg/wise-ci/check-python@d2483ccf39ccce58ccfbaa75d3d1c6466ff6701e
+      - uses: WisewareOrg/wise-ci/check-python@491858538bf01b19cfb86aab1195ad3822b59903
 
   pytest:
     name: pytest
