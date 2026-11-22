@@ -1,9 +1,10 @@
 name: process-gates
 
 # Satisfies the `process-gates` ruleset's required-status-check contexts (`check-branch`,
-# `pr-title`, `repo-floor`): each job is top-level and named for its context. `merge_group` is a
-# deliberate addition over wise-ci's own workflow: WiseKiosk's merge queue re-runs its required
-# checks there, and these three skip rather than repeat work a pull_request run already did.
+# `pr-title`, `repo-floor`, `check-python-floor`): each job is top-level and named for its context.
+# `merge_group` is a deliberate addition over wise-ci's own workflow: WiseKiosk's merge queue
+# re-runs its required checks there, and these four skip rather than repeat work a pull_request
+# run already did.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
@@ -45,3 +46,16 @@ jobs:
       contents: read
     steps:
       - uses: WisewareOrg/wise-ci/repo-floor@6f8840aacdd7eb0c431af64f7eaa7bf326b38e29
+
+  check-python-floor:
+    name: check-python-floor
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: WisewareOrg/wise-ci/check-python-floor@d2483ccf39ccce58ccfbaa75d3d1c6466ff6701e

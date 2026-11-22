@@ -36,18 +36,19 @@ packages = ["wise_dynamics"]
 
 [dependency-groups]
 dev = [
-    "interrogate>=1.7.0",
+    "check-python",
     "ipykernel>=7.4.0",
     "nbclient>=0.11.0",
-    "pydoclint>=0.12.0",
     "pytest-xdist>=3.6",
-    "ruff>=0.17.0",
 ]
 
 [tool.uv]
 # bsk caps Pillow at 12.2.0, below its security fixes. Basilisk never imports Pillow; matplotlib
 # and bokeh, which do, accept 13. Drop the override once a Basilisk release lifts the cap.
 override-dependencies = ["pillow>=13"]
+
+[tool.uv.sources]
+check-python = { git = "https://github.com/WisewareOrg/wise-ci", subdirectory = "check-python", rev = "d2483ccf39ccce58ccfbaa75d3d1c6466ff6701e" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -60,14 +61,3 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "D", "D417"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.interrogate]
-fail-under = 100
-verbose = 1
-
-[tool.pydoclint]
-style = "google"
-arg-type-hints-in-docstring = false
-check-return-types = false
-skip-checking-short-docstrings = false
-allow-init-docstring = true
