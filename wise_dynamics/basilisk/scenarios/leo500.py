@@ -84,7 +84,7 @@ class Leo500(Scenario):
         """
         turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * _ATTITUDE_ROTVEC_PER_DRAW)
         nominal = Rotation.from_quat(type(self).q0_BN, scalar_first=True)
-        self.q0_BN = (nominal * turn).as_quat(canonical=True, scalar_first=True)
+        self.q0_BN = (nominal * turn).as_quat(canonical=True, scalar_first=True)  # ty: ignore[missing-union-attribute]
         self.omega0_BN_B_rad_s = np.asarray(type(self).omega0_BN_B_rad_s) + rng.normal(0.0, 0.2 * D2R, size=3)
         vehicle, vehicle_draws = type(self.vehicle).dispersed(rng, noise_seed=noise_seed)
         self.vehicle = self._placed(vehicle)

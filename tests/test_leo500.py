@@ -110,7 +110,7 @@ def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_fr
     rng = np.random.default_rng(7)
     turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
     nominal_attitude = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
-    expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}
+    expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}  # ty: ignore[missing-union-attribute]
     for name, nominal, std in (
         ("omega0_BN_B_rad_s", Leo500.omega0_BN_B_rad_s, 0.2 * D2R),
         ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
@@ -150,6 +150,6 @@ def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
         dispersed.append(Rotation.from_quat(scenario.draws["q0_BN"], scalar_first=True))
     dispersed = Rotation.concatenate(dispersed)
 
-    additive_std = (nominal.inv() * additive).as_rotvec().std(axis=0)
-    dispersed_std = (nominal.inv() * dispersed).as_rotvec().std(axis=0)
+    additive_std = (nominal.inv() * additive).as_rotvec().std(axis=0)  # ty: ignore[missing-union-attribute]
+    dispersed_std = (nominal.inv() * dispersed).as_rotvec().std(axis=0)  # ty: ignore[missing-union-attribute]
     assert dispersed_std == pytest.approx(additive_std, rel=0.07)
