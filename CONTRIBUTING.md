@@ -24,8 +24,10 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 
 - `check-adrs` — `docs/decisions/` and its index agree, and every citation of an ADR in the
   tracked tree pins that ADR's current rev.
-- `pytest` — after `uv sync --all-extras`, `uv run --locked check-python` (ruff check and format,
-  interrogate, pydoclint and ty, at the versions wise-ci pins), then `uv run pytest`, the full
-  suite.
+- `check-python` — after `uv sync --locked --all-extras`, wise-ci's `check-python` action: ruff check
+  and format, interrogate, pydoclint and ty. The action's tool versions are wise-ci's at the commit
+  `uses:` names; the `check-python` dev dependency's `rev` in `pyproject.toml` names the same
+  commit, so a local run sees the same versions. Renovate bumps the two together.
+- `pytest` — `uv run pytest`, the full suite.
 
-The same commands run locally after `uv sync --all-extras`.
+Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.
