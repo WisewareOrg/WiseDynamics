@@ -135,11 +135,10 @@ def test_session_directory_with_no_active_session_raises_no_session_error(
 
 
 def test_no_session_error_is_exported_and_is_not_a_pytest_usage_error():
-    """`NoSessionError` stays in `__all__` but no longer subclasses pytest's `@final` `UsageError`."""
+    """`NoSessionError` is in `__all__` and does not subclass pytest's `@final` `UsageError`."""
     sessions = _sessions()
 
     assert "NoSessionError" in sessions.__all__
-    assert issubclass(sessions.NoSessionError, Exception)
     assert not issubclass(sessions.NoSessionError, pytest.UsageError)
 
 

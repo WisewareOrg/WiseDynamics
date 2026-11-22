@@ -1485,7 +1485,13 @@ def test_with_no_pointer_the_run_exits_one_and_stops_on_no_usage_error(
     assert "UsageError" not in result.stdout.str() + result.stderr.str()
     assert not (pytester.path / "monte_carlo").exists()
 
+
+def test_with_no_pointer_collect_only_exits_zero(pytester: pytest.Pytester):
+    """With no active session `--collect-only` exits 0: collection alone raises no error."""
+    pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
+
     collected = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
+
     assert collected.ret == pytest.ExitCode.OK
 
 
