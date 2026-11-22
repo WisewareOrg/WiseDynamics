@@ -6,6 +6,7 @@ and its recorded fields.
 
 import inspect
 from collections.abc import Callable
+from typing import TypedDict
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
+from wise_dynamics.basilisk.vehicles.imu_spacecraft import Vector3
 
 
 class _Guidance(inertial3D.inertial3D):
@@ -26,7 +28,27 @@ class _Guidance(inertial3D.inertial3D):
     period_s = 1.0
 
 
-DISPERSED = {
+class _Dispersed(TypedDict):
+    """`ImuSpacecraft` constructor keywords, all but the seed.
+
+    Attributes:
+        mass_kg: Hub mass, in kilograms.
+        inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2.
+        gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+        gyro_noise_density_rad_s_rthz: Gyro noise density, in rad/s/sqrt(Hz).
+        accel_noise_density_m_s2_rthz: Accelerometer noise density, in m/s^2/sqrt(Hz).
+    """
+
+    mass_kg: float
+    inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3]
+    gyro_bias_P_rad_s: Vector3
+    accel_bias_P_m_s2: Vector3
+    gyro_noise_density_rad_s_rthz: float
+    accel_noise_density_m_s2_rthz: float
+
+
+DISPERSED: _Dispersed = {
     "mass_kg": 500.0,
     "inertia_B_kg_m2": ((150.0, -1.0, 0.0), (-1.0, 200.0, 0.0), (0.0, 0.0, 250.0)),
     "gyro_bias_P_rad_s": (3e-4, -1e-4, 2e-4),

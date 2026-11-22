@@ -110,7 +110,7 @@ class _Tilted(ImuWheelSpacecraft):
 
 @pytest.mark.parametrize("vehicle_type", [ImuWheelSpacecraft, _Tilted], ids=["nominal", "tilted"])
 def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says(
-    commanding: Callable[..., Any], torque: Callable[[float], Any], vehicle_type: type
+    commanding: Callable[..., Any], torque: Callable[[float], Any], vehicle_type: type[ImuSpacecraft]
 ):
     """The wheel's spin momentum gains the torque times the time since the tick that wrote it.
 

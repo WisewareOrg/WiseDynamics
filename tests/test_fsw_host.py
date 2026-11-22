@@ -191,6 +191,7 @@ def test_an_error_no_host_kept_passes_from_run_as_basilisk_raised_it(hosted: boo
             scenario.run(_Raising(), {}, duration_s=2.0)
 
     if hosted:
+        assert host is not None
         assert host.failure is None
 
 
@@ -279,8 +280,10 @@ def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host(
         torque: Builds a wheel torque command.
     """
     scenario = Leo500(vehicle_type=_Commanded)
-    host = FswHost(commanding({"spare": torque(0.25)}), scenario.vehicle)
-    command = scenario.vehicle.spare_cmd
+    vehicle = scenario.vehicle
+    assert isinstance(vehicle, _Commanded)
+    host = FswHost(commanding({"spare": torque(0.25)}), vehicle)
+    command = vehicle.spare_cmd
     reader = messaging.ArrayMotorTorqueMsgReader()
     reader.subscribeTo(command)
 
@@ -304,10 +307,12 @@ def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_
         torque: Builds a wheel torque command.
     """
     scenario = Leo500(vehicle_type=_Commanded)
+    vehicle = scenario.vehicle
+    assert isinstance(vehicle, _Commanded)
     commands = {"spare": torque(0.25), "wheel": torque(0.5), "arm": torque(1.0)}
-    host = FswHost(commanding(commands), scenario.vehicle)
+    host = FswHost(commanding(commands), vehicle)
     reader = messaging.ArrayMotorTorqueMsgReader()
-    reader.subscribeTo(scenario.vehicle.spare_cmd)
+    reader.subscribeTo(vehicle.spare_cmd)
 
     with pytest.raises(
         ValueError,
@@ -329,10 +334,12 @@ def test_a_role_absent_from_a_tick_keeps_its_last_command(
         torque: Builds a wheel torque command.
     """
     scenario = Leo500(vehicle_type=_Commanded)
+    vehicle = scenario.vehicle
+    assert isinstance(vehicle, _Commanded)
     build = commanding({"spare": torque(0.25)}, ticks=1)
-    command = scenario.vehicle.spare_cmd
+    command = vehicle.spare_cmd
 
-    datasets = scenario.run(FswHost(build, scenario.vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
+    datasets = scenario.run(FswHost(build, vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
 
     t_s, _ = datasets["t_s"]
     written, _ = datasets["cmd"]
