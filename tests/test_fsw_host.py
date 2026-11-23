@@ -20,8 +20,9 @@ class _Boom(Exception):
 class _Stub:
     """A build that logs its boot and each tick, and commands nothing.
 
-    It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; and each
-    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`. It raises `_Boom` in
+    It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; each
+    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`; and each tick's payloads, as
+    given, in `payloads`, and each tick's mapping itself in `mappings`. It raises `_Boom` in
     `fail_in`, `"boot"` or `"tick"`, and keeps it in `raised`. The `commanding` fixture's build
     commands.
 
@@ -40,6 +41,8 @@ class _Stub:
         self.events: list[str | int] = []
         self.gyro: dict[int, list[float]] = {}
         self.roles: list[list[str]] = []
+        self.payloads: list[Mapping[str, Any]] = []
+        self.mappings: list[Any] = []
         self.fail_in = fail_in
         self.raised: _Boom | None = None
 
@@ -60,6 +63,8 @@ class _Stub:
         """
         self.events.append(t_ns)
         self.roles.append(sorted(messages_by_role))
+        self.payloads.append(dict(messages_by_role))
+        self.mappings.append(messages_by_role)
         self.gyro[t_ns] = list(messages_by_role["imu"].AngVelPlatform)
         self._maybe_fail("tick")
         return {}
@@ -108,6 +113,31 @@ def test_the_vehicle_s_readings_reach_the_build_by_role_as_sampled_at_the_tick()
     for t_ns, reading in build.gyro.items():
         (row,) = np.flatnonzero(t_s == t_ns / 1e9)
         assert reading == gyro_P[row].tolist(), t_ns
+
+
+def test_every_tick_gets_each_role_s_payload_taken_at_reset():
+    """Each role's payload is the same object at every tick."""
+    scenario = Leo500(ImuSpacecraft())
+    build = _Stub()
+
+    scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=2.0)
+
+    first, *later = build.payloads
+    assert first and later
+    for tick, payloads in enumerate(later, start=2):
+        for role in first:
+            assert payloads[role] is first[role], f"tick {tick} got a new {role} payload"
+
+
+def test_a_tick_cannot_change_the_mapping_of_payloads_it_is_given():
+    """The mapping every tick shares is read-only."""
+    scenario = Leo500(ImuSpacecraft())
+    build = _Stub()
+
+    scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=0.5)
+
+    with pytest.raises(TypeError):
+        build.mappings[0]["imu"] = None
 
 
 @pytest.mark.parametrize("where", ["boot", "tick"])

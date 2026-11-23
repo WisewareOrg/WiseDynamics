@@ -110,10 +110,11 @@ what `FswBuild` lists: `period_s`, its period in seconds, which is the host's; `
 `tick(t_ns, messages_by_role)`, which returns actuator commands by role. The host takes the
 vehicle's `readers()` and `writers()` once, when it is built.
 
-At reset the host calls `boot()`. Each later instant of its task, from one period after the reset,
-it reads every reader once and calls `tick` with the simulation time in Basilisk's integer
-nanoseconds and `{role: payload}`, the payloads as the readers give them, unconverted. A payload is
-valid only during its tick: it is a view of its reader's buffer, which the next read overwrites.
+At reset the host takes each reader's payload once and calls `boot()`. Each later instant of its
+task, from one period after the reset, it calls `tick` with the simulation time in Basilisk's
+integer nanoseconds and `{role: payload}`, a read-only mapping of the payloads as the readers gave
+them, unconverted. A payload is a live view of its role's message, the same object at every tick,
+so a build copies what it keeps.
 Its class is whichever SWIG type Basilisk returns, which may be a simulation module's alias of
 `messaging.<Name>Payload`, such as `imuSensor`'s, without that class's `__dtype__`; a build that
 needs the message type resolves it by name through `Basilisk.architecture.messaging`.

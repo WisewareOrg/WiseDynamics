@@ -1,6 +1,7 @@
 """The Basilisk module hosting any flight-software build in a scenario's flight-software slot."""
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from Basilisk.architecture import sysModel
@@ -27,9 +28,9 @@ class FswBuild(Protocol):
 
         Args:
             t_ns: The simulation time, in Basilisk's integer nanoseconds.
-            messages_by_role: The vehicle's readings, role to the message payload its reader
-                gives, unconverted. Each payload is valid only during this tick, a view of its
-                reader's buffer that the next read overwrites, so copy what you keep.
+            messages_by_role: The vehicle's readings, a read-only mapping of role to the message
+                payload its reader gives, unconverted. Each payload is a live view of its role's
+                message, the same object at every tick, so copy what you keep.
 
         Returns:
             Actuator commands by role, `{}` when it commands nothing: each a payload of the
@@ -42,18 +43,18 @@ class FswBuild(Protocol):
 class FswHost(sysModel.SysModel):
     """Hosts one flight-software build: boots it at reset, then ticks it at its period.
 
-    `Reset` calls `build.boot()` and takes the reset time as the last tick. Each `UpdateState`
-    whose time lies after the last tick reads every reader of the vehicle once, calls
-    `build.tick(t_ns, {role: payload})` and writes each returned command to its role's writer at
-    that time, so the device reads it before the next dynamics step. The first tick is one period
-    after the reset; the call Basilisk makes at the reset time ticks nothing. A tick commanding any
-    role with no writer fails before any of its commands is written. A command its writer rejects,
-    such as a payload of another message, fails the tick with the writer's own error; which of the
-    tick's other commands were written is not said, since the run has failed. A reader subscribed
-    to no message fails the reset before `boot`, and one whose message is unwritten at the first
-    tick fails that tick before `tick`. An exception from `boot` or `tick`, from a write, or from
-    either check, is kept whole in `failure` and re-raised, and `Scenario.run` raises that same
-    exception in place of Basilisk's director error.
+    `Reset` takes each reader's payload once, as `FswBuild.tick` describes it, calls `build.boot()`
+    and takes the reset time as the last tick. Each `UpdateState` whose time lies after the last
+    tick calls `build.tick(t_ns, {role: payload})` with those payloads and writes each returned
+    command to its role's writer at that time, so the device reads it before the next dynamics step.
+    The first tick is one period after the reset; the call Basilisk makes at the reset time ticks
+    nothing. A tick commanding any role with no writer fails before any of its commands is written.
+    A command its writer rejects, such as a payload of another message, fails the tick with the
+    writer's own error; which of the tick's other commands were written is not said, since the run
+    has failed. A reader subscribed to no message fails the reset before `boot`, and one whose
+    message is unwritten at the first tick fails that tick before `tick`. An exception from `boot`
+    or `tick`, from a write, or from either check, is kept whole in `failure` and re-raised, and
+    `Scenario.run` raises that same exception in place of Basilisk's director error.
 
     Attributes:
         failure: The exception `boot`, a tick, a write or a reader check raised, kept whole, else
@@ -74,6 +75,7 @@ class FswHost(sysModel.SysModel):
         self._build = build
         self._readers = vehicle.readers()
         self._writers = vehicle.writers()
+        self._payloads: Mapping[str, Any] = MappingProxyType({})
         self._t_ns = 0
         self._inputs_written = False
         self.failure = None
@@ -84,7 +86,9 @@ class FswHost(sysModel.SysModel):
         return self._build.period_s
 
     def Reset(self, CurrentSimNanos: int) -> None:
-        """Check every reader is subscribed, boot the build; take the reset time as the last tick.
+        """Check every reader is subscribed, take its payload and boot the build.
+
+        The reset time is taken as the last tick.
 
         Args:
             CurrentSimNanos: The reset time, in nanoseconds, as Basilisk passes it.
@@ -99,6 +103,7 @@ class FswHost(sysModel.SysModel):
             unlinked = sorted(role for role, reader in self._readers.items() if not reader.isLinked())
             if unlinked:
                 raise RuntimeError(f"roles {unlinked} are not subscribed to any message")
+            self._payloads = MappingProxyType({role: reader() for role, reader in self._readers.items()})
             self._build.boot()
         except BaseException as error:
             self.failure = error
@@ -127,8 +132,7 @@ class FswHost(sysModel.SysModel):
                     t = CurrentSimNanos / 1e9
                     raise RuntimeError(f"roles {unwritten} have not been written at t = {t} s")
                 self._inputs_written = True
-            messages = {role: reader() for role, reader in self._readers.items()}
-            commands = self._build.tick(CurrentSimNanos, messages)
+            commands = self._build.tick(CurrentSimNanos, self._payloads)
             unwritable = sorted(set(commands) - set(self._writers))
             if unwritable:
                 raise ValueError(
