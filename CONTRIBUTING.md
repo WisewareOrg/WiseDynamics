@@ -35,11 +35,12 @@ Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `u
 ## Measuring a case's cost
 
 `uv run python -m benchmarks.case_budget` times a warm Leo500 case layer by layer, from dynamics alone
-to the run file, each layer flown through `Scenario.run`; `--allocations` adds each layer's native
+to the run file, every layer that runs a simulation flown through `Scenario.run`; `--allocations` adds each layer's native
 allocations per tick and the functions that make them, counted with memray. It is run by hand, never in
 CI, since wall time on a shared runner says nothing.
 
 `tests/allocations.py` counts the native allocations per tick that a named code path makes, as the slope
 between two flights. `assert_no_native_allocations_per_tick` holds a path to none; memray cannot see a
 path that ran without allocating, so the flight it is given returns how many times the path ran, and
-the hold fails when that is 0.
+the hold fails when that is 0. `within` is a substring of a frame's name, so it names the path by a
+qualified name no other frame contains, and `native_allocations` shows the name resolves.

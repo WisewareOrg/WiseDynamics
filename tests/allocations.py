@@ -8,13 +8,15 @@ import memray
 
 __all__ = [
     "assert_no_native_allocations_per_tick",
+    "native_allocations",
     "native_allocations_by_function",
     "native_allocations_per_tick",
 ]
 
 _RELEASES = {memray.AllocatorType.FREE, memray.AllocatorType.MUNMAP, memray.AllocatorType.PYMALLOC_FREE}
-_PLUMBING = ("malloc", "calloc", "realloc", "memalign", "mmap", "operator new", "std::", "__gnu_cxx", "Eigen::")
-"""Substrings of the frames that only carry an allocation to the allocator, which never own one."""
+_PLUMBING = ("operator new", "std::", "__gnu_cxx::", "Eigen::", "<unknown>")
+"""Prefixes of the frames that never own an allocation: the allocator's own, the standard library's,
+Eigen's, and the frames memray cannot name, so an allocation is charged to the nearest named caller."""
 
 
 def _name(function: str) -> str:
@@ -73,6 +75,24 @@ def _count(stacks: list[tuple[list[str], int]], within: str, excluding: tuple[st
     )
 
 
+def native_allocations(fly: Callable[[int], object], *, within: str, ticks: int, directory: Path) -> int:
+    """All the native allocations one flight makes under a named frame, set-up included.
+
+    A path holding no allocation per tick may still allocate once, as it sets up; a count above 0
+    shows memray resolves the path's frame, which a stripped library would hide.
+
+    Args:
+        fly: Builds and runs a fresh simulation for the given number of ticks.
+        within: A substring of the native function name that names the path.
+        ticks: The number of ticks to fly.
+        directory: Where the memray capture file is written and removed.
+
+    Returns:
+        The number of allocations.
+    """
+    return _count(_stacks(fly, ticks, directory / "flight.bin"), within, ())
+
+
 def native_allocations_per_tick(
     fly: Callable[[int], object],
     *,
@@ -118,7 +138,11 @@ def assert_no_native_allocations_per_tick(
     """Fail unless a code path ran and made no native allocation per tick.
 
     memray sees only allocations, so a path that ran without allocating looks like one that never
-    ran; `fly` therefore returns how many times the path ran, which the caller counts.
+    ran; `fly` therefore returns how many times the path ran, which the caller counts. That count shows
+    the path ran, not that `within` names it: `within` is a substring, so it is a qualified name
+    (`Class::method`) that no other frame contains, and a path that allocates as it sets up is shown
+    to be named by `native_allocations` counting more than 0 under it. Each flight is preceded by an
+    untracked warm-up, whose count must not be 0 either.
 
     Args:
         fly: Builds and runs a fresh simulation for the given number of ticks, and returns how many
@@ -154,8 +178,9 @@ def native_allocations_by_function(fly: Callable[[int], object], *, ticks: int, 
     """Every native allocation per tick, by the function that made it.
 
     An allocation belongs to the innermost frame of its stack that is not allocator plumbing
-    (`malloc`, `operator new`, the standard library, Eigen), so an Eigen temporary is charged to the
-    function that built it. The slope is taken as `native_allocations_per_tick` takes it.
+    (`operator new`, the standard library, Eigen) and that memray can name, so an Eigen temporary is
+    charged to the function that built it, and an allocation in an unnamed lambda to the function
+    that called it. The slope is taken as `native_allocations_per_tick` takes it.
 
     Args:
         fly: Builds and runs a fresh simulation for the given number of ticks.
@@ -177,7 +202,7 @@ def native_allocations_by_function(fly: Callable[[int], object], *, ticks: int, 
         """
         owned: Counter[str] = Counter()
         for functions, count in stacks:
-            owner = next((f for f in functions if not any(p in f for p in _PLUMBING)), "<unknown>")
+            owner = next((f for f in functions if not f.startswith(_PLUMBING)), "<unknown>")
             owned[owner] += count
         return owned
 
