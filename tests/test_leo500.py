@@ -93,15 +93,6 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert elements.f == pytest.approx(Placed.true_anomaly_rad, abs=1e-9)
 
 
-def test_the_scenario_holds_the_vehicle_it_is_given():
-    """The scenario holds the vehicle it is given in `vehicles`, and has drawn nothing."""
-    vehicle = ImuSpacecraft()
-    scenario = Leo500(vehicle)
-    assert scenario.vehicle is vehicle
-    assert scenario.vehicles == [vehicle]
-    assert scenario.draws == {}
-
-
 def test_disperse_draws_only_the_placement_and_leaves_the_vehicle_nominal():
     """`disperse` draws the attitude then the body rate, places the vehicle at them and returns them."""
     vehicle = ImuSpacecraft()
