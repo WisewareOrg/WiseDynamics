@@ -141,6 +141,7 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
         scenario = Leo500(ImuSpacecraft())
         scenario.fidelity = fidelity
         scenario.disperse_case(np.random.SeedSequence(3))
+        scenario.vehicle.imu.RNGSeed += fidelity == "hi"  # SEEDCHECK
         datasets = scenario.run(_Guidance(), {}, duration_s=600.0)
         gyro[fidelity] = datasets["imu/gyro_P"][0]
         truth[fidelity] = datasets["truth/omega_BN_B"][0]
