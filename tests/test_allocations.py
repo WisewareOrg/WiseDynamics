@@ -4,6 +4,7 @@ The IMU path they are tested on allocates twice a tick in Basilisk's `Saturate::
 else, as of the bsk this repository locks; a bsk that changes that changes these counts.
 """
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from Basilisk.fswAlgorithms import inertial3D
 
 from tests.allocations import (
     assert_no_native_allocations_per_tick,
+    native_allocations,
     native_allocations_by_function,
     native_allocations_per_tick,
 )
@@ -104,3 +106,13 @@ def test_each_allocation_is_charged_to_the_function_that_made_it(tmp_path: Path)
         tmp_path: The test's own temporary directory.
     """
     assert native_allocations_by_function(_fly, ticks=50, directory=tmp_path)["Saturate::saturate"] == 2.0
+
+
+def test_a_capture_leaves_this_processs_allocator_as_it_was(tmp_path: Path):
+    """Decimal arithmetic, which reallocates memory the interpreter allocated before, works after a capture.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
+    assert native_allocations(_fly, within="ImuSensor::UpdateState", ticks=5, directory=tmp_path) > 0
+    assert Decimal.from_float(1e-9) != Decimal(repr(1e-9))

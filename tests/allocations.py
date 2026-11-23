@@ -1,5 +1,10 @@
 """Count the native allocations a named code path makes per simulation tick, with memray."""
 
+import json
+import os
+import re
+import traceback
+import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -20,7 +25,10 @@ Eigen's, and the frames memray cannot name, so an allocation is charged to the n
 
 
 def _name(function: str) -> str:
-    """A native frame's function name without its parameter list or anonymous namespace.
+    """A native frame's function name without its parameter list, anonymous namespace or build suffixes.
+
+    The suffixes a compiler or linker adds to a symbol (`.llvm.<hash>`, `.cold`, `@GLIBC_<version>`) differ
+    between builds of one library, so they are dropped.
 
     Args:
         function: The frame's function, as memray resolves it.
@@ -28,10 +36,56 @@ def _name(function: str) -> str:
     Returns:
         The name.
     """
-    return function.replace("(anonymous namespace)::", "").split("(")[0]
+    name = function.replace("(anonymous namespace)::", "").split("(")[0]
+    return re.sub(r"(\.(llvm\.\d+|cold|isra\.\d+|constprop\.\d+|part\.\d+))+$|@@?GLIBC_[\d.]+$", "", name)
 
 
-def _stacks(fly: Callable[[int], object], ticks: int, file: Path) -> list[tuple[list[str], int]]:
+def _tracked(fly: Callable[[int], object], ticks: int, file: Path) -> object:
+    """Fly `ticks` ticks under memray in a child process of this one, which writes the capture.
+
+    memray does not restore the allocator of a statically linked CPython, such as uv's, once it stops
+    tracking: memory the interpreter allocated before is then freed with another allocator, which
+    corrupts the heap (`Decimal` arithmetic aborts on it, for one). A forked child carries the
+    tracking and exits, so this process is never tracked.
+
+    Args:
+        fly: Builds and runs a fresh simulation for the given number of ticks.
+        ticks: The number of ticks to fly.
+        file: The memray capture file the child writes, which must not exist.
+
+    Returns:
+        What `fly` returned, which must be JSON.
+
+    Raises:
+        RuntimeError: The flight raised in the child, whose traceback it printed.
+    """
+    read, write = os.pipe()
+    with warnings.catch_warnings():
+        # The child only flies and exits, so threads of this process it does not inherit are harmless.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        os.close(read)
+        status = 1
+        try:
+            with memray.Tracker(file, native_traces=True, trace_python_allocators=False):
+                result = fly(ticks)
+            os.write(write, json.dumps(result).encode())
+            status = 0
+        except BaseException:
+            traceback.print_exc()
+        finally:
+            os._exit(status)
+    os.close(write)
+    with os.fdopen(read, "rb") as pipe:
+        payload = pipe.read()
+    _, status = os.waitpid(pid, 0)
+    if os.waitstatus_to_exitcode(status) != 0:
+        raise RuntimeError(f"the tracked flight of {ticks} ticks raised in its child process")
+    return json.loads(payload)
+
+
+def _stacks(fly: Callable[[int], object], ticks: int, file: Path) -> tuple[list[tuple[list[str], int]], object]:
     """Fly `ticks` ticks under memray and give each native allocation's stack, innermost frame first.
 
     One untracked flight of `ticks` ticks goes first, so imports and lazy set-up land outside the
@@ -43,18 +97,18 @@ def _stacks(fly: Callable[[int], object], ticks: int, file: Path) -> list[tuple[
         file: The memray capture file to write and remove, which must not exist.
 
     Returns:
-        One `(function names, allocation count)` per allocation record.
+        One `(function names, allocation count)` per allocation record, and what the tracked flight's
+        `fly` returned.
     """
     fly(ticks)
-    with memray.Tracker(file, native_traces=True, trace_python_allocators=False):
-        fly(ticks)
+    result = _tracked(fly, ticks, file)
     stacks = [
         ([_name(function) for function, _, _ in record.native_stack_trace()], record.n_allocations)
         for record in memray.FileReader(file).get_allocation_records()
         if memray.AllocatorType(record.allocator) not in _RELEASES
     ]
     file.unlink()
-    return stacks
+    return stacks, result
 
 
 def _count(stacks: list[tuple[list[str], int]], within: str, excluding: tuple[str, ...]) -> int:
@@ -90,7 +144,7 @@ def native_allocations(fly: Callable[[int], object], *, within: str, ticks: int,
     Returns:
         The number of allocations.
     """
-    return _count(_stacks(fly, ticks, directory / "flight.bin"), within, ())
+    return _count(_stacks(fly, ticks, directory / "flight.bin")[0], within, ())
 
 
 def native_allocations_per_tick(
@@ -121,10 +175,27 @@ def native_allocations_per_tick(
     Returns:
         The allocations per tick.
     """
-    excluded = tuple(excluding)
-    short = _count(_stacks(fly, ticks, directory / "short.bin"), within, excluded)
-    long = _count(_stacks(fly, 2 * ticks, directory / "long.bin"), within, excluded)
-    return (long - short) / ticks
+    return _per_tick(fly, within, tuple(excluding), ticks, directory)[0]
+
+
+def _per_tick(
+    fly: Callable[[int], object], within: str, excluding: tuple[str, ...], ticks: int, directory: Path
+) -> tuple[float, list[object]]:
+    """The allocations per tick under `within` and outside `excluding`, and what each tracked flight returned.
+
+    Args:
+        fly: Builds and runs a fresh simulation for the given number of ticks.
+        within: A substring of the native function name that names the path.
+        excluding: Substrings of native function names the path calls but does not own.
+        ticks: The number of ticks of the shorter flight.
+        directory: Where the memray capture files are written and removed.
+
+    Returns:
+        The allocations per tick, and the shorter and the longer tracked flight's `fly` results.
+    """
+    short, short_result = _stacks(fly, ticks, directory / "short.bin")
+    long, long_result = _stacks(fly, 2 * ticks, directory / "long.bin")
+    return (_count(long, within, excluding) - _count(short, within, excluding)) / ticks, [short_result, long_result]
 
 
 def assert_no_native_allocations_per_tick(
@@ -138,15 +209,15 @@ def assert_no_native_allocations_per_tick(
     """Fail unless a code path ran and made no native allocation per tick.
 
     memray sees only allocations, so a path that ran without allocating looks like one that never
-    ran; `fly` therefore returns how many times the path ran, which the caller counts. That count shows
-    the path ran, not that `within` names it: `within` is a substring, so it is a qualified name
-    (`Class::method`) that no other frame contains, and a path that allocates as it sets up is shown
-    to be named by `native_allocations` counting more than 0 under it. Each flight is preceded by an
-    untracked warm-up, whose count must not be 0 either.
+    ran; `fly` therefore returns how many times the path ran, which the caller counts, and each
+    tracked flight's count must be above 0. That count shows the path ran, not that `within` names it:
+    `within` is a substring, so it is a qualified name (`Class::method`) that no other frame contains,
+    and a path that allocates as it sets up is shown to be named by `native_allocations` counting more
+    than 0 under it.
 
     Args:
         fly: Builds and runs a fresh simulation for the given number of ticks, and returns how many
-            times the path ran.
+            times the path ran, as an int.
         within: A substring of the native function name that names the path.
         excluding: Substrings of native function names the path calls but does not own.
         ticks: The number of ticks of the shorter flight.
@@ -155,19 +226,7 @@ def assert_no_native_allocations_per_tick(
     Raises:
         AssertionError: A flight reported that the path never ran, or the path allocates per tick.
     """
-    runs: list[int] = []
-
-    def counted(n: int) -> None:
-        """Fly `n` ticks and keep how many times the path ran.
-
-        Args:
-            n: The number of ticks to fly.
-        """
-        runs.append(fly(n))
-
-    per_tick = native_allocations_per_tick(
-        counted, within=within, excluding=excluding, ticks=ticks, directory=directory
-    )
+    per_tick, runs = _per_tick(fly, within, tuple(excluding), ticks, directory)
     if not all(runs):
         raise AssertionError(f"the path {within!r} never ran in a flight: it ran {runs} times")
     if per_tick != 0.0:
@@ -206,7 +265,7 @@ def native_allocations_by_function(fly: Callable[[int], object], *, ticks: int, 
             owned[owner] += count
         return owned
 
-    short = owners(_stacks(fly, ticks, directory / "short.bin"))
-    long = owners(_stacks(fly, 2 * ticks, directory / "long.bin"))
+    short = owners(_stacks(fly, ticks, directory / "short.bin")[0])
+    long = owners(_stacks(fly, 2 * ticks, directory / "long.bin")[0])
     slopes = {function: (long[function] - short[function]) / ticks for function in long | short}
     return dict(sorted(((f, s) for f, s in slopes.items() if s), key=lambda item: -item[1]))
