@@ -340,7 +340,7 @@ class _StoppingThenRaising(_Stopping):
 
 
 def test_a_scenario_keeps_no_ground_once_its_run_returns():
-    """With the scenario alive, a ground holding `stop_ground` is freed when `run` returns."""
+    """With the scenario alive, a ground that holds the scenario is freed when `run` returns."""
     order: list[tuple[int, str]] = []
     scenario = Leo500(ImuSpacecraft())
     ground = _Stopping(order, scenario, at_ns=1_000_000_000)
@@ -353,7 +353,7 @@ def test_a_scenario_keeps_no_ground_once_its_run_returns():
 
 
 def test_a_scenario_keeps_no_ground_once_its_run_raises():
-    """With the scenario alive, a ground holding `stop_ground` is freed when `run` raises."""
+    """With the scenario alive, a ground that holds the scenario is freed when `run` raises."""
     order: list[tuple[int, str]] = []
     scenario = Leo500(ImuSpacecraft())
     ground = _StoppingThenRaising(order, scenario, at_ns=1_000_000_000)
