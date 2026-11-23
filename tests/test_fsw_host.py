@@ -115,8 +115,8 @@ def test_the_vehicle_s_readings_reach_the_build_by_role_as_sampled_at_the_tick()
         assert reading == gyro_P[row].tolist(), t_ns
 
 
-def test_every_tick_gets_each_role_s_payload_taken_at_reset_in_a_read_only_mapping():
-    """Each role's payload is the same object at every tick, and a tick cannot change the mapping."""
+def test_every_tick_gets_each_role_s_payload_taken_at_reset():
+    """Each role's payload is the same object at every tick."""
     scenario = Leo500(ImuSpacecraft())
     build = _Stub()
 
@@ -127,6 +127,15 @@ def test_every_tick_gets_each_role_s_payload_taken_at_reset_in_a_read_only_mappi
     for tick, payloads in enumerate(later, start=2):
         for role in first:
             assert payloads[role] is first[role], f"tick {tick} got a new {role} payload"
+
+
+def test_a_tick_cannot_change_the_mapping_of_payloads_it_is_given():
+    """The mapping every tick shares is read-only."""
+    scenario = Leo500(ImuSpacecraft())
+    build = _Stub()
+
+    scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=0.5)
+
     with pytest.raises(TypeError):
         build.mappings[0]["imu"] = None
 
