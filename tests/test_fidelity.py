@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from Basilisk.fswAlgorithms import inertial3D
 
+from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios import SCENARIOS
 
 ORBIT_S = 5700.0
@@ -37,7 +38,7 @@ def _truth_position(scenario: str, fidelity: str) -> np.ndarray:
     Returns:
         The `truth/r_N` dataset, in metres.
     """
-    built = SCENARIOS[scenario]()
+    built = SCENARIOS[scenario](ImuSpacecraft())
     built.fidelity = fidelity
     return built.run(_Guidance(), {}, duration_s=ORBIT_S)["truth/r_N"][0]
 

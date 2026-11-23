@@ -15,7 +15,7 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import SCENARIOS
+from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
@@ -56,8 +56,8 @@ CASE_5_NOISE_SEED = 2153058428
 CASE_5_DRAWS = {
     "q0_BN": [0.7341694811560888, 0.1623176545275744, 0.3508807591933471, -0.5581494824825755],
     "omega0_BN_B_rad_s": [0.012184953200484915, 0.01815985986877613, 0.014939997512415095],
-    "gyro_bias_P_rad_s": [8.079773541256839e-05, -0.00011052054402547108, -5.069458483787486e-05],
-    "accel_bias_P_m_s2": [0.00012226550330897274, 1.6712413497495933e-05, 9.917025892881453e-05],
+    "gyro_bias_P_rad_s": [-2.3925146757579707e-05, -0.0001404113887609669, 0.00015028731556911468],
+    "accel_bias_P_m_s2": [7.165629208920359e-05, -7.72674472960181e-05, 0.0001320369861415271],
 }
 
 
@@ -155,13 +155,9 @@ def _run_session(
     """
     session = _point(pytester, out)
     pytester.makepyfile(
-        test_scenario=_source(
-            _case_test((f"sim_runs({runs})", f"sim_duration_s({duration_s})", *marks))
-        )
+        test_scenario=_source(_case_test((f"sim_runs({runs})", f"sim_duration_s({duration_s})", *marks)))
     )
-    pytester.runpytest_subprocess(*FULL, "-o", f"sim_out={out}", *args).assert_outcomes(
-        passed=passed
-    )
+    pytester.runpytest_subprocess(*FULL, "-o", f"sim_out={out}", *args).assert_outcomes(passed=passed)
     return _read_runs(session / "test_scenario" / "test_case")
 
 
@@ -175,9 +171,7 @@ def _draws_of(run: dict) -> dict[str, np.ndarray]:
         Draw name, without its `draw_` prefix, to its value.
     """
     return {
-        key.removeprefix("draw_"): np.asarray(value)
-        for key, value in run["attrs"].items()
-        if key.startswith("draw_")
+        key.removeprefix("draw_"): np.asarray(value) for key, value in run["attrs"].items() if key.startswith("draw_")
     }
 
 
@@ -185,21 +179,21 @@ _DRAWS = ("q0_BN", "omega0_BN_B_rad_s", "gyro_bias_P_rad_s", "accel_bias_P_m_s2"
 """The names of Leo500's draws, in draw order, as its docstring states."""
 
 
-def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Derive case `index`'s two streams, as the README states.
+def _case_seed(seed: int, index: int) -> np.random.SeedSequence:
+    """Derive case `index`'s seed, as the README states.
 
     Args:
         seed: The session seed.
         index: The case number.
 
     Returns:
-        The draw stream, then the noise stream.
+        The case's seed, which `disperse_case` spawns its streams from.
     """
-    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+    return np.random.SeedSequence(seed, spawn_key=(index,))
 
 
 def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """Derive the standard draws of case `index`: `Leo500`'s dispersion from its draw stream.
+    """Derive the standard draws of case `index`: `Leo500`'s and its vehicle's dispersion from the case's seed.
 
     Args:
         seed: The session seed.
@@ -208,9 +202,8 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     Returns:
         Draw name to its value, in draw order.
     """
-    draws_stream, _ = _case_streams(seed, index)
-    scenario = Leo500()
-    scenario.disperse(np.random.default_rng(draws_stream), noise_seed=0)
+    scenario = Leo500(ImuSpacecraft())
+    scenario.disperse_case(_case_seed(seed, index))
     return scenario.draws
 
 
@@ -232,12 +225,8 @@ def test_a_case_is_the_same_whatever_the_run_count(pytester: pytest.Pytester):
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    (small,) = _run_session(
-        pytester, "test_scenario.py::test_case[5]", runs=8, passed=1, out="small"
-    )
-    (large,) = _run_session(
-        pytester, "test_scenario.py::test_case[5]", runs=852, passed=1, out="large"
-    )
+    (small,) = _run_session(pytester, "test_scenario.py::test_case[5]", runs=8, passed=1, out="small")
+    (large,) = _run_session(pytester, "test_scenario.py::test_case[5]", runs=852, passed=1, out="large")
     assert small["attrs"]["probe_noise_seed"] == large["attrs"]["probe_noise_seed"]
     for name, value in _draws_of(small).items():
         assert np.array_equal(value, _draws_of(large)[name])
@@ -349,9 +338,7 @@ def _default_session(pytester: pytest.Pytester, *args: str, runs: int = 2) -> py
         The session's result, which must have passed every case.
     """
     _point(pytester)
-    pytester.makepyfile(
-        test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)")))
-    )
+    pytester.makepyfile(test_scenario=_source(_case_test((f"sim_runs({runs})", "sim_duration_s(3)"))))
     result = pytester.runpytest_subprocess(*FULL, *args)
     result.assert_outcomes(passed=runs)
     return result
@@ -543,9 +530,7 @@ def test_workers_write_to_the_relative_out_dir_resolved_against_rootdir(
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
     pytester.runpytest_subprocess(*FULL, "-o", "sim_out=out", "-n", "2").assert_outcomes(passed=2)
 
-    in_out_dir = sorted(
-        (pytester.path / "out" / SESSION / "test_scenario" / "test_case").glob("run_*.h5")
-    )
+    in_out_dir = sorted((pytester.path / "out" / SESSION / "test_scenario" / "test_case").glob("run_*.h5"))
     assert len(in_out_dir) == 2
     assert sorted(pytester.path.rglob("run_*.h5")) == in_out_dir
 
@@ -597,9 +582,7 @@ def test_two_campaigns_in_one_session_each_run_in_their_own_directory(
     assert [run["name"] for run in _read_runs(dir_a)] == [f"run_000{i}.h5" for i in range(3)]
     assert [run["name"] for run in _read_runs(dir_b)] == [f"run_000{i}.h5" for i in range(2)]
     assert len(list(pytester.path.rglob("run_*.h5"))) == 5
-    result.stdout.fnmatch_lines(
-        [f"wise-dynamics: 3 run files in {dir_a}", f"wise-dynamics: 2 run files in {dir_b}"]
-    )
+    result.stdout.fnmatch_lines([f"wise-dynamics: 3 run files in {dir_a}", f"wise-dynamics: 2 run files in {dir_b}"])
 
 
 def test_each_session_holds_its_own_run_files(pytester: pytest.Pytester):
@@ -615,9 +598,7 @@ def test_each_session_holds_its_own_run_files(pytester: pytest.Pytester):
     pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
     for session in (first, second):
-        assert [run["name"] for run in _read_runs(session / "test_scenario" / "test_case")] == [
-            "run_0000.h5"
-        ]
+        assert [run["name"] for run in _read_runs(session / "test_scenario" / "test_case")] == ["run_0000.h5"]
 
 
 def test_test_files_outside_the_rootdir_are_named_by_their_stem(
@@ -758,9 +739,7 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         The session's result, which must have collected nothing.
     """
     _point(pytester)
-    pytester.makepyfile(
-        f"import pytest\n\n\n@pytest.mark.{mark}\ndef test_case(sim_case_index):\n    pass\n"
-    )
+    pytester.makepyfile(f"import pytest\n\n\n@pytest.mark.{mark}\ndef test_case(sim_case_index):\n    pass\n")
     result = pytester.runpytest_subprocess("-p", "no:xdist", *args)
     assert result.ret == pytest.ExitCode.INTERRUPTED
     result.assert_outcomes(errors=1)
@@ -783,9 +762,7 @@ def _bad_mark_session(pytester: pytest.Pytester, mark: str, *args: str) -> pytes
         ("sim_vehicle(1, 2)", "sim_vehicle"),
     ],
 )
-def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(
-    pytester: pytest.Pytester, mark: str, name: str
-):
+def test_a_bad_mark_fails_collection_naming_the_test_and_the_mark(pytester: pytest.Pytester, mark: str, name: str):
     """A bad mark fails collection, naming the test's node id and the mark.
 
     Args:
@@ -826,7 +803,7 @@ MARKdef test_case(sim_case_index, sim_scenario):
 def test_the_sim_vehicle_mark_chooses_the_vehicle_class_a_scenario_flies(
     pytester: pytest.Pytester, scenario: str, mark: str, expected: str
 ):
-    """A marked vehicle is the class the scenario flies; no mark keeps the scenario's own.
+    """A marked vehicle is the class the scenario flies; no mark flies the plugin's default, `imu_spacecraft`.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -835,11 +812,7 @@ def test_the_sim_vehicle_mark_chooses_the_vehicle_class_a_scenario_flies(
         expected: The vehicle class the case must hold, exactly.
     """
     _point(pytester)
-    source = (
-        VEHICLE_PROBE.replace("SCENARIO", repr(scenario))
-        .replace("MARK", mark)
-        .replace("EXPECTED", expected)
-    )
+    source = VEHICLE_PROBE.replace("SCENARIO", repr(scenario)).replace("MARK", mark).replace("EXPECTED", expected)
     pytester.makepyfile(source)
     pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
@@ -896,15 +869,10 @@ def test_a_bare_run_caps_every_tests_case_count_at_two_and_the_flag_lifts_it(
             pass
         """
     )
-    result = pytester.runpytest_subprocess(
-        "-p", "no:xdist", "--collect-only", "-q", *["--full-monte-carlo"] * full
-    )
+    result = pytester.runpytest_subprocess("-p", "no:xdist", "--collect-only", "-q", *["--full-monte-carlo"] * full)
     assert result.ret == pytest.ExitCode.OK
     for name, count in expected.items():
-        assert (
-            len([line for line in result.outlines if line.startswith(f"test_cap.py::{name}[")])
-            == count
-        )
+        assert len([line for line in result.outlines if line.startswith(f"test_cap.py::{name}[")]) == count
 
 
 def test_a_capped_run_leaves_fidelity_and_duration_to_the_marks(pytester: pytest.Pytester):
@@ -953,9 +921,7 @@ def test_each_removed_option_is_unknown(pytester: pytest.Pytester):
         "--ci": "",
     }
     pytester.makepyfile("def test_case(sim_case_index):\n    pass\n")
-    result = pytester.runpytest_subprocess(
-        *(arg for item in options.items() for arg in item if arg)
-    )
+    result = pytester.runpytest_subprocess(*(arg for item in options.items() for arg in item if arg))
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     unrecognized = [line for line in result.stderr.lines if "unrecognized arguments:" in line]
     assert len(unrecognized) == 1
@@ -996,9 +962,7 @@ def _strict_session(pytester: pytest.Pytester, marks: list[str]) -> pytest.RunRe
     """
     decorators = "".join(f"@pytest.mark.{mark}\n" for mark in marks)
     _point(pytester)
-    pytester.makepyfile(
-        f"import pytest\n\n\n{decorators}def test_case(sim_case_index):\n    pass\n"
-    )
+    pytester.makepyfile(f"import pytest\n\n\n{decorators}def test_case(sim_case_index):\n    pass\n")
     return pytester.runpytest_subprocess("-p", "no:xdist", "--strict-markers")
 
 
@@ -1015,9 +979,7 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     """
     session = _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(2)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*FULL, *XDIST, "test_scenario.py::test_case[0]").assert_outcomes(
-        passed=1
-    )
+    pytester.runpytest_subprocess(*FULL, *XDIST, "test_scenario.py::test_case[0]").assert_outcomes(passed=1)
     directory = session / "test_scenario" / "test_case"
     assert sorted(path.name for path in directory.iterdir()) == ["planned.json", "run_0000.h5"]
     assert json.loads((directory / "planned.json").read_text()) == {
@@ -1026,9 +988,7 @@ def test_a_rerun_of_other_cases_keeps_the_planned_count_and_the_other_files(
     }
     before = (directory / "run_0000.h5").stat().st_mtime_ns
 
-    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(
-        passed=1
-    )
+    pytester.runpytest_subprocess(*FULL, *SERIAL, "test_scenario.py::test_case[1]").assert_outcomes(passed=1)
 
     assert sorted(path.name for path in directory.iterdir()) == [
         "planned.json",
@@ -1054,9 +1014,7 @@ def test_a_collect_only_pytest_run_creates_nothing(pytester: pytest.Pytester):
     result = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
     assert result.ret == pytest.ExitCode.OK
     assert not session.exists()
-    assert list((pytester.path / "monte_carlo").iterdir()) == [
-        pytester.path / "monte_carlo" / "SESSION"
-    ]
+    assert list((pytester.path / "monte_carlo").iterdir()) == [pytester.path / "monte_carlo" / "SESSION"]
 
 
 def _git(directory: Path, *args: str) -> str:
@@ -1099,9 +1057,7 @@ def _make_repository(directory: Path, dirty: bool = False) -> str:
     return _git(directory, "rev-parse", "HEAD")
 
 
-def _provenance_session(
-    pytester: pytest.Pytester, direct_url: dict | None, *args: str
-) -> pytest.RunResult:
+def _provenance_session(pytester: pytest.Pytester, direct_url: dict | None, *args: str) -> pytest.RunResult:
     """Run the one-case scenario with the install's `direct_url.json` replaced by `direct_url`.
 
     The plugin's `distribution` lookup returns a stand-in whose `read_text("direct_url.json")` is
@@ -1140,10 +1096,7 @@ def _provenance_attrs(pytester: pytest.Pytester) -> dict:
     """
     prefix = "versions_wise_dynamics_"
     (run,) = _read_runs(pytester.path / "monte_carlo" / SESSION / "test_scenario" / "test_case")
-    return {
-        key: run["attrs"][prefix + key]
-        for key in ("install", "commit", "requested_revision", "dirty")
-    }
+    return {key: run["attrs"][prefix + key] for key in ("install", "commit", "requested_revision", "dirty")}
 
 
 def test_a_pinned_install_records_its_commit_as_pinned(pytester: pytest.Pytester):
@@ -1370,9 +1323,7 @@ def test_sim_session_accepts_a_valid_name(pytester: pytest.Pytester, name: str):
 
 
 @pytest.mark.parametrize("name", ["..", ".", "-x", ".hidden", "SESSION", "a/b", "_a"])
-def test_sim_session_refuses_an_invalid_name_and_leaves_the_pointer(
-    pytester: pytest.Pytester, name: str
-):
+def test_sim_session_refuses_an_invalid_name_and_leaves_the_pointer(pytester: pytest.Pytester, name: str):
     """An invalid name exits non-zero, not as an unknown option; the pointer is left as it was.
 
     Args:
@@ -1454,9 +1405,7 @@ def test_sim_session_under_xdist_addopts_starts_no_workers(pytester: pytest.Pyte
 
 
 @pytest.mark.parametrize("blocker", ["broken-pointer", "undescribable-install"])
-def test_sim_session_is_not_blocked_by_a_broken_pointer_or_install(
-    pytester: pytest.Pytester, blocker: str
-):
+def test_sim_session_is_not_blocked_by_a_broken_pointer_or_install(pytester: pytest.Pytester, blocker: str):
     """The option needs neither a readable pointer nor a describable install.
 
     Args:
@@ -1513,6 +1462,84 @@ def test_with_no_pointer_each_monte_carlo_test_errors_and_other_tests_run(
     assert not (pytester.path / "monte_carlo").exists()
 
 
+@pytest.mark.parametrize("xdist", [("-p", "no:xdist"), ("-n", "2")], ids=["serial", "xdist"])
+def test_with_no_pointer_the_run_exits_one_and_stops_on_no_usage_error(
+    pytester: pytest.Pytester, xdist: tuple[str, ...]
+):
+    """With no active session the run exits 1 (tests failed), not 4 (usage error), on every path.
+
+    The errors come from worker configuration, collection and `pytest_collection_finish`
+    degrading to the `no-session` case, not from any of them stopping the run.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+        xdist: The arguments that run the session with pytest-xdist or without it.
+    """
+    pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
+
+    result = pytester.runpytest_subprocess(*FULL, *xdist)
+
+    result.assert_outcomes(passed=1, errors=2)
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    assert "UsageError" not in result.stdout.str() + result.stderr.str()
+    assert not (pytester.path / "monte_carlo").exists()
+
+
+def test_with_no_pointer_collect_only_exits_zero(pytester: pytest.Pytester):
+    """With no active session `--collect-only` exits 0: collection alone raises no error.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    pytester.makepyfile(test_mixed=PLAIN_AND_MONTE_CARLO)
+
+    collected = pytester.runpytest_subprocess(*FULL, *SERIAL, "--collect-only", "-q")
+
+    assert collected.ret == pytest.ExitCode.OK
+
+
+CUSTOM_ITEM_CONFTEST = """
+import pytest
+
+
+class Check(pytest.Item):
+    def runtest(self):
+        pass
+
+
+class CheckFile(pytest.File):
+    def collect(self):
+        yield Check.from_parent(self, name="check")
+
+
+def pytest_collect_file(parent, file_path):
+    if file_path.suffix == ".check":
+        return CheckFile.from_parent(parent, path=file_path)
+"""
+
+
+def test_a_non_function_item_does_not_stop_collection_finish(pytester: pytest.Pytester):
+    """A plain `pytest.Item`, which has no `fixturenames`, collects alongside a Monte Carlo test.
+
+    The custom item passes, the Monte Carlo test still gets its `planned.json`, and the run exits 0.
+
+    Args:
+        pytester: pytest's own fixture for running a test session in a subprocess.
+    """
+    session = _point(pytester)
+    pytester.makeconftest(CUSTOM_ITEM_CONFTEST)
+    pytester.makefile(".check", example="")
+    pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
+
+    result = pytester.runpytest_subprocess(*FULL, *SERIAL)
+
+    assert "AttributeError" not in result.stdout.str() + result.stderr.str()
+    result.assert_outcomes(passed=2)
+    assert result.ret == pytest.ExitCode.OK
+    planned = session / "test_scenario" / "test_case" / "planned.json"
+    assert json.loads(planned.read_text()) == {"runs": 1, "nodeid": "test_scenario.py::test_case"}
+
+
 def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pytester):
     """Workers use the session the controller handed them, whatever the pointer says later.
 
@@ -1550,9 +1577,7 @@ def test_a_session_switch_after_start_does_not_split_a_run(pytester: pytest.Pyte
 
     assert pointer.read_text() == "other\n"
     directory = session / "test_switch" / "test_case"
-    assert [path.name for path in sorted(directory.glob("run_*.h5"))] == [
-        f"run_000{i}.h5" for i in range(6)
-    ]
+    assert [path.name for path in sorted(directory.glob("run_*.h5"))] == [f"run_000{i}.h5" for i in range(6)]
     assert not (pytester.path / "monte_carlo" / "other").exists()
 
 
@@ -1587,9 +1612,7 @@ def _caller_attrs(pytester: pytest.Pytester, repository: bool, dirty: bool = Fal
 
 
 @pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])
-def test_the_run_file_records_the_rootdir_repositorys_commit_and_dirt(
-    pytester: pytest.Pytester, dirty: bool
-):
+def test_the_run_file_records_the_rootdir_repositorys_commit_and_dirt(pytester: pytest.Pytester, dirty: bool):
     """The caller's repository HEAD and whether it has changes sit beside the install's.
 
     Args:

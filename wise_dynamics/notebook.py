@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+import types
 from pathlib import Path
 from typing import Any
 
@@ -74,16 +74,11 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
             if _is_campaign(each)
         }
         if "\n".join(map(str.rstrip, cell.splitlines())).strip("\n") not in saved:
-            raise RuntimeError(
-                "This cell has unsaved changes. Save the notebook and run the cell again."
-            )
+            raise RuntimeError("This cell has unsaved changes. Save the notebook and run the cell again.")
         tests = [
             node.name
             for node in ast.parse(ipython.input_transformer_manager.transform_cell(cell)).body
-            if (
-                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-                and node.name.startswith("test")
-            )
+            if (isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith("test"))
             or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
         ]
         if notebook.suffix == ".ipynb":
@@ -93,10 +88,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
         tests += [
             name
             for name, value in ipython.user_ns.items()
-            if (
-                (name.startswith("test") and callable(value))
-                or (name.startswith("Test") and isinstance(value, type))
-            )
+            if ((name.startswith("test") and callable(value)) or (name.startswith("Test") and isinstance(value, type)))
             and before.get(name) is not value
             and name not in tests
         ]
@@ -122,9 +114,7 @@ def load_ipython_extension(ipython: InteractiveShell) -> None:
     ipython.register_magic_function(monte_carlo, "cell", "monte_carlo")
 
 
-def load_runs(
-    test: str | Callable[..., object], notebook: str | os.PathLike[str] | None = None
-) -> list[dict[str, Any]]:
+def load_runs(test: str | types.FunctionType, notebook: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Read back the run files of a notebook test in the session its runs land in, finished or not.
 
     It prints one line, `<session>: <found> of <planned> cases`, followed by `, crashed: <cases>`
@@ -159,9 +149,7 @@ def load_runs(
             text=True,
         )
         if collected.returncode or not report.exists():
-            raise RuntimeError(
-                f"{py}::{node} does not collect:\n{collected.stdout}{collected.stderr}"
-            )
+            raise RuntimeError(f"{py}::{node} does not collect:\n{collected.stdout}{collected.stderr}")
         handshake = json.loads(report.read_text())
     if handshake["session"] is None:
         raise RuntimeError(sessions.NO_SESSION)
@@ -175,9 +163,7 @@ def load_runs(
     if not (directory / sessions.PLANNED).is_file():
         raise FileNotFoundError(f"no Monte Carlo results in {directory}")
     results = sessions.read_test_results(directory)
-    crashed = (
-        f", crashed: {', '.join(map(str, sorted(results.crashes)))}" if results.crashes else ""
-    )
+    crashed = f", crashed: {', '.join(map(str, sorted(results.crashes)))}" if results.crashes else ""
     print(f"{handshake['session']}: {len(results.runs)} of {results.planned} cases{crashed}")
     runs = []
     for case in sorted(results.runs):
@@ -226,7 +212,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         except NoSessionError:
             name = None
         directories = (
-            [] if name is None else sorted({str(_run_dir(item)) for item in session.items})
+            []
+            if name is None
+            else sorted({str(_run_dir(item)) for item in session.items if isinstance(item, pytest.Function)})
         )
         Path(report).write_text(json.dumps({"session": name, "directories": directories}))
 
@@ -319,8 +307,7 @@ def _notebook_path(line: str) -> Path:
     found = line.strip() or user_ns.get("__vsc_ipynb_file__") or os.environ.get("JPY_SESSION_NAME")
     if not found:
         raise RuntimeError(
-            "The notebook's path is unknown; pass it as an argument, such as "
-            "`%%monte_carlo path/to/notebook.ipynb`."
+            "The notebook's path is unknown; pass it as an argument, such as `%%monte_carlo path/to/notebook.ipynb`."
         )
     return Path(found)
 
@@ -361,11 +348,7 @@ def _mark_notebook_only(notebook: Path) -> None:
     """
     saved = jupytext.read(notebook)
     last = max(i for i, each in enumerate(saved.cells) if _is_campaign(each))
-    unmarked = [
-        each
-        for each in saved.cells[last + 1 :]
-        if each.cell_type == "code" and "active" not in each.metadata
-    ]
+    unmarked = [each for each in saved.cells[last + 1 :] if each.cell_type == "code" and "active" not in each.metadata]
     if not unmarked:
         return
     for each in unmarked:
@@ -395,7 +378,6 @@ def _notebook_py(notebook: Path) -> Path:
     pys = [line for line in out.getvalue().splitlines() if line.endswith(".py")]
     if not pys:
         raise RuntimeError(
-            f"{notebook} has no paired .py; pair it with "
-            "`jupytext --set-formats ipynb,py:percent <notebook>`"
+            f"{notebook} has no paired .py; pair it with `jupytext --set-formats ipynb,py:percent <notebook>`"
         )
     return Path(pys[0])

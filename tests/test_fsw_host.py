@@ -83,7 +83,7 @@ class _Stub:
 
 def test_a_build_boots_then_ticks_at_its_period_from_one_period_in():
     """Boot comes first; the ticks follow at each period, from `period_s` to the end, inclusive."""
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     build = _Stub()
     host = FswHost(build, scenario.vehicle)
 
@@ -96,8 +96,8 @@ def test_a_build_boots_then_ticks_at_its_period_from_one_period_in():
 
 def test_the_vehicle_s_readings_reach_the_build_by_role_as_sampled_at_the_tick():
     """Each tick gets every role of `readers()`, and the IMU reading of that tick's instant."""
-    scenario = Leo500()
-    scenario.disperse(np.random.default_rng(0), noise_seed=1)
+    scenario = Leo500(ImuSpacecraft())
+    scenario.disperse_case(np.random.SeedSequence(0))
     build = _Stub()
 
     datasets = scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=2.0)
@@ -117,7 +117,7 @@ def test_an_exception_in_the_build_surfaces_whole_from_run(where: str):
     Args:
         where: Where the build raises.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     build = _Stub(fail_in=where)
     host = FswHost(build, scenario.vehicle)
 
@@ -139,7 +139,7 @@ def test_a_command_for_a_role_with_no_writer_fails_the_run_at_that_tick(
     Args:
         commanding: The stub build that commands what it is given.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     build = commanding({"wheel": 0.1})
     host = FswHost(build, scenario.vehicle)
 
@@ -181,7 +181,7 @@ def test_an_error_no_host_kept_passes_from_run_as_basilisk_raised_it(hosted: boo
     Args:
         hosted: Whether the flight software is an `FswHost`, with the raising module as ground.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     host = FswHost(_Stub(), scenario.vehicle) if hosted else None
 
     with pytest.raises(RuntimeError, match="SWIG director method error"):
@@ -191,6 +191,7 @@ def test_an_error_no_host_kept_passes_from_run_as_basilisk_raised_it(hosted: boo
             scenario.run(_Raising(), {}, duration_s=2.0)
 
     if hosted:
+        assert host is not None
         assert host.failure is None
 
 
@@ -224,13 +225,11 @@ class _Unwritten(ImuSpacecraft):
 
 def test_a_role_subscribed_to_nothing_fails_the_reset_before_boot():
     """`run` raises the host's error naming the unsubscribed role; the build never boots."""
-    scenario = Leo500(vehicle_type=_Unsubscribed)
+    scenario = Leo500(_Unsubscribed())
     build = _Stub()
     host = FswHost(build, scenario.vehicle)
 
-    with pytest.raises(
-        RuntimeError, match=r"roles \['spare'\] are not subscribed to any message"
-    ) as raised:
+    with pytest.raises(RuntimeError, match=r"roles \['spare'\] are not subscribed to any message") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
@@ -239,13 +238,11 @@ def test_a_role_subscribed_to_nothing_fails_the_reset_before_boot():
 
 def test_a_role_never_written_by_the_first_tick_fails_it_before_the_build_ticks():
     """`run` raises the host's error naming the unwritten role and the first tick's time."""
-    scenario = Leo500(vehicle_type=_Unwritten)
+    scenario = Leo500(_Unwritten())
     build = _Stub()
     host = FswHost(build, scenario.vehicle)
 
-    with pytest.raises(
-        RuntimeError, match=r"roles \['spare'\] have not been written at t = 0.5 s"
-    ) as raised:
+    with pytest.raises(RuntimeError, match=r"roles \['spare'\] have not been written at t = 0.5 s") as raised:
         scenario.run(host, {}, duration_s=2.0)
 
     assert host.failure is raised.value
@@ -282,9 +279,10 @@ def test_a_command_is_written_to_its_role_s_writer_at_the_tick_by_the_host(
         commanding: The stub build that commands what it is given.
         torque: Builds a wheel torque command.
     """
-    scenario = Leo500(vehicle_type=_Commanded)
-    host = FswHost(commanding({"spare": torque(0.25)}), scenario.vehicle)
-    command = scenario.vehicle.spare_cmd
+    vehicle = _Commanded()
+    scenario = Leo500(vehicle)
+    host = FswHost(commanding({"spare": torque(0.25)}), vehicle)
+    command = vehicle.spare_cmd
     reader = messaging.ArrayMotorTorqueMsgReader()
     reader.subscribeTo(command)
 
@@ -307,11 +305,12 @@ def test_a_command_set_naming_a_role_with_no_writer_is_refused_whole_before_any_
         commanding: The stub build that commands what it is given.
         torque: Builds a wheel torque command.
     """
-    scenario = Leo500(vehicle_type=_Commanded)
+    vehicle = _Commanded()
+    scenario = Leo500(vehicle)
     commands = {"spare": torque(0.25), "wheel": torque(0.5), "arm": torque(1.0)}
-    host = FswHost(commanding(commands), scenario.vehicle)
+    host = FswHost(commanding(commands), vehicle)
     reader = messaging.ArrayMotorTorqueMsgReader()
-    reader.subscribeTo(scenario.vehicle.spare_cmd)
+    reader.subscribeTo(vehicle.spare_cmd)
 
     with pytest.raises(
         ValueError,
@@ -332,13 +331,12 @@ def test_a_role_absent_from_a_tick_keeps_its_last_command(
         commanding: The stub build that commands what it is given.
         torque: Builds a wheel torque command.
     """
-    scenario = Leo500(vehicle_type=_Commanded)
+    vehicle = _Commanded()
+    scenario = Leo500(vehicle)
     build = commanding({"spare": torque(0.25)}, ticks=1)
-    command = scenario.vehicle.spare_cmd
+    command = vehicle.spare_cmd
 
-    datasets = scenario.run(
-        FswHost(build, scenario.vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0
-    )
+    datasets = scenario.run(FswHost(build, vehicle), {"cmd": (command, "motorTorque", "N*m")}, duration_s=2.0)
 
     t_s, _ = datasets["t_s"]
     written, _ = datasets["cmd"]
@@ -351,16 +349,14 @@ def test_a_role_absent_from_a_tick_keeps_its_last_command(
     [0.25, messaging.IMUSensorMsgPayload()],
     ids=["not-a-payload", "another-message-s-payload"],
 )
-def test_a_command_its_writer_rejects_fails_the_run_kept_whole(
-    commanding: Callable[..., Any], payload: Any
-):
+def test_a_command_its_writer_rejects_fails_the_run_kept_whole(commanding: Callable[..., Any], payload: Any):
     """The writer's own error fails the tick, kept whole in `failure` and raised from `run`.
 
     Args:
         commanding: The stub build that commands what it is given.
         payload: A command the `ArrayMotorTorqueMsg` writer cannot take.
     """
-    scenario = Leo500(vehicle_type=_Commanded)
+    scenario = Leo500(_Commanded())
     host = FswHost(commanding({"spare": payload}), scenario.vehicle)
 
     with pytest.raises(TypeError, match="ArrayMotorTorqueMsgPayload") as raised:

@@ -17,11 +17,79 @@ class Vehicle:
     A subclass builds its Basilisk objects and provides `models()`, the propagated modules a
     scenario steps with the dynamics; `sensor_models(sample_period_s)`, which sets each sensor's
     per-sample noise for that period and lists the sensors a scenario samples at it; `readers()`,
-    its sensor outputs by role; and `recorded_fields()`, run-file dataset path to the
-    `(message, field, units)` it records. It may override `writers()`, its actuator inputs by role,
+    its sensor outputs by role; `recorded_fields()`, run-file dataset path to the
+    `(message, field, units)` it records; and `disperse(rng, *, noise_seed)`, which draws and
+    applies its own dispersion in place. It may override `writers()`, its actuator inputs by role,
     and `finish(datasets)` to change what the recorders captured before the run returns it. A
     scenario places its `spacecraft`.
+
+    Attributes:
+        spacecraft: The Basilisk `Spacecraft` hub, which a subclass builds.
     """
+
+    spacecraft: Any
+
+    def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> dict[str, np.ndarray]:
+        """Draw this vehicle's dispersion from `rng`, apply it to this vehicle and seed its sensor noise.
+
+        Args:
+            rng: The generator the dispersion is drawn from.
+            noise_seed: The seed of this vehicle's sensor noise.
+
+        Returns:
+            What was drawn, name to value.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
+
+    def models(self) -> list[Any]:
+        """List the vehicle's propagated Basilisk modules in task order.
+
+        Returns:
+            The modules a scenario steps with the dynamics.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
+
+    def sensor_models(self, sample_period_s: float) -> list[Any]:
+        """Set each sensor's per-sample noise for its sample period, and list the sensors.
+
+        Args:
+            sample_period_s: The period the sensors sample at, in seconds.
+
+        Returns:
+            The sensors a scenario samples at that period.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
+
+    def readers(self) -> dict[str, Any]:
+        """Build the vehicle's sensor readers.
+
+        Returns:
+            Role to the Basilisk message reader subscribed to that sensor's output.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
+
+    def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
+        """Declare what the vehicle records.
+
+        Returns:
+            Run-file dataset path to the `(message, field, units)` it records.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
 
     def writers(self) -> dict[str, Any]:
         """The vehicle's actuator inputs by role: by default it has none.
@@ -76,9 +144,7 @@ class Vehicle:
                 for name, (data, units) in datasets.items():
                     array = np.asarray(data)
                     if array.dtype.kind == "U":
-                        dataset = run_file.create_dataset(
-                            name, data=array.astype(object), dtype=h5py.string_dtype()
-                        )
+                        dataset = run_file.create_dataset(name, data=array.astype(object), dtype=h5py.string_dtype())
                     else:
                         dataset = run_file.create_dataset(name, data=array.astype(np.float64))
                     dataset.attrs["units"] = units

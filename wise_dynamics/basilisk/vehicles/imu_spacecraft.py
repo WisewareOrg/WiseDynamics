@@ -41,8 +41,8 @@ class ImuSpacecraft(Vehicle):
         accel_noise_density_m_s2_rthz: Nominal white-noise density on each accelerometer axis, in
             m/s^2/sqrt(Hz).
         noise_seed: Nominal seed of the IMU's white-noise generator.
-        gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `dispersed` draws, in rad/s.
-        accel_bias_std_P_m_s2: Per-axis 1-sigma of the accelerometer bias `dispersed` draws, in
+        gyro_bias_std_P_rad_s: Per-axis 1-sigma of the gyro bias `disperse` draws, in rad/s.
+        accel_bias_std_P_m_s2: Per-axis 1-sigma of the accelerometer bias `disperse` draws, in
             m/s^2.
     """
 
@@ -59,30 +59,6 @@ class ImuSpacecraft(Vehicle):
     noise_seed: int = 0
     gyro_bias_std_P_rad_s: float = 1e-4
     accel_bias_std_P_m_s2: float = 1e-4
-
-    @classmethod
-    def dispersed(
-        cls, rng: np.random.Generator, *, noise_seed: int
-    ) -> tuple["ImuSpacecraft", dict[str, np.ndarray]]:
-        """A vehicle built with biases drawn from `rng`, and what was drawn.
-
-        Each bias is its nominal plus independent normal samples per axis of its 1-sigma, the gyro
-        bias first, then the accelerometer bias.
-
-        Args:
-            rng: The generator the biases are drawn from.
-            noise_seed: The vehicle's sensor-noise seed.
-
-        Returns:
-            The vehicle, and `gyro_bias_P_rad_s` and `accel_bias_P_m_s2` as drawn.
-        """
-        draws = {
-            "gyro_bias_P_rad_s": np.asarray(cls.gyro_bias_P_rad_s)
-            + rng.normal(0.0, cls.gyro_bias_std_P_rad_s, size=3),
-            "accel_bias_P_m_s2": np.asarray(cls.accel_bias_P_m_s2)
-            + rng.normal(0.0, cls.accel_bias_std_P_m_s2, size=3),
-        }
-        return cls(**draws, noise_seed=noise_seed), draws
 
     def __init__(
         self,
@@ -111,15 +87,9 @@ class ImuSpacecraft(Vehicle):
         """
         nominal = type(self)
         self.mass_kg = nominal.mass_kg if mass_kg is None else mass_kg
-        self.inertia_B_kg_m2 = (
-            nominal.inertia_B_kg_m2 if inertia_B_kg_m2 is None else inertia_B_kg_m2
-        )
-        self.gyro_bias_P_rad_s = (
-            nominal.gyro_bias_P_rad_s if gyro_bias_P_rad_s is None else gyro_bias_P_rad_s
-        )
-        self.accel_bias_P_m_s2 = (
-            nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
-        )
+        self.inertia_B_kg_m2 = nominal.inertia_B_kg_m2 if inertia_B_kg_m2 is None else inertia_B_kg_m2
+        self.gyro_bias_P_rad_s = nominal.gyro_bias_P_rad_s if gyro_bias_P_rad_s is None else gyro_bias_P_rad_s
+        self.accel_bias_P_m_s2 = nominal.accel_bias_P_m_s2 if accel_bias_P_m_s2 is None else accel_bias_P_m_s2
         self.gyro_noise_density_rad_s_rthz = (
             nominal.gyro_noise_density_rad_s_rthz
             if gyro_noise_density_rad_s_rthz is None
@@ -144,9 +114,39 @@ class ImuSpacecraft(Vehicle):
         self.imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
         self.imu.sensorPos_B = (0.0, 0.0, 0.0)
         self.imu.dcm_PB = np.eye(3)
+        self._configure_imu()
+
+    def _configure_imu(self) -> None:
+        """Set the IMU's biases and noise seed from this vehicle's attributes."""
         self.imu.senRotBias = self.gyro_bias_P_rad_s
         self.imu.senTransBias = self.accel_bias_P_m_s2
         self.imu.RNGSeed = int(self.noise_seed)
+
+    def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> dict[str, np.ndarray]:
+        """Draw the biases from `rng`, apply them to this vehicle and seed the IMU's noise.
+
+        Each bias is its class nominal plus independent normal samples per axis of its 1-sigma, the
+        gyro bias first, then the accelerometer bias.
+
+        Args:
+            rng: The generator the biases are drawn from.
+            noise_seed: The seed of the IMU's white-noise generator.
+
+        Returns:
+            `gyro_bias_P_rad_s` and `accel_bias_P_m_s2` as drawn.
+        """
+        nominal = type(self)
+        draws = {
+            "gyro_bias_P_rad_s": np.asarray(nominal.gyro_bias_P_rad_s)
+            + rng.normal(0.0, nominal.gyro_bias_std_P_rad_s, size=3),
+            "accel_bias_P_m_s2": np.asarray(nominal.accel_bias_P_m_s2)
+            + rng.normal(0.0, nominal.accel_bias_std_P_m_s2, size=3),
+        }
+        self.gyro_bias_P_rad_s = draws["gyro_bias_P_rad_s"]
+        self.accel_bias_P_m_s2 = draws["accel_bias_P_m_s2"]
+        self.noise_seed = noise_seed
+        self._configure_imu()
+        return draws
 
     def models(self) -> list[Any]:
         """List the vehicle's propagated Basilisk modules in task order.

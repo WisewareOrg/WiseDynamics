@@ -6,6 +6,7 @@ and its recorded fields.
 
 import inspect
 from collections.abc import Callable
+from typing import TypedDict
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from Basilisk.fswAlgorithms import inertial3D
 
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
+from wise_dynamics.basilisk.vehicles.imu_spacecraft import Vector3
 
 
 class _Guidance(inertial3D.inertial3D):
@@ -26,7 +28,27 @@ class _Guidance(inertial3D.inertial3D):
     period_s = 1.0
 
 
-DISPERSED = {
+class _Dispersed(TypedDict):
+    """`ImuSpacecraft` constructor keywords, all but the seed.
+
+    Attributes:
+        mass_kg: Hub mass, in kilograms.
+        inertia_B_kg_m2: Hub inertia about its centre of mass in body axes, in kg*m^2.
+        gyro_bias_P_rad_s: Constant gyro bias in the IMU platform frame, in rad/s.
+        accel_bias_P_m_s2: Constant accelerometer bias in the IMU platform frame, in m/s^2.
+        gyro_noise_density_rad_s_rthz: Gyro noise density, in rad/s/sqrt(Hz).
+        accel_noise_density_m_s2_rthz: Accelerometer noise density, in m/s^2/sqrt(Hz).
+    """
+
+    mass_kg: float
+    inertia_B_kg_m2: tuple[Vector3, Vector3, Vector3]
+    gyro_bias_P_rad_s: Vector3
+    accel_bias_P_m_s2: Vector3
+    gyro_noise_density_rad_s_rthz: float
+    accel_noise_density_m_s2_rthz: float
+
+
+DISPERSED: _Dispersed = {
     "mass_kg": 500.0,
     "inertia_B_kg_m2": ((150.0, -1.0, 0.0), (-1.0, 200.0, 0.0), (0.0, 0.0, 250.0)),
     "gyro_bias_P_rad_s": (3e-4, -1e-4, 2e-4),
@@ -104,9 +126,10 @@ def test_keywords_reach_the_basilisk_objects():
     assert np.array_equal(np.array(imu.PMatrixAccel), 9e-5 / 0.5 * np.eye(3))
 
 
-def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():
-    """`dispersed` draws the gyro then the accelerometer bias and builds the IMU with them."""
-    vehicle, draws = ImuSpacecraft.dispersed(np.random.default_rng(7), noise_seed=11)
+def test_disperse_applies_biases_drawn_in_order_to_the_vehicle():
+    """`disperse` draws the gyro then the accelerometer bias and sets the IMU with them."""
+    vehicle = ImuSpacecraft()
+    draws = vehicle.disperse(np.random.default_rng(7), noise_seed=11)
     rng = np.random.default_rng(7)
     gyro = np.asarray(ImuSpacecraft.gyro_bias_P_rad_s) + rng.normal(0.0, 1e-4, size=3)
     accel = np.asarray(ImuSpacecraft.accel_bias_P_m_s2) + rng.normal(0.0, 1e-4, size=3)
@@ -120,7 +143,7 @@ def test_dispersed_builds_the_vehicle_from_biases_drawn_in_order():
 
 def test_imu_reader_is_subscribed_to_the_imu_output():
     """The `imu` reader reads the IMU's own output message."""
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     reader = scenario.vehicle.readers()["imu"]
     assert reader.isLinked()
     datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
@@ -167,7 +190,7 @@ def test_the_noise_per_sample_is_the_density_over_the_root_of_the_sample_period(
     Args:
         period_s: The flight software's period, and so the IMU's sample period, in seconds.
     """
-    scenario = Leo500(vehicle_type=_Quiet)
+    scenario = Leo500(_Quiet())
     fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
     datasets = scenario.run(fsw, {}, duration_s=2000 * period_s)
     expected = 1e-3 / np.sqrt(period_s)
@@ -182,7 +205,7 @@ def test_a_run_records_the_attitude_as_the_quaternion_of_the_placed_state():
 
     The first row is the placement's quaternion, and no row is an MRP.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
     assert "truth/sigma_BN" not in datasets
     assert set(scenario.vehicle.recorded_fields()) <= set(datasets)
@@ -247,8 +270,9 @@ class _Tracker(sysModel.SysModel):
 
 def test_a_ground_reads_through_tracking_the_recorded_truth_of_its_instant():
     """At each of its ticks a ground's `tracking()` gives the truth the run records then."""
-    scenario = Leo500()
-    tracker = _Tracker(scenario.vehicle.tracking())
+    vehicle = ImuSpacecraft()
+    scenario = Leo500(vehicle)
+    tracker = _Tracker(vehicle.tracking())
     datasets = scenario.run(_Guidance(), {}, duration_s=5.0, ground=tracker)
     assert len(tracker.read) == 6
     for k, state in enumerate(tracker.read):

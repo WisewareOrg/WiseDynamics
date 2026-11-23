@@ -8,6 +8,7 @@ from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
 from wise_dynamics.basilisk.fsw_host import FswHost
+from wise_dynamics.basilisk.vehicle import Vehicle
 
 __all__ = ["Scenario"]
 
@@ -87,22 +88,66 @@ def _step_ns(fsw_ns: int) -> int:
 class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
-    A subclass's constructor calls `super().__init__()`, builds its vehicles and places them, and
-    sets `vehicles`, the vehicles `run` adds to the simulation in order. `run` reads them, and
-    `fidelity`.
+    A scenario flies the vehicle it is given and knows nothing of its class. A subclass's
+    constructor calls `super().__init__(vehicle)` and places the vehicle. `run` reads `vehicles`,
+    and `fidelity`.
 
     Attributes:
         fidelity: `"hi"`, `"med"` or `"lo"`, the integrator `run` gives every vehicle's spacecraft,
             as the README's Scenarios section defines them.
+        vehicle: The vehicle the scenario flies.
+        vehicles: The vehicles `run` adds to the simulation, in order: `[vehicle]`.
+        draws: What `disperse_case` drew and applied, name to value; empty until then.
     """
 
     fidelity: str = "lo"
+    vehicle: Vehicle
+    vehicles: list[Vehicle]
+    draws: dict[str, np.ndarray]
 
-    def __init__(self) -> None:
-        """Create the empty Basilisk simulation `run` builds into."""
+    def __init__(self, vehicle: Vehicle) -> None:
+        """Hold the vehicle to fly and create the empty Basilisk simulation `run` builds into.
+
+        Args:
+            vehicle: The vehicle the scenario flies, which a subclass places.
+        """
+        self.vehicle = vehicle
+        self.vehicles = [vehicle]
+        self.draws = {}
         self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
+
+    def disperse(self, rng: np.random.Generator) -> dict[str, np.ndarray]:
+        """Draw this scenario's initial conditions from `rng` and apply them.
+
+        Args:
+            rng: The generator the initial conditions are drawn from.
+
+        Returns:
+            What was drawn, name to value.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
+
+    def disperse_case(self, seed: np.random.SeedSequence) -> None:
+        """Disperse this case: the initial conditions, then the vehicle, and record what was drawn.
+
+        The case's seed spawns three children, in order: the generator the initial conditions are
+        drawn from, the vehicle's sensor-noise seed, and the generator the vehicle's dispersion is
+        drawn from.
+
+        Args:
+            seed: The case's seed.
+        """
+        initial_conditions_seed, noise_seed, vehicle_seed = seed.spawn(3)
+        initial_conditions = self.disperse(np.random.default_rng(initial_conditions_seed))
+        vehicle_draws = self.vehicle.disperse(
+            np.random.default_rng(vehicle_seed), noise_seed=int(noise_seed.generate_state(1)[0])
+        )
+        self.draws = {**initial_conditions, **vehicle_draws}
 
     def stop_ground(self) -> None:
         """Stop the ground's task: the ground `run` was given is not called again in this run.
@@ -187,12 +232,8 @@ class Scenario:
                 self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
         self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
         if ground is not None:
-            ground_process = self._simulation.CreateNewProcess(
-                _GROUND_PROCESS, _GROUND_PROCESS_PRIORITY
-            )
-            ground_task = self._simulation.CreateNewTask(
-                _GROUND_TASK, macros.sec2nano(ground.period_s)
-            )
+            ground_process = self._simulation.CreateNewProcess(_GROUND_PROCESS, _GROUND_PROCESS_PRIORITY)
+            ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
             ground_process.addTask(ground_task)
             self._simulation.AddModelToTask(_GROUND_TASK, ground)
         for recorder in recorders.values():

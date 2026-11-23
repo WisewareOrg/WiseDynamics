@@ -14,6 +14,7 @@ Every pull request against the default branch runs `process-gates.yml`:
 - `pr-title` — the PR title is a Conventional Commits subject (PROC-009).
 - `repo-floor` — the repository's rulesets meet [`repository-floor.yml`](https://github.com/WisewareOrg/.github/blob/main/repository-floor.yml)
   (PROC-011).
+- `check-python-floor` — the root `pyproject.toml` meets the org Python floor (wise-ci).
 
 A PR whose base is not the default branch needs the Development-field link written by hand — see
 WiseKiosk's [`link-pr` skill](https://github.com/WisewareOrg/WiseKiosk/blob/main/.claude/skills/link-pr/SKILL.md)
@@ -23,13 +24,10 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 
 - `check-adrs` — `docs/decisions/` and its index agree, and every citation of an ADR in the
   tracked tree pins that ADR's current rev.
-- `ruff` — four commands:
-  - `uv run ruff check .`, which includes the Google-convention docstring rules;
-  - `uv run ruff format --check .`;
-  - `uv run interrogate -v --fail-under 100 wise_dynamics tests`, which requires a docstring on
-    every module, class and function in the package and the tests;
-  - `uv run pydoclint wise_dynamics tests`, which requires every argument and return to be
-    documented in Google style, with types left to the signature's hints.
+- `check-python` — after `uv sync --locked --all-extras`, wise-ci's `check-python` action: ruff check
+  and format, interrogate, pydoclint and ty. The action's tool versions are wise-ci's at the commit
+  `uses:` names; the `check-python` dev dependency's `rev` in `pyproject.toml` names the same
+  commit, so a local run sees the same versions. Renovate bumps the two together.
 - `pytest` — `uv run pytest`, the full suite.
 
-The same commands run locally after `uv sync`.
+Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.

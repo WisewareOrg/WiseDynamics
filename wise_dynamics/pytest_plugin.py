@@ -42,6 +42,7 @@ _INSTALL_HINT = (
 _DEFAULT_OUT = "monte_carlo"
 _CAPPED_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
+_DEFAULT_VEHICLE = "imu_spacecraft"
 _DEFAULT_RUNS = 8
 _DEFAULT_FIDELITY = "lo"
 _DEFAULT_DURATION_S = 5700.0
@@ -55,8 +56,7 @@ _MARKS = (
     (
         "sim_vehicle",
         "name",
-        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's"
-        " own",
+        f"name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default {_DEFAULT_VEHICLE}",
     ),
     ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
@@ -92,7 +92,7 @@ class _Settings(NamedTuple):
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
         directory: The directory the test's run files are written to, in the runs' session.
-        vehicle: The vehicle's name in `VEHICLES`, or None for the scenario's own.
+        vehicle: The vehicle's name in `VEHICLES`.
     """
 
     scenario: str
@@ -100,7 +100,7 @@ class _Settings(NamedTuple):
     fidelity: str
     duration_s: float
     directory: Path
-    vehicle: str | None
+    vehicle: str
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -122,8 +122,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         const="",
         default=None,
         metavar="name",
-        help="with a name, make it the active Monte Carlo session; without, list the sessions; "
-        "either way no test runs",
+        help="with a name, make it the active Monte Carlo session; without, list the sessions; either way no test runs",
     )
     parser.addini(
         "sim_out",
@@ -203,7 +202,7 @@ def pytest_configure_node(node: Any) -> None:
     """
     try:
         handed = {"directory": str(_active_session(node.config)), "error": None}
-    except pytest.UsageError as error:
+    except (pytest.UsageError, sessions.NoSessionError) as error:
         handed = {"directory": None, "error": str(error)}
     node.workerinput[_WORKER_SESSION] = handed
 
@@ -217,9 +216,7 @@ def pytest_testnodedown(node: Any, error: object) -> None:
         error: The error that ended the worker, if any.
     """
     workeroutput = getattr(node, "workeroutput", None) or {}
-    node.config.stash[_WRITTEN_DIRS].update(
-        Path(path) for path in workeroutput.get(_WORKER_DIRS, ())
-    )
+    node.config.stash[_WRITTEN_DIRS].update(Path(path) for path in workeroutput.get(_WORKER_DIRS, ()))
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -238,10 +235,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         settings = _settings(node)
     except ValueError as error:
         pytest.fail(f"{node.nodeid}: {error}", pytrace=False)
-    except pytest.UsageError as error:
-        metafunc.parametrize(
-            "sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True
-        )
+    except (pytest.UsageError, sessions.NoSessionError) as error:
+        metafunc.parametrize("sim_case_index", [pytest.param(_NoSession(str(error)), id="no-session")], indirect=True)
         return
     metafunc.parametrize("sim_case_index", range(settings.runs), indirect=True)
 
@@ -263,7 +258,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         return
     planned: dict[Path, tuple[int, str]] = {}
     for item in session.items:
-        if "sim_case_index" in item.fixturenames and _case_of(item) is not None:
+        if isinstance(item, pytest.Function) and "sim_case_index" in item.fixturenames and _case_of(item) is not None:
             settings = _settings(item)
             planned[settings.directory] = (settings.runs, item.nodeid.partition("[")[0])
     for directory, (runs, nodeid) in planned.items():
@@ -279,7 +274,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         item: The test item about to be set up.
     """
     case = _case_of(item)
-    if case is not None:
+    if isinstance(item, pytest.Function) and case is not None:
         directory = _run_dir(item)
         sessions.run_path(directory, case).unlink(missing_ok=True)
         sessions.crash_path(directory, case).unlink(missing_ok=True)
@@ -299,7 +294,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     report = yield
     case = _case_of(item)
     if (
-        case is not None
+        isinstance(item, pytest.Function)
+        and case is not None
         and report.when in ("setup", "call")
         and report.failed
         and call.excinfo is not None
@@ -403,7 +399,7 @@ def sim_test_directory(request: pytest.FixtureRequest) -> Path:
 
 @pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
-    """This case's scenario, dispersed from the case's two random streams.
+    """This case's scenario, flying a new vehicle and dispersed from the case's seed.
 
     Args:
         request: The fixture request, whose node carries the `sim_scenario` and `sim_fidelity`
@@ -411,21 +407,14 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
         sim_case_index: The case number.
 
     Returns:
-        The test's `sim_scenario` at its `sim_fidelity`, dispersed from the case's first stream,
-        with its vehicle's sensor noise seeded from the case's second. Its vehicle is
+        The test's `sim_scenario` flying a new vehicle of its `sim_vehicle`, at its
+        `sim_fidelity`, dispersed by `disperse_case` from the case's seed. Its vehicle is
         `sim_scenario.vehicle`.
     """
     settings = _settings(request.node)
-    draws_stream, noise_stream = _streams(sim_case_index)
-    scenario_type = _scenario_type(settings.scenario)
-    if settings.vehicle is None:
-        scenario = scenario_type()
-    else:
-        scenario = scenario_type(vehicle_type=_vehicle_type(settings.vehicle))
+    scenario = _scenario_type(settings.scenario)(_vehicle_type(settings.vehicle)())
     scenario.fidelity = settings.fidelity
-    scenario.disperse(
-        np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0])
-    )
+    scenario.disperse_case(np.random.SeedSequence(_SEED, spawn_key=(sim_case_index,)))
     return scenario
 
 
@@ -460,14 +449,8 @@ def sim_run_file(
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "versions_wise_dynamics": version("wise-dynamics"),
         "versions_bsk": version("bsk"),
-        **{
-            f"versions_wise_dynamics_{name}": value
-            for name, value in request.config.stash[_PROVENANCE].items()
-        },
-        **{
-            f"versions_caller_{name}": value
-            for name, value in request.config.stash[_CALLER].items()
-        },
+        **{f"versions_wise_dynamics_{name}": value for name, value in request.config.stash[_PROVENANCE].items()},
+        **{f"versions_caller_{name}": value for name, value in request.config.stash[_CALLER].items()},
     }
     for name, value in sim_scenario.draws.items():
         own[f"draw_{name}"] = np.asarray(value, dtype=float)
@@ -475,9 +458,7 @@ def sim_run_file(
     path = sessions.run_path(directory, sim_case_index)
     config = request.config
 
-    def write(
-        datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None
-    ) -> Path:
+    def write(datasets: Mapping[str, tuple[Any, str]], attrs: Mapping[str, Any] | None = None) -> Path:
         """Write the run file.
 
         Args:
@@ -504,8 +485,8 @@ def sim_run_file(
 def _settings(node: pytest.Function) -> _Settings:
     """Resolve a test's configuration from its marks, the defaults and the cap.
 
-    Resolving the run directory raises `pytest.UsageError` through `_active_session` when no
-    session is active or its name is invalid.
+    Resolving the run directory raises `NoSessionError` through `_active_session` when no session
+    is active, and `pytest.UsageError` when its name is invalid.
 
     Args:
         node: The test function, or one of its parametrized items.
@@ -531,20 +512,15 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_runs: expected an integer of at least 1, got {runs!r}")
     if fidelity not in _FIDELITIES:
         raise ValueError(f"sim_fidelity: expected one of {_FIDELITIES}, got {fidelity!r}")
-    if (
-        not isinstance(duration_s, numbers.Real)
-        or isinstance(duration_s, bool)
-        or not duration_s > 0
-    ):
+    if not isinstance(duration_s, numbers.Real) or isinstance(duration_s, bool) or not duration_s > 0:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
-    vehicle = values.get("sim_vehicle")
-    if vehicle is not None:
-        if not isinstance(vehicle, str):
-            raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
-        try:
-            _vehicle_type(vehicle)
-        except ValueError as error:
-            raise ValueError(f"sim_vehicle: {error}") from None
+    vehicle = values.get("sim_vehicle", _DEFAULT_VEHICLE)
+    if not isinstance(vehicle, str):
+        raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
+    try:
+        _vehicle_type(vehicle)
+    except ValueError as error:
+        raise ValueError(f"sim_vehicle: {error}") from None
     if _capped(node.config):
         runs = min(runs, _CAPPED_RUNS)
     directory = _run_dir(node)
@@ -554,7 +530,8 @@ def _settings(node: pytest.Function) -> _Settings:
 def _run_dir(node: pytest.Function) -> Path:
     """Build a test's run directory in the session its runs land in.
 
-    `_active_session` raises `pytest.UsageError` when no session is active or its name is invalid.
+    `_active_session` raises `NoSessionError` when no session is active, and `pytest.UsageError`
+    when its name is invalid.
 
     Args:
         node: The test function, or one of its parametrized items.
@@ -577,15 +554,15 @@ def _active_session(config: pytest.Config) -> Path:
         The `scratch` session's directory when the run is capped, else the active session's.
 
     Raises:
-        pytest.UsageError: A full run has no active session, or its name is invalid.
+        pytest.UsageError: A pytest-xdist worker was handed no session. `session_directory`'s
+            `NoSessionError`, for a full run with no active session, and its `pytest.UsageError`,
+            for an invalid name, pass through.
     """
     if _SESSION not in config.stash:
         workerinput = getattr(config, "workerinput", None)
         if workerinput is None:
             config.stash[_SESSION] = (
-                sessions.sim_root(config) / sessions.SCRATCH
-                if _capped(config)
-                else sessions.session_directory(config)
+                sessions.sim_root(config) / sessions.SCRATCH if _capped(config) else sessions.session_directory(config)
             )
         else:
             handed = workerinput[_WORKER_SESSION]
@@ -664,9 +641,7 @@ def _write_crash(directory: Path, case: int, exception: str, traceback: str) -> 
         traceback: The failure's full report.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    sessions.crash_path(directory, case).write_text(
-        json.dumps({"exception": exception, "traceback": traceback})
-    )
+    sessions.crash_path(directory, case).write_text(json.dumps({"exception": exception, "traceback": traceback}))
 
 
 def _marked_values(node: pytest.Function) -> dict[str, Any]:
@@ -754,8 +729,7 @@ def _provenance() -> dict[str, str | bool]:
     url = info.get("url", "")
     if not (info.get("dir_info", {}).get("editable") and url.startswith("file://")):
         raise pytest.UsageError(
-            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n"
-            f"{_INSTALL_HINT}"
+            f"the install of wise-dynamics is not a git pin or an editable checkout: {found}\n{_INSTALL_HINT}"
         )
     path = url2pathname(urlparse(url).path)
     try:
@@ -784,9 +758,7 @@ def _git_state(path: str | Path) -> tuple[str, bool]:
     """
     git = ["git", "-C", str(path)]
     commit = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
-    status = subprocess.run(
-        [*git, "status", "--porcelain"], check=True, capture_output=True, text=True
-    )
+    status = subprocess.run([*git, "status", "--porcelain"], check=True, capture_output=True, text=True)
     return commit.stdout.strip(), bool(status.stdout.strip())
 
 
@@ -836,9 +808,7 @@ def _scenario_type(name: str) -> "type[Scenario]":
     try:
         return SCENARIOS[name]
     except KeyError:
-        raise ValueError(
-            f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}"
-        ) from None
+        raise ValueError(f"unknown scenario {name!r}; known scenarios: {', '.join(sorted(SCENARIOS))}") from None
 
 
 def _vehicle_type(name: str) -> "type[Vehicle]":
@@ -858,15 +828,3 @@ def _vehicle_type(name: str) -> "type[Vehicle]":
     if name not in VEHICLES:
         raise ValueError(f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}")
     return VEHICLES[name]
-
-
-def _streams(index: int) -> list[np.random.SeedSequence]:
-    """Spawn case `index`'s two random streams from the seed `_SEED`.
-
-    Args:
-        index: The case number.
-
-    Returns:
-        The first stream, which draws the dispersions, and the second, which seeds sensor noise.
-    """
-    return np.random.SeedSequence(_SEED, spawn_key=(index,)).spawn(2)

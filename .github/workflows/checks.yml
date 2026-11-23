@@ -25,8 +25,8 @@ jobs:
 
       - uses: WisewareOrg/wise-ci/check-adrs@6f8840aacdd7eb0c431af64f7eaa7bf326b38e29
 
-  ruff:
-    name: ruff
+  check-python:
+    name: check-python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,11 +37,8 @@ jobs:
         with:
           version: "0.13.9"
 
-      - run: uv sync --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run interrogate -v --fail-under 100 wise_dynamics tests
-      - run: uv run pydoclint wise_dynamics tests
+      - run: uv sync --locked --all-extras
+      - uses: WisewareOrg/wise-ci/check-python@491858538bf01b19cfb86aab1195ad3822b59903
 
   pytest:
     name: pytest

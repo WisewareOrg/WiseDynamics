@@ -38,7 +38,7 @@ _CASE_FILE = re.compile(r"run_(\d+)\..+")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-class NoSessionError(pytest.UsageError):
+class NoSessionError(Exception):
     """No Monte Carlo session is active."""
 
 
@@ -150,8 +150,8 @@ def session_directory(config: pytest.Config) -> Path:
         directory may not exist yet.
 
     Raises:
-        NoSessionError: The pointer is missing or empty. A subclass of `pytest.UsageError`, which
-            is also raised when the name the pointer holds is invalid.
+        NoSessionError: The pointer is missing or empty. A name the pointer holds that is invalid
+            raises `pytest.UsageError` through `check_name`.
     """
     root = sim_root(config)
     if os.environ.get(CAPPED_ENV):
@@ -184,9 +184,7 @@ def current_session() -> Path:
             text=True,
         )
         if listed.returncode or not report.exists():
-            raise RuntimeError(
-                f"pytest could not report the session:\n{listed.stdout}{listed.stderr}"
-            )
+            raise RuntimeError(f"pytest could not report the session:\n{listed.stdout}{listed.stderr}")
         found = json.loads(report.read_text())
     if found is None:
         raise NoSessionError(NO_SESSION)
