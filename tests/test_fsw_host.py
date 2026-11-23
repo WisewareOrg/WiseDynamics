@@ -20,10 +20,10 @@ class _Boom(Exception):
 class _Stub:
     """A build that logs its boot and each tick, and commands nothing.
 
-    It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; and each
-    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`. It raises `_Boom` in
-    `fail_in`, `"boot"` or `"tick"`, and keeps it in `raised`. The `commanding` fixture's build
-    commands.
+    It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; each
+    tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`; and each tick's payloads, as
+    given, in `payloads`. It raises `_Boom` in `fail_in`, `"boot"` or `"tick"`, and keeps it in
+    `raised`. The `commanding` fixture's build commands.
 
     Attributes:
         period_s: The build's period, in seconds.
@@ -40,6 +40,7 @@ class _Stub:
         self.events: list[str | int] = []
         self.gyro: dict[int, list[float]] = {}
         self.roles: list[list[str]] = []
+        self.payloads: list[Mapping[str, Any]] = []
         self.fail_in = fail_in
         self.raised: _Boom | None = None
 
@@ -60,6 +61,7 @@ class _Stub:
         """
         self.events.append(t_ns)
         self.roles.append(sorted(messages_by_role))
+        self.payloads.append(dict(messages_by_role))
         self.gyro[t_ns] = list(messages_by_role["imu"].AngVelPlatform)
         self._maybe_fail("tick")
         return {}
@@ -108,6 +110,18 @@ def test_the_vehicle_s_readings_reach_the_build_by_role_as_sampled_at_the_tick()
     for t_ns, reading in build.gyro.items():
         (row,) = np.flatnonzero(t_s == t_ns / 1e9)
         assert reading == gyro_P[row].tolist(), t_ns
+
+
+def test_each_role_s_payload_is_one_view_the_whole_run():
+    """Every tick gets the same payload object per role, taken once."""
+    scenario = Leo500(ImuSpacecraft())
+    build = _Stub()
+
+    scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=2.0)
+
+    first, *later = build.payloads
+    for payloads in later:
+        assert all(payloads[role] is first[role] for role in first), "a tick got a new payload"
 
 
 @pytest.mark.parametrize("where", ["boot", "tick"])
