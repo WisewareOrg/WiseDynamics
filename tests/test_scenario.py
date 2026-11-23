@@ -344,10 +344,12 @@ def test_a_scenario_keeps_no_ground_once_its_run_returns():
     order: list[tuple[int, str]] = []
     scenario = Leo500(ImuSpacecraft())
     ground = _Stopping(order, scenario, at_ns=1_000_000_000)
-    scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
     kept = weakref.ref(ground)
+
+    scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
     del ground
-    assert kept() is None
+
+    assert kept() is None, "the scenario still reaches its ground after `run` returned"
 
 
 def test_a_scenario_keeps_no_ground_once_its_run_raises():
@@ -355,11 +357,13 @@ def test_a_scenario_keeps_no_ground_once_its_run_raises():
     order: list[tuple[int, str]] = []
     scenario = Leo500(ImuSpacecraft())
     ground = _StoppingThenRaising(order, scenario, at_ns=1_000_000_000)
+    kept = weakref.ref(ground)
+
     with pytest.raises(RuntimeError, match="SWIG director method error"):
         scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
-    kept = weakref.ref(ground)
     del ground
-    assert kept() is None
+
+    assert kept() is None, "the scenario still reaches its ground after `run` raised"
 
 
 class _Exact(ImuSpacecraft):
