@@ -22,7 +22,7 @@ class ImuWheelSpacecraft(ImuSpacecraft):
 
     The wheel is a balanced Honeywell HR16 from Basilisk's `rwFactory`, at the hub's centre of mass:
     its spin inertia Js is its maximum momentum over its maximum speed, and its torque and speed
-    limits are the factory's HR16 values. The wheel is not dispersed: `dispersed` draws only the
+    limits are the factory's HR16 values. The wheel is not dispersed: `disperse` draws only the
     IMU's biases, as `ImuSpacecraft`'s does. Besides `ImuSpacecraft`'s, a vehicle holds `wheel`, the
     Basilisk `ReactionWheelStateEffector`, and `wheel_command`, the stand-alone
     `ArrayMotorTorqueMsg` the wheel reads its torque from, its first element. Its run file holds

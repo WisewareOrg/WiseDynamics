@@ -51,7 +51,7 @@ class Placed(Leo500):
 
 def test_the_scenario_is_its_class_attributes():
     """Read from the class, as a consumer reads it without building a scenario."""
-    assert list(inspect.signature(Leo500).parameters) == ["vehicle_type"]
+    assert list(inspect.signature(Leo500).parameters) == ["vehicle"]
     assert Leo500.fidelity == "lo"
     assert Leo500.mu_m3_s2 == {"earth": 3.986004360e14}
     assert Leo500.semi_major_axis_m == 6871.0e3
@@ -68,7 +68,7 @@ def test_the_scenario_is_its_class_attributes():
 
 def test_the_placement_reaches_the_basilisk_objects():
     """Gravity and every placement attribute reach the hub and the task the run builds."""
-    scenario = Placed()
+    scenario = Placed(ImuSpacecraft())
     vehicle = scenario.vehicle
     state = scenario.initial_state()
     scenario.run(_Guidance(), {}, duration_s=1.0)
@@ -93,21 +93,46 @@ def test_the_placement_reaches_the_basilisk_objects():
     assert elements.f == pytest.approx(Placed.true_anomaly_rad, abs=1e-9)
 
 
-def test_the_scenario_builds_and_holds_its_vehicle():
-    """The constructor builds an `ImuSpacecraft`, holds it in `vehicles`, and has drawn nothing."""
-    scenario = Leo500()
-    assert type(scenario.vehicle) is ImuSpacecraft
-    assert scenario.vehicles == [scenario.vehicle]
+def test_the_scenario_holds_the_vehicle_it_is_given():
+    """The scenario holds the vehicle it is given in `vehicles`, and has drawn nothing."""
+    vehicle = ImuSpacecraft()
+    scenario = Leo500(vehicle)
+    assert scenario.vehicle is vehicle
+    assert scenario.vehicles == [vehicle]
     assert scenario.draws == {}
 
 
-def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_from_them():
-    """`disperse` draws the placement then the vehicle's biases, and builds with them."""
-    scenario = Leo500()
-    built = scenario.vehicle
-    scenario.disperse(np.random.default_rng(7), noise_seed=11)
+def test_disperse_draws_only_the_placement_and_leaves_the_vehicle_nominal():
+    """`disperse` draws the attitude then the body rate, places the vehicle at them and returns them."""
+    vehicle = ImuSpacecraft()
+    scenario = Leo500(vehicle)
+    draws = scenario.disperse(np.random.default_rng(7))
 
     rng = np.random.default_rng(7)
+    turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
+    nominal_attitude = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
+    expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}  # ty: ignore[missing-union-attribute]
+    expected["omega0_BN_B_rad_s"] = np.asarray(Leo500.omega0_BN_B_rad_s) + rng.normal(0.0, 0.2 * D2R, size=3)
+    assert list(draws) == list(expected)
+    for name, value in expected.items():
+        assert np.array_equal(draws[name], value), name
+
+    hub = vehicle.spacecraft.hub
+    mrp = Rotation.from_quat(expected["q0_BN"], scalar_first=True).as_mrp()
+    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), mrp)
+    assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), expected["omega0_BN_B_rad_s"])
+    assert len(vehicle.spacecraft.gravField.gravBodies) == 1
+    assert np.array_equal(np.array(vehicle.imu.senRotBias).flatten(), ImuSpacecraft.gyro_bias_P_rad_s)
+
+
+def test_disperse_case_draws_the_placement_then_the_vehicle_in_place_and_records_both():
+    """`disperse_case` draws the placement then the vehicle's biases from one stream, and keeps the vehicle."""
+    vehicle = ImuSpacecraft()
+    scenario = Leo500(vehicle)
+    draws_seed, noise_seed = np.random.SeedSequence(7).spawn(2)
+    scenario.disperse_case(np.random.SeedSequence(7))
+
+    rng = np.random.default_rng(draws_seed)
     turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
     nominal_attitude = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
     expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}  # ty: ignore[missing-union-attribute]
@@ -121,17 +146,13 @@ def test_disperse_draws_the_placement_then_the_vehicle_and_builds_the_vehicle_fr
     for name, value in expected.items():
         assert np.array_equal(scenario.draws[name], value), name
 
-    assert scenario.vehicle is not built
-    assert scenario.vehicles == [scenario.vehicle]
-    hub = scenario.vehicle.spacecraft.hub
-    mrp = Rotation.from_quat(expected["q0_BN"], scalar_first=True).as_mrp()
-    assert np.array_equal(np.array(hub.sigma_BNInit).flatten(), mrp)
-    assert np.array_equal(np.array(hub.omega_BN_BInit).flatten(), expected["omega0_BN_B_rad_s"])
-    assert len(scenario.vehicle.spacecraft.gravField.gravBodies) == 1
-    imu = scenario.vehicle.imu
+    assert scenario.vehicle is vehicle
+    assert scenario.vehicles == [vehicle]
+    assert len(vehicle.spacecraft.gravField.gravBodies) == 1
+    imu = vehicle.imu
     assert np.array_equal(np.array(imu.senRotBias).flatten(), expected["gyro_bias_P_rad_s"])
     assert np.array_equal(np.array(imu.senTransBias).flatten(), expected["accel_bias_P_m_s2"])
-    assert imu.RNGSeed == 11
+    assert imu.RNGSeed == int(noise_seed.generate_state(1)[0])
 
 
 def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
@@ -145,9 +166,9 @@ def test_the_attitude_dispersion_matches_an_additive_mrp_dispersion():
     additive = Rotation.from_mrp(nominal.as_mrp() + np.random.default_rng(1).normal(0, 0.01, (1500, 3)))
     dispersed = []
     for case in range(1500):
-        scenario = Leo500()
-        scenario.disperse(np.random.default_rng(case), noise_seed=0)
-        dispersed.append(Rotation.from_quat(scenario.draws["q0_BN"], scalar_first=True))
+        scenario = Leo500(ImuSpacecraft())
+        draws = scenario.disperse(np.random.default_rng(case))
+        dispersed.append(Rotation.from_quat(draws["q0_BN"], scalar_first=True))
     dispersed = Rotation.concatenate(dispersed)
 
     additive_std = (nominal.inv() * additive).as_rotvec().std(axis=0)  # ty: ignore[missing-union-attribute]

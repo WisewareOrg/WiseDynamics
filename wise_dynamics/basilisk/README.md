@@ -23,8 +23,8 @@ raises.
 Consumers import `Scenario`, `Vehicle`, `ImuSpacecraft`, `FswHost`, `FswBuild`, `SCENARIOS` and
 `VEHICLES` from `wise_dynamics.basilisk`, and a scenario class from its own module,
 `wise_dynamics.basilisk.scenarios.<name>`. A test picks one scenario with the `sim_scenario` mark, a
-name in `SCENARIOS`, and the scenario builds its own vehicle unless the `sim_vehicle` mark names
-another.
+name in `SCENARIOS`, and the vehicle it flies with the `sim_vehicle` mark, `imu_spacecraft` by
+default.
 
 ## Vehicles
 
@@ -32,9 +32,9 @@ A vehicle is a `Vehicle` subclass: its parameters are keywords, each defaulting 
 attribute of the same name, read when the vehicle is built, so a subclass that overrides an
 attribute is built with its value. Its class attributes are its nominal values, and its class
 docstring gives each parameter's units and frame. Every vehicle takes `noise_seed`, the seed of its
-sensor noise. A vehicle class disperses itself: `dispersed(rng, *, noise_seed)` draws its own
-dispersion from `rng`, with the 1-sigmas its class attributes give, and returns a vehicle built
-with it and what it drew.
+sensor noise. A vehicle disperses itself: `disperse(rng, *, noise_seed)` draws its own dispersion
+from `rng`, with the 1-sigmas its class attributes give, applies it to the vehicle in place, seeds
+its sensor noise with `noise_seed`, and returns what it drew.
 
 A vehicle lists the Basilisk modules it propagates in `models()` and its sensors in
 `sensor_models(sample_period_s)`, which also sets each sensor's per-sample noise for that period: a
@@ -62,17 +62,14 @@ defining one `Scenario` subclass; there is nothing else to edit. `SCENARIOS` reg
 module's name. A module defining none or several raises `TypeError` when the package is imported.
 
 A scenario is a `Scenario` subclass whose class attributes are its environment and its placement,
-with units and frames in its class docstring. It names its vehicle's class as `Scenario`'s type
-parameter, as `Leo500(Scenario[ImuSpacecraft])` does, so a type checker knows `scenario.vehicle`'s
-class. Its constructor takes no required argument and one optional argument, the vehicle class to
-build in place of its own, which the `sim_vehicle` mark supplies; a scenario that does not accept
-it cannot be used with that mark. It builds its vehicle,
-places it, and holds it as `scenario.vehicle` and in `scenario.vehicles`. `disperse(rng, *,
-noise_seed)` draws the scenario's placement from `rng`, as its docstring lists it, then has its
-vehicle class draw its own dispersion from the same `rng` and build a vehicle with `noise_seed`,
-places that vehicle, and records both sets of draws in `scenario.draws`. The new vehicle replaces
-`scenario.vehicle`, so readers and other handles on it are taken after dispersing. `initial_state()`
-returns the placement the vehicle starts from.
+with units and frames in its class docstring. A scenario knows nothing of its vehicle's class: its
+constructor takes one required argument, the vehicle to fly, which the `sim_vehicle` mark names. It
+places the vehicle and holds it as `scenario.vehicle` and in `scenario.vehicles`. A caller that
+needs the vehicle's own members holds its own reference to it. `disperse(rng)` draws the
+scenario's placement from `rng`, as its docstring lists it, applies it and returns what it drew.
+`disperse_case(seed)` disperses the case: the placement, then the vehicle's own `disperse`, and
+records both sets of draws in `scenario.draws`. The vehicle is dispersed in place, so handles on it
+stay valid. `initial_state()` returns the placement the vehicle starts from.
 
 `scenario.fidelity`, an attribute from `Scenario` that defaults to `"lo"`, is the integrator `run`
 gives every vehicle's spacecraft. A fidelity is the accuracy of the truth it propagates: each has a
@@ -152,7 +149,7 @@ bad one fails collection of the test, naming its node id and the mark.
 | `sim_runs(n)` | cases in the campaign, an integer of at least 1 | 8 |
 | `sim_duration_s(seconds)` | simulated seconds per case, positive | 5700 |
 | `sim_scenario(name)` | the scenario's name in `SCENARIOS` | `leo500` |
-| `sim_vehicle(name)` | the vehicle's name in `VEHICLES`, a module name in `wise_dynamics/basilisk/vehicles/`; the scenario builds that class instead of its own | the scenario's own |
+| `sim_vehicle(name)` | the vehicle's name in `VEHICLES`, a module name in `wise_dynamics/basilisk/vehicles/`; the plugin builds one and passes it to the scenario | `imu_spacecraft` |
 | `sim_fidelity(level)` | `hi`, `med` or `lo`, as the Scenarios section defines them | `lo` |
 
 A run is capped unless `--full-monte-carlo` is given: every test's case count is at most 2, and a
@@ -177,11 +174,11 @@ JSON, `null` when none is active; `current_session()` reads it.
 | `sim_case_index` | the case number; a test using it, directly or through the fixtures below, runs once per case |
 | `sim_duration_s` | the test's `sim_duration_s` |
 | `sim_test_directory` | the test's directory in the session its runs land in (`scratch` for a capped run), the directory `sim_run_file` writes to |
-| `sim_scenario` | the case's scenario at the test's `sim_fidelity`, dispersed from the case's two streams; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
+| `sim_scenario` | the case's scenario flying a new vehicle of the test's `sim_vehicle`, at the test's `sim_fidelity`, dispersed by `disperse_case` from the case's seed; its vehicle is `sim_scenario.vehicle`, and what it drew is `sim_scenario.draws` |
 | `sim_run_file` | `sim_run_file(datasets, attrs=None)` writes `run_<NNNN>.h5` in the test's directory of the session its runs land in (`scratch` for a capped run) through `sim_scenario.vehicle` and returns its path, with root attributes `case`, `seed` (0), `fidelity`, `created_utc`, `versions_bsk`, `versions_wise_dynamics`, the install's provenance (`versions_wise_dynamics_install`, `pinned` or `local`; `versions_wise_dynamics_commit`; `versions_wise_dynamics_requested_revision`, empty for a local install; `versions_wise_dynamics_dirty`, always false for a pin) and the calling repository's provenance (`versions_caller_commit`, the commit of the git repository that holds the rootdir, and `versions_caller_dirty`, whether its tree has uncommitted changes; both absent when the rootdir is not in a git checkout), `draw_<name>` per entry of `sim_scenario.draws`, and `attrs` beside them |
 
-Case `k` takes its draws and its noise seed from the two streams of
-`numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
+Case `k` takes its draws, from the first stream, and its noise seed, from the second, from the two
+streams of `numpy.random.SeedSequence(0, spawn_key=(k,)).spawn(2)`, so it is the same whatever `sim_runs`
 is and reruns alone by its node id: `pytest "<test file>::test_case[k]" --full-monte-carlo`.
 
 A session is a named working set holding one set of run files per test

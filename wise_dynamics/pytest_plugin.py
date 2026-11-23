@@ -42,6 +42,7 @@ _INSTALL_HINT = (
 _DEFAULT_OUT = "monte_carlo"
 _CAPPED_RUNS = 2
 _DEFAULT_SCENARIO = "leo500"
+_DEFAULT_VEHICLE = "imu_spacecraft"
 _DEFAULT_RUNS = 8
 _DEFAULT_FIDELITY = "lo"
 _DEFAULT_DURATION_S = 5700.0
@@ -55,7 +56,7 @@ _MARKS = (
     (
         "sim_vehicle",
         "name",
-        "name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default: the scenario's own",
+        f"name of the vehicle in wise_dynamics.basilisk.vehicles.VEHICLES; default {_DEFAULT_VEHICLE}",
     ),
     ("sim_runs", "n", f"number of cases, at least 1; default {_DEFAULT_RUNS}"),
     (
@@ -91,7 +92,7 @@ class _Settings(NamedTuple):
         fidelity: The integration fidelity.
         duration_s: Each case's simulated duration, in seconds.
         directory: The directory the test's run files are written to, in the runs' session.
-        vehicle: The vehicle's name in `VEHICLES`, or None for the scenario's own.
+        vehicle: The vehicle's name in `VEHICLES`.
     """
 
     scenario: str
@@ -99,7 +100,7 @@ class _Settings(NamedTuple):
     fidelity: str
     duration_s: float
     directory: Path
-    vehicle: str | None
+    vehicle: str
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -398,7 +399,7 @@ def sim_test_directory(request: pytest.FixtureRequest) -> Path:
 
 @pytest.fixture
 def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenario":
-    """This case's scenario, dispersed from the case's two random streams.
+    """This case's scenario, flying a new vehicle and dispersed from the case's seed.
 
     Args:
         request: The fixture request, whose node carries the `sim_scenario` and `sim_fidelity`
@@ -406,19 +407,14 @@ def sim_scenario(request: pytest.FixtureRequest, sim_case_index: int) -> "Scenar
         sim_case_index: The case number.
 
     Returns:
-        The test's `sim_scenario` at its `sim_fidelity`, dispersed from the case's first stream,
-        with its vehicle's sensor noise seeded from the case's second. Its vehicle is
+        The test's `sim_scenario` flying a new vehicle of its `sim_vehicle`, at its
+        `sim_fidelity`, dispersed by `disperse_case` from the case's seed. Its vehicle is
         `sim_scenario.vehicle`.
     """
     settings = _settings(request.node)
-    draws_stream, noise_stream = _streams(sim_case_index)
-    scenario_type = _scenario_type(settings.scenario)
-    if settings.vehicle is None:
-        scenario = scenario_type()
-    else:
-        scenario = scenario_type(vehicle_type=_vehicle_type(settings.vehicle))
+    scenario = _scenario_type(settings.scenario)(_vehicle_type(settings.vehicle)())
     scenario.fidelity = settings.fidelity
-    scenario.disperse(np.random.default_rng(draws_stream), noise_seed=int(noise_stream.generate_state(1)[0]))
+    scenario.disperse_case(np.random.SeedSequence(_SEED, spawn_key=(sim_case_index,)))
     return scenario
 
 
@@ -518,14 +514,13 @@ def _settings(node: pytest.Function) -> _Settings:
         raise ValueError(f"sim_fidelity: expected one of {_FIDELITIES}, got {fidelity!r}")
     if not isinstance(duration_s, numbers.Real) or isinstance(duration_s, bool) or not duration_s > 0:
         raise ValueError(f"sim_duration_s: expected a positive number, got {duration_s!r}")
-    vehicle = values.get("sim_vehicle")
-    if vehicle is not None:
-        if not isinstance(vehicle, str):
-            raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
-        try:
-            _vehicle_type(vehicle)
-        except ValueError as error:
-            raise ValueError(f"sim_vehicle: {error}") from None
+    vehicle = values.get("sim_vehicle", _DEFAULT_VEHICLE)
+    if not isinstance(vehicle, str):
+        raise ValueError(f"sim_vehicle: expected a vehicle name, got {vehicle!r}")
+    try:
+        _vehicle_type(vehicle)
+    except ValueError as error:
+        raise ValueError(f"sim_vehicle: {error}") from None
     if _capped(node.config):
         runs = min(runs, _CAPPED_RUNS)
     directory = _run_dir(node)
@@ -833,15 +828,3 @@ def _vehicle_type(name: str) -> "type[Vehicle]":
     if name not in VEHICLES:
         raise ValueError(f"unknown vehicle {name!r}; known vehicles: {', '.join(sorted(VEHICLES))}")
     return VEHICLES[name]
-
-
-def _streams(index: int) -> list[np.random.SeedSequence]:
-    """Spawn case `index`'s two random streams from the seed `_SEED`.
-
-    Args:
-        index: The case number.
-
-    Returns:
-        The first stream, which draws the dispersions, and the second, which seeds sensor noise.
-    """
-    return np.random.SeedSequence(_SEED, spawn_key=(index,)).spawn(2)

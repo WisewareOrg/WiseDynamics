@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import SCENARIOS
+from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo400 import Leo400
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
@@ -33,6 +33,6 @@ def test_leo400_differs_from_leo500_only_in_its_semi_major_axis():
 
 def test_leo400_places_its_vehicle_on_its_own_orbit():
     """The initial position's radius is within the eccentricity of 6771 km, not of 6871 km."""
-    radius = float(np.linalg.norm(Leo400().initial_state()["r0_N"]))
+    radius = float(np.linalg.norm(Leo400(ImuSpacecraft()).initial_state()["r0_N"]))
 
     assert radius == pytest.approx(6771.0e3, rel=Leo400.eccentricity)

@@ -6,7 +6,7 @@ __all__ = ["Leo400"]
 
 
 class Leo400(Leo500):
-    """`Leo500` on a lower orbit: the same vehicle, environment, placement and dispersions.
+    """`Leo500` on a lower orbit: the same environment, placement and dispersions.
 
     Attributes:
         semi_major_axis_m: Semi-major axis of the initial orbit, in metres.

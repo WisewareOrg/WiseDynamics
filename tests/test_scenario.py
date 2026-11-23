@@ -36,7 +36,7 @@ def _guidance():
 
 def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     """A run records `t_s`, the vehicle's fields and the flight-software fields at every step."""
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     fields = scenario.vehicle.recorded_fields()
     guidance, fsw_fields = _guidance()
     datasets = scenario.run(guidance, fsw_fields, duration_s=50.0)
@@ -68,9 +68,9 @@ def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(fidelity: s
         fidelity: The fidelity level set on the scenario.
         integrator_type: The Basilisk integrator class the level gives.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     scenario.fidelity = fidelity
-    scenario.disperse(np.random.default_rng(0), noise_seed=1)
+    scenario.disperse_case(np.random.SeedSequence(0))
     scenario.run(_Guidance(), {}, duration_s=1.0)
     (integrator,) = scenario._integrators
     assert type(integrator) is integrator_type
@@ -101,7 +101,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
         period_s: The flight software's period, in seconds.
         step_ns: The dynamics task period the flight software's period gives, in nanoseconds.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
     scenario.run(fsw, {}, duration_s=0.0)
     dynamics, sensors, flight, record = scenario._simulation.TaskList
@@ -113,7 +113,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
 
 def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
     """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     fsw = type("_Paced", (_Guidance,), {"period_s": 1.000000007})()
     with pytest.raises(ValueError, match=r"the 1000000007 ns flight-software period"):
         scenario.run(fsw, {}, duration_s=0.0)
@@ -121,8 +121,8 @@ def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
 
 def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     """The propagated modules step with the dynamics; the sensors only at the FSW period."""
-    scenario = Leo500()
-    vehicle = scenario.vehicle
+    vehicle = ImuSpacecraft()
+    scenario = Leo500(vehicle)
     scenario.run(_Guidance(), {}, duration_s=1.0)
     dynamics, sensors, _, _ = scenario._simulation.TaskList
     assert dynamics.TaskModels == vehicle.models()
@@ -132,22 +132,28 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
 def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
     """Sampled at the flight software's period, a case's IMU noise does not depend on the tier.
 
-    What differs between the tiers' IMU outputs is the numerical difference in the truth they
-    measure, far below the noise.
+    The tiers' IMU outputs differ by exactly their truth difference: the bias and the noise are
+    identical.
     """
     gyro = {}
+    truth = {}
     for fidelity in ("lo", "hi"):
-        scenario = Leo500()
+        scenario = Leo500(ImuSpacecraft())
         scenario.fidelity = fidelity
-        scenario.disperse(np.random.default_rng(3), noise_seed=5)
-        gyro[fidelity] = scenario.run(_Guidance(), {}, duration_s=600.0)["imu/gyro_P"][0]
+        scenario.disperse_case(np.random.SeedSequence(3))
+        datasets = scenario.run(_Guidance(), {}, duration_s=600.0)
+        gyro[fidelity] = datasets["imu/gyro_P"][0]
+        truth[fidelity] = datasets["truth/omega_BN_B"][0]
     assert np.std(gyro["hi"], axis=0).min() > 1e-6
-    assert np.abs(gyro["lo"] - gyro["hi"]).max() < 1e-9
+    noise_difference = (gyro["lo"] - gyro["hi"]) - (truth["lo"] - truth["hi"])
+    assert np.abs(noise_difference).max() < 1e-15, (
+        f"the tiers' noise differs by {np.abs(noise_difference).max():.2e} rad/s; expected equal to rounding, < 1e-15"
+    )
 
 
 def test_a_scenario_runs_once():
     """A second `run` of the same scenario is refused."""
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     scenario.run(_Guidance(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
         scenario.run(_Guidance(), {}, duration_s=1.0)
@@ -196,7 +202,7 @@ def test_the_flight_software_steps_at_its_own_period_and_is_recorded_at_its_inst
     It reads the IMU output of that instant, and each recorded value is the one it wrote at that
     row's own time, t = 0 included.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     fsw = _Stepping(scenario.vehicle.readers()["imu"])
     datasets = scenario.run(fsw, {"fsw/time_tag": (fsw.output_msg, "timeTag", "s")}, duration_s=20.0)
     assert fsw.called_ns == [k * 1_000_000_000 for k in range(21)]
@@ -212,7 +218,7 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     The flight software reads the IMU output written at its own instant, and the IMU output
     recorded at each odd second is the one written a second before.
     """
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     paced = type("_Paced", (_Stepping,), {"period_s": 2.0})
     fsw = paced(scenario.vehicle.readers()["imu"])
     datasets = scenario.run(fsw, {}, duration_s=6.0)
@@ -251,7 +257,7 @@ class _Marker(sysModel.SysModel):
 def test_the_ground_runs_after_the_flight_software_at_every_shared_instant():
     """The ground, in its own process, is called after the flight software at each instant."""
     order: list[tuple[int, str]] = []
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     scenario.run(
         _Marker("fsw", order),
         {},
@@ -264,7 +270,7 @@ def test_the_ground_runs_after_the_flight_software_at_every_shared_instant():
 def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
     """A 2 s ground is called every 2 s while the 1 s flight software runs every second."""
     order: list[tuple[int, str]] = []
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     ground = _Marker("ground", order, period_s=2.0)
     scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
     assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
@@ -303,7 +309,7 @@ class _Stopping(_Marker):
 def test_a_ground_that_stops_is_not_called_again_while_the_flight_software_runs_on():
     """After `stop_ground` at t = 1 s, the ground is never called again; the run goes on."""
     order: list[tuple[int, str]] = []
-    scenario = Leo500()
+    scenario = Leo500(ImuSpacecraft())
     ground = _Stopping(order, scenario, at_ns=1_000_000_000)
     scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
     assert [t for t, name in order if name == "ground"] == [0, 1_000_000_000]
@@ -333,7 +339,7 @@ def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
     read the previous step's rate. Basilisk's `ImuSensor` writes zeros on its first call, at t = 0,
     so the comparison starts at the next sample.
     """
-    scenario = Leo500(vehicle_type=_Exact)
+    scenario = Leo500(_Exact())
     datasets = scenario.run(_Guidance(), {}, duration_s=60.0)
     omega = datasets["truth/omega_BN_B"][0]
     assert np.abs(np.diff(omega, axis=0)).max() > 1e-6

@@ -124,7 +124,7 @@ def test_a_commanded_torque_spins_the_wheel_as_basilisk_s_wheel_model_says(
         torque: Builds a wheel torque command.
         vehicle_type: The wheel vehicle flown.
     """
-    scenario = Leo500(vehicle_type=vehicle_type)
+    scenario = Leo500(vehicle_type())
     host = FswHost(commanding({"wheel": torque(TORQUE_N_M)}), scenario.vehicle)
 
     datasets = scenario.run(host, {}, duration_s=4.0)
@@ -151,7 +151,7 @@ def test_a_tick_with_no_command_leaves_the_last_one_in_force(
         commanding: The stub build that commands what it is given.
         torque: Builds a wheel torque command.
     """
-    scenario = Leo500(vehicle_type=ImuWheelSpacecraft)
+    scenario = Leo500(ImuWheelSpacecraft())
     host = FswHost(commanding({"wheel": torque(TORQUE_N_M)}, ticks=1), scenario.vehicle)
 
     datasets = scenario.run(host, {}, duration_s=4.0)

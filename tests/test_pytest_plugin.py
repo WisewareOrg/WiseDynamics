@@ -15,7 +15,7 @@ import h5py
 import numpy as np
 import pytest
 
-from wise_dynamics.basilisk import SCENARIOS
+from wise_dynamics.basilisk import SCENARIOS, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 README = Path(__file__).parent.parent / "wise_dynamics" / "basilisk" / "README.md"
@@ -179,21 +179,21 @@ _DRAWS = ("q0_BN", "omega0_BN_B_rad_s", "gyro_bias_P_rad_s", "accel_bias_P_m_s2"
 """The names of Leo500's draws, in draw order, as its docstring states."""
 
 
-def _case_streams(seed: int, index: int) -> list[np.random.SeedSequence]:
-    """Derive case `index`'s two streams, as the README states.
+def _case_seed(seed: int, index: int) -> np.random.SeedSequence:
+    """Derive case `index`'s seed, as the README states.
 
     Args:
         seed: The session seed.
         index: The case number.
 
     Returns:
-        The draw stream, then the noise stream.
+        The case's seed, which `disperse_case` spawns its streams from.
     """
-    return np.random.SeedSequence(seed, spawn_key=(index,)).spawn(2)
+    return np.random.SeedSequence(seed, spawn_key=(index,))
 
 
 def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
-    """Derive the standard draws of case `index`: `Leo500`'s dispersion from its draw stream.
+    """Derive the standard draws of case `index`: `Leo500`'s and its vehicle's dispersion from the case's seed.
 
     Args:
         seed: The session seed.
@@ -202,9 +202,8 @@ def _standard_draws(seed: int, index: int) -> dict[str, np.ndarray]:
     Returns:
         Draw name to its value, in draw order.
     """
-    draws_stream, _ = _case_streams(seed, index)
-    scenario = Leo500()
-    scenario.disperse(np.random.default_rng(draws_stream), noise_seed=0)
+    scenario = Leo500(ImuSpacecraft())
+    scenario.disperse_case(_case_seed(seed, index))
     return scenario.draws
 
 
@@ -804,7 +803,7 @@ MARKdef test_case(sim_case_index, sim_scenario):
 def test_the_sim_vehicle_mark_chooses_the_vehicle_class_a_scenario_flies(
     pytester: pytest.Pytester, scenario: str, mark: str, expected: str
 ):
-    """A marked vehicle is the class the scenario flies; no mark keeps the scenario's own.
+    """A marked vehicle is the class the scenario flies; no mark flies the plugin's default, `imu_spacecraft`.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.

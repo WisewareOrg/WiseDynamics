@@ -17,8 +17,9 @@ class Vehicle:
     A subclass builds its Basilisk objects and provides `models()`, the propagated modules a
     scenario steps with the dynamics; `sensor_models(sample_period_s)`, which sets each sensor's
     per-sample noise for that period and lists the sensors a scenario samples at it; `readers()`,
-    its sensor outputs by role; and `recorded_fields()`, run-file dataset path to the
-    `(message, field, units)` it records. It may override `writers()`, its actuator inputs by role,
+    its sensor outputs by role; `recorded_fields()`, run-file dataset path to the
+    `(message, field, units)` it records; and `disperse(rng, *, noise_seed)`, which draws and
+    applies its own dispersion in place. It may override `writers()`, its actuator inputs by role,
     and `finish(datasets)` to change what the recorders captured before the run returns it. A
     scenario places its `spacecraft`.
 
@@ -27,6 +28,21 @@ class Vehicle:
     """
 
     spacecraft: Any
+
+    def disperse(self, rng: np.random.Generator, *, noise_seed: int) -> dict[str, np.ndarray]:
+        """Draw this vehicle's dispersion from `rng`, apply it to this vehicle and seed its sensor noise.
+
+        Args:
+            rng: The generator the dispersion is drawn from.
+            noise_seed: The seed of this vehicle's sensor noise.
+
+        Returns:
+            What was drawn, name to value.
+
+        Raises:
+            NotImplementedError: Always: a subclass provides it.
+        """
+        raise NotImplementedError
 
     def models(self) -> list[Any]:
         """List the vehicle's propagated Basilisk modules in task order.
