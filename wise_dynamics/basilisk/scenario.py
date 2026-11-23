@@ -176,7 +176,8 @@ class Scenario:
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
         `duration_s`. A period that no step of at least 1 ms divides is refused with a
-        `ValueError` before anything runs.
+        `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
+        or raises.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -205,52 +206,54 @@ class Scenario:
         fsw_ns = macros.sec2nano(fsw_module.period_s)
         step_ns = _step_ns(fsw_ns)
         self._executed = True
-
-        make_integrator = _FIDELITY[self.fidelity]
-        fields = {}
-        for vehicle in self.vehicles:
-            integrator = make_integrator(vehicle.spacecraft)
-            vehicle.spacecraft.setIntegrator(integrator)
-            self._integrators.append(integrator)
-            fields.update(vehicle.recorded_fields())
-        fields.update(fsw_fields)
-        recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
-
-        tasks = (
-            (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
-            (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
-            (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
-            (_RECORD_TASK, step_ns, _RECORD_PRIORITY),
-        )
-        process = self._simulation.CreateNewProcess(_PROCESS, _PROCESS_PRIORITY)
-        for name, task_ns, priority in tasks:
-            process.addTask(self._simulation.CreateNewTask(name, task_ns), priority)
-        for vehicle in self.vehicles:
-            for model in vehicle.models():
-                self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
-            for sensor in vehicle.sensor_models(fsw_module.period_s):
-                self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
-        self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
-        if ground is not None:
-            ground_process = self._simulation.CreateNewProcess(_GROUND_PROCESS, _GROUND_PROCESS_PRIORITY)
-            ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
-            ground_process.addTask(ground_task)
-            self._simulation.AddModelToTask(_GROUND_TASK, ground)
-        for recorder in recorders.values():
-            self._simulation.AddModelToTask(_RECORD_TASK, recorder)
         try:
-            self._simulation.InitializeSimulation()
-            self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
-            self._simulation.ExecuteSimulation()
-        except BaseException:
-            if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
-                raise fsw_module.failure from None
-            raise
+            make_integrator = _FIDELITY[self.fidelity]
+            fields = {}
+            for vehicle in self.vehicles:
+                integrator = make_integrator(vehicle.spacecraft)
+                vehicle.spacecraft.setIntegrator(integrator)
+                self._integrators.append(integrator)
+                fields.update(vehicle.recorded_fields())
+            fields.update(fsw_fields)
+            recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
 
-        first = next(iter(recorders.values()))
-        datasets = {"t_s": (np.asarray(first.times()) / macros.sec2nano(1.0), "s")}
-        for path, (_, field, units) in fields.items():
-            datasets[path] = (np.array(getattr(recorders[path], field)), units)
-        for vehicle in self.vehicles:
-            datasets = vehicle.finish(datasets)
-        return datasets
+            tasks = (
+                (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
+                (_SENSOR_TASK, fsw_ns, _SENSOR_PRIORITY),
+                (_FSW_TASK, fsw_ns, _FSW_PRIORITY),
+                (_RECORD_TASK, step_ns, _RECORD_PRIORITY),
+            )
+            process = self._simulation.CreateNewProcess(_PROCESS, _PROCESS_PRIORITY)
+            for name, task_ns, priority in tasks:
+                process.addTask(self._simulation.CreateNewTask(name, task_ns), priority)
+            for vehicle in self.vehicles:
+                for model in vehicle.models():
+                    self._simulation.AddModelToTask(_DYNAMICS_TASK, model)
+                for sensor in vehicle.sensor_models(fsw_module.period_s):
+                    self._simulation.AddModelToTask(_SENSOR_TASK, sensor)
+            self._simulation.AddModelToTask(_FSW_TASK, fsw_module)
+            if ground is not None:
+                ground_process = self._simulation.CreateNewProcess(_GROUND_PROCESS, _GROUND_PROCESS_PRIORITY)
+                ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
+                ground_process.addTask(ground_task)
+                self._simulation.AddModelToTask(_GROUND_TASK, ground)
+            for recorder in recorders.values():
+                self._simulation.AddModelToTask(_RECORD_TASK, recorder)
+            try:
+                self._simulation.InitializeSimulation()
+                self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
+                self._simulation.ExecuteSimulation()
+            except BaseException:
+                if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
+                    raise fsw_module.failure from None
+                raise
+
+            first = next(iter(recorders.values()))
+            datasets = {"t_s": (np.asarray(first.times()) / macros.sec2nano(1.0), "s")}
+            for path, (_, field, units) in fields.items():
+                datasets[path] = (np.array(getattr(recorders[path], field)), units)
+            for vehicle in self.vehicles:
+                datasets = vehicle.finish(datasets)
+            return datasets
+        finally:
+            del self._simulation
