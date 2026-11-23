@@ -31,3 +31,15 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 - `pytest` — `uv run pytest`, the full suite.
 
 Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.
+
+## Measuring a case's cost
+
+`uv run python benchmarks/case_budget.py` times a warm Leo500 case layer by layer, from dynamics alone
+to the run file, and against the case flown through `Scenario.run`; `--allocations` adds each layer's
+native allocations per tick, counted with memray. It is run by hand, never in CI, since wall time on a
+shared runner says nothing.
+
+`tests/allocations.py`'s `native_allocations_per_tick` counts the native allocations per tick that a
+named code path makes, as the slope between two flights, so a test can hold a path to a count. It counts
+only allocations whose native stack holds the path's frame; that a path never ran also reads 0, so the
+test shows the path ran.

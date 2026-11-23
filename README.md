@@ -52,6 +52,7 @@ WiseDynamics depends on no flight software; flight software depends on WiseDynam
 - `wise_dynamics/` — the installed package: the pytest plugin and its sessions, and the `basilisk` subpackage below.
 - `wise_dynamics/basilisk/` — the vehicle and scenario interfaces, the vehicles, the scenarios and the flight-software host.
 - `tests/` — the test suite.
+- `benchmarks/` — `case_budget.py`, which times a case layer by layer; run by hand.
 - `justfile` — the `session` recipe.
 - `docs/decisions/` — this repository's ADRs.
 
