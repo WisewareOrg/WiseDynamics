@@ -114,6 +114,10 @@ class ImuSpacecraft(Vehicle):
         self.imu.scStateInMsg.subscribeTo(self.spacecraft.scStateOutMsg)
         self.imu.sensorPos_B = (0.0, 0.0, 0.0)
         self.imu.dcm_PB = np.eye(3)
+        self._configure_imu()
+
+    def _configure_imu(self) -> None:
+        """Set the IMU's biases and noise seed from this vehicle's attributes."""
         self.imu.senRotBias = self.gyro_bias_P_rad_s
         self.imu.senTransBias = self.accel_bias_P_m_s2
         self.imu.RNGSeed = int(self.noise_seed)
@@ -141,9 +145,7 @@ class ImuSpacecraft(Vehicle):
         self.gyro_bias_P_rad_s = draws["gyro_bias_P_rad_s"]
         self.accel_bias_P_m_s2 = draws["accel_bias_P_m_s2"]
         self.noise_seed = noise_seed
-        self.imu.senRotBias = self.gyro_bias_P_rad_s
-        self.imu.senTransBias = self.accel_bias_P_m_s2
-        self.imu.RNGSeed = int(noise_seed)
+        self._configure_imu()
         return draws
 
     def models(self) -> list[Any]:

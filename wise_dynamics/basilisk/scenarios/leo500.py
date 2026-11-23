@@ -60,13 +60,12 @@ class Leo500(Scenario):
             vehicle: The vehicle to fly.
         """
         super().__init__(vehicle)
-        state = self.initial_state()
         self._gravity = simIncludeGravBody.gravBodyFactory()
         earth = self._gravity.createEarth()
         earth.mu = self.mu_m3_s2["earth"]
         earth.isCentralBody = True
         self._gravity.addBodiesTo(vehicle.spacecraft)
-        self._set_initial_state(state)
+        self._set_initial_state()
 
     def disperse(self, rng: np.random.Generator) -> dict[str, np.ndarray]:
         """Disperse the placement: the attitude, then the body rate.
@@ -87,7 +86,7 @@ class Leo500(Scenario):
         nominal = Rotation.from_quat(type(self).q0_BN, scalar_first=True)
         self.q0_BN = (nominal * turn).as_quat(canonical=True, scalar_first=True)  # ty: ignore[missing-union-attribute]
         self.omega0_BN_B_rad_s = np.asarray(type(self).omega0_BN_B_rad_s) + rng.normal(0.0, 0.2 * D2R, size=3)
-        self._set_initial_state(self.initial_state())
+        self._set_initial_state()
         return {"q0_BN": self.q0_BN, "omega0_BN_B_rad_s": self.omega0_BN_B_rad_s}
 
     def initial_state(self) -> dict[str, np.ndarray]:
@@ -110,12 +109,9 @@ class Leo500(Scenario):
             "omega0_BN_B": np.asarray(self.omega0_BN_B_rad_s, dtype=float),
         }
 
-    def _set_initial_state(self, state: dict[str, np.ndarray]) -> None:
-        """Set the initial state on the vehicle's hub.
-
-        Args:
-            state: The placement's initial condition, as `initial_state` gives it.
-        """
+    def _set_initial_state(self) -> None:
+        """Set the placement's initial state, as `initial_state` gives it, on the vehicle's hub."""
+        state = self.initial_state()
         hub = self.vehicle.spacecraft.hub
         hub.r_CN_NInit = state["r0_N"]
         hub.v_CN_NInit = state["v0_N"]
