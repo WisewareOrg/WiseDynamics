@@ -72,6 +72,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     vehicle = scenario.vehicle
     state = scenario.initial_state()
     simulation = scenario._simulation
+
     scenario.run(_Guidance(), {}, duration_s=1.0)
 
     (earth,) = vehicle.spacecraft.gravField.gravBodies

@@ -101,7 +101,6 @@ A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a 
 `ground_process`, whose priority is below the scenario process's, so at each instant they share it
 runs after every task of the scenario process: after the flight software, and after the recorders.
 The ground can end its own part of the run with `stop_ground()`.
-`run` releases its simulation when it returns or raises.
 
 ## Flight-software host
 
