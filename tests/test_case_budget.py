@@ -198,4 +198,4 @@ def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: di
         for function, per_tick in per_layer[layer].items()
         if per_tick != below.get(function, 0.0)
     }
-    assert added == pytest.approx(BUDGET[layer], abs=1e-9)
+    assert added == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer adds {added}"
