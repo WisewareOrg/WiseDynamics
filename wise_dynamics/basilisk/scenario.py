@@ -176,7 +176,8 @@ class Scenario:
         Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
         truth and flight output are recorded from the same instant. Runs from t = 0 for
         `duration_s`. A period that no step of at least 1 ms divides is refused with a
-        `ValueError` before anything runs. `run` releases its simulation when it returns or raises.
+        `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
+        or raises.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
