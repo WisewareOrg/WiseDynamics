@@ -112,9 +112,9 @@ vehicle's `readers()` and `writers()` once, when it is built.
 
 At reset the host takes each reader's payload once and calls `boot()`. Each later instant of its
 task, from one period after the reset, it calls `tick` with the simulation time in Basilisk's
-integer nanoseconds and `{role: payload}`, the payloads as the readers gave them, unconverted. A
-payload is a live view of its role's message, the same object at every tick, holding the message
-as last written; a later write overwrites it, so a build copies what it keeps.
+integer nanoseconds and `{role: payload}`, a read-only mapping of the payloads as the readers gave
+them, unconverted. A payload is a live view of its role's message, the same object at every tick,
+so a build copies what it keeps.
 Its class is whichever SWIG type Basilisk returns, which may be a simulation module's alias of
 `messaging.<Name>Payload`, such as `imuSensor`'s, without that class's `__dtype__`; a build that
 needs the message type resolves it by name through `Basilisk.architecture.messaging`.

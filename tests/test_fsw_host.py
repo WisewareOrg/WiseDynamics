@@ -22,8 +22,9 @@ class _Stub:
 
     It logs `"boot"`, then each tick's `t_ns`, in `events`; each tick's roles in `roles`; each
     tick's `t_ns` to the `imu` reading's `AngVelPlatform` in `gyro`; and each tick's payloads, as
-    given, in `payloads`. It raises `_Boom` in `fail_in`, `"boot"` or `"tick"`, and keeps it in
-    `raised`. The `commanding` fixture's build commands.
+    given, in `payloads`, and each tick's mapping itself in `mappings`. It raises `_Boom` in
+    `fail_in`, `"boot"` or `"tick"`, and keeps it in `raised`. The `commanding` fixture's build
+    commands.
 
     Attributes:
         period_s: The build's period, in seconds.
@@ -41,6 +42,7 @@ class _Stub:
         self.gyro: dict[int, list[float]] = {}
         self.roles: list[list[str]] = []
         self.payloads: list[Mapping[str, Any]] = []
+        self.mappings: list[Any] = []
         self.fail_in = fail_in
         self.raised: _Boom | None = None
 
@@ -62,6 +64,7 @@ class _Stub:
         self.events.append(t_ns)
         self.roles.append(sorted(messages_by_role))
         self.payloads.append(dict(messages_by_role))
+        self.mappings.append(messages_by_role)
         self.gyro[t_ns] = list(messages_by_role["imu"].AngVelPlatform)
         self._maybe_fail("tick")
         return {}
@@ -112,16 +115,20 @@ def test_the_vehicle_s_readings_reach_the_build_by_role_as_sampled_at_the_tick()
         assert reading == gyro_P[row].tolist(), t_ns
 
 
-def test_each_role_s_payload_is_one_view_the_whole_run():
-    """Every tick gets the same payload object per role, taken once."""
+def test_every_tick_gets_each_role_s_payload_taken_at_reset_in_a_read_only_mapping():
+    """Each role's payload is the same object at every tick, and a tick cannot change the mapping."""
     scenario = Leo500(ImuSpacecraft())
     build = _Stub()
 
     scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=2.0)
 
     first, *later = build.payloads
-    for payloads in later:
-        assert all(payloads[role] is first[role] for role in first), "a tick got a new payload"
+    assert first and later
+    for tick, payloads in enumerate(later, start=2):
+        for role in first:
+            assert payloads[role] is first[role], f"tick {tick} got a new {role} payload"
+    with pytest.raises(TypeError):
+        build.mappings[0]["imu"] = None
 
 
 @pytest.mark.parametrize("where", ["boot", "tick"])
