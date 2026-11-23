@@ -126,13 +126,13 @@ def test_disperse_draws_only_the_placement_and_leaves_the_vehicle_nominal():
 
 
 def test_disperse_case_draws_the_placement_then_the_vehicle_in_place_and_records_both():
-    """`disperse_case` draws the placement then the vehicle's biases from one stream, and keeps the vehicle."""
+    """`disperse_case` draws the placement and the vehicle's biases from separate streams, and keeps the vehicle."""
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
-    draws_seed, noise_seed = np.random.SeedSequence(7).spawn(2)
+    initial_conditions_seed, noise_seed, vehicle_seed = np.random.SeedSequence(7).spawn(3)
     scenario.disperse_case(np.random.SeedSequence(7))
 
-    rng = np.random.default_rng(draws_seed)
+    rng = np.random.default_rng(initial_conditions_seed)
     turn = Rotation.from_rotvec(rng.normal(0.0, 0.01, size=3) * 4.0 / 1.14)
     nominal_attitude = Rotation.from_quat(Leo500.q0_BN, scalar_first=True)
     expected = {"q0_BN": (nominal_attitude * turn).as_quat(canonical=True, scalar_first=True)}  # ty: ignore[missing-union-attribute]
@@ -141,6 +141,8 @@ def test_disperse_case_draws_the_placement_then_the_vehicle_in_place_and_records
         ("gyro_bias_P_rad_s", ImuSpacecraft.gyro_bias_P_rad_s, 1e-4),
         ("accel_bias_P_m_s2", ImuSpacecraft.accel_bias_P_m_s2, 1e-4),
     ):
+        if name == "gyro_bias_P_rad_s":
+            rng = np.random.default_rng(vehicle_seed)
         expected[name] = np.asarray(nominal) + rng.normal(0.0, std, size=3)
     assert list(scenario.draws) == list(expected)
     for name, value in expected.items():

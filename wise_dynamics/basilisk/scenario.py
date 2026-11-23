@@ -135,16 +135,18 @@ class Scenario:
     def disperse_case(self, seed: np.random.SeedSequence) -> None:
         """Disperse this case: the initial conditions, then the vehicle, and record what was drawn.
 
-        The case's seed spawns two children. The first seeds the generator the initial conditions
-        and then the vehicle draw from; the second gives the vehicle's sensor-noise seed.
+        The case's seed spawns three children, in order: the generator the initial conditions are
+        drawn from, the vehicle's sensor-noise seed, and the generator the vehicle's dispersion is
+        drawn from.
 
         Args:
             seed: The case's seed.
         """
-        draws_seed, noise_seed = seed.spawn(2)
-        rng = np.random.default_rng(draws_seed)
-        initial_conditions = self.disperse(rng)
-        vehicle_draws = self.vehicle.disperse(rng, noise_seed=int(noise_seed.generate_state(1)[0]))
+        initial_conditions_seed, noise_seed, vehicle_seed = seed.spawn(3)
+        initial_conditions = self.disperse(np.random.default_rng(initial_conditions_seed))
+        vehicle_draws = self.vehicle.disperse(
+            np.random.default_rng(vehicle_seed), noise_seed=int(noise_seed.generate_state(1)[0])
+        )
         self.draws = {**initial_conditions, **vehicle_draws}
 
     def stop_ground(self) -> None:
