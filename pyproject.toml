@@ -48,7 +48,7 @@ dev = [
 override-dependencies = ["pillow>=13"]
 
 [tool.uv.sources]
-check-python = { git = "https://github.com/WisewareOrg/wise-ci", subdirectory = "check-python", rev = "491858538bf01b19cfb86aab1195ad3822b59903" }
+check-python = { git = "https://github.com/WisewareOrg/wise-ci", subdirectory = "check-python", rev = "b27c5858566679b604bfcbf56f07ff93aeb5c81f" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
