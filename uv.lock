@@ -335,7 +335,7 @@ wheels = [
 [[package]]
 name = "check-python"
 version = "0"
-source = { git = "https://github.com/WisewareOrg/wise-ci?subdirectory=check-python&rev=491858538bf01b19cfb86aab1195ad3822b59903#491858538bf01b19cfb86aab1195ad3822b59903" }
+source = { git = "https://github.com/WisewareOrg/wise-ci?subdirectory=check-python&rev=b27c5858566679b604bfcbf56f07ff93aeb5c81f#b27c5858566679b604bfcbf56f07ff93aeb5c81f" }
 dependencies = [
     { name = "interrogate" },
     { name = "pydoclint" },
@@ -2233,7 +2233,7 @@ provides-extras = ["notebook"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "check-python", git = "https://github.com/WisewareOrg/wise-ci?subdirectory=check-python&rev=491858538bf01b19cfb86aab1195ad3822b59903" },
+    { name = "check-python", git = "https://github.com/WisewareOrg/wise-ci?subdirectory=check-python&rev=b27c5858566679b604bfcbf56f07ff93aeb5c81f" },
     { name = "ipykernel", specifier = ">=7.4.0" },
     { name = "nbclient", specifier = ">=0.11.0" },
     { name = "pytest-xdist", specifier = ">=3.6" },
