@@ -71,12 +71,13 @@ def test_the_placement_reaches_the_basilisk_objects():
     scenario = Placed(ImuSpacecraft())
     vehicle = scenario.vehicle
     state = scenario.initial_state()
+    simulation = scenario._simulation
     scenario.run(_Guidance(), {}, duration_s=1.0)
 
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody
     assert earth.mu == Leo500.mu_m3_s2["earth"]
-    dynamics, *_ = scenario._simulation.TaskList
+    dynamics, *_ = simulation.TaskList
     assert dynamics.TaskModels == vehicle.models()
     hub = vehicle.spacecraft.hub
     assert np.allclose(np.array(hub.sigma_BNInit).flatten(), [1 / 3] * 3, rtol=0, atol=1e-15)

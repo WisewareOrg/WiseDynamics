@@ -105,8 +105,9 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
     """
     scenario = Leo500(ImuSpacecraft())
     fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
+    simulation = scenario._simulation
     scenario.run(fsw, {}, duration_s=0.0)
-    dynamics, sensors, flight, record = scenario._simulation.TaskList
+    dynamics, sensors, flight, record = simulation.TaskList
     assert dynamics.TaskData.TaskPeriod == step_ns
     assert sensors.TaskData.TaskPeriod == round(period_s * 1e9)
     assert flight.TaskData.TaskPeriod == round(period_s * 1e9)
@@ -125,8 +126,9 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     """The propagated modules step with the dynamics; the sensors only at the FSW period."""
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
+    simulation = scenario._simulation
     scenario.run(_Guidance(), {}, duration_s=1.0)
-    dynamics, sensors, _, _ = scenario._simulation.TaskList
+    dynamics, sensors, _, _ = simulation.TaskList
     assert dynamics.TaskModels == vehicle.models()
     assert sensors.TaskModels == [vehicle.imu]
 
@@ -223,8 +225,9 @@ def test_the_sensors_sample_at_the_flight_software_period_not_the_step():
     scenario = Leo500(ImuSpacecraft())
     paced = type("_Paced", (_Stepping,), {"period_s": 2.0})
     fsw = paced(scenario.vehicle.readers()["imu"])
+    simulation = scenario._simulation
     datasets = scenario.run(fsw, {}, duration_s=6.0)
-    dynamics, *_ = scenario._simulation.TaskList
+    dynamics, *_ = simulation.TaskList
     assert dynamics.TaskData.TaskPeriod == 1_000_000_000
     assert fsw.called_ns == [k * 2_000_000_000 for k in range(4)]
     assert fsw.read_ns == fsw.called_ns
@@ -274,10 +277,11 @@ def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
     order: list[tuple[int, str]] = []
     scenario = Leo500(ImuSpacecraft())
     ground = _Marker("ground", order, period_s=2.0)
+    simulation = scenario._simulation
     scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
     assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
     assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(5)]
-    assert [process.Name for process in scenario._simulation.procList] == [
+    assert [process.Name for process in simulation.procList] == [
         "scenario_process",
         "ground_process",
     ]
