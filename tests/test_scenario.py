@@ -1,5 +1,7 @@
 """`Scenario.run`: what a run records, as run-file datasets, and that it runs once."""
 
+import weakref
+
 import numpy as np
 import pytest
 from Basilisk.architecture import messaging, sysModel
@@ -314,6 +316,46 @@ def test_a_ground_that_stops_is_not_called_again_while_the_flight_software_runs_
     scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
     assert [t for t, name in order if name == "ground"] == [0, 1_000_000_000]
     assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(4)]
+
+
+class _StoppingThenRaising(_Stopping):
+    """A ground that stops its own task at its call at a given time, then raises."""
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Stop the ground's task at `at_ns`, then raise there.
+
+        Args:
+            CurrentSimNanos: The simulation time of this call, in nanoseconds.
+
+        Raises:
+            RuntimeError: At `at_ns`.
+        """
+        super().UpdateState(CurrentSimNanos)
+        if CurrentSimNanos == self.at_ns:
+            raise RuntimeError("the ground fails")
+
+
+def test_a_scenario_keeps_no_ground_once_its_run_returns():
+    """With the scenario alive, a ground holding `stop_ground` is freed when `run` returns."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500(ImuSpacecraft())
+    ground = _Stopping(order, scenario, at_ns=1_000_000_000)
+    scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
+    kept = weakref.ref(ground)
+    del ground
+    assert kept() is None
+
+
+def test_a_scenario_keeps_no_ground_once_its_run_raises():
+    """With the scenario alive, a ground holding `stop_ground` is freed when `run` raises."""
+    order: list[tuple[int, str]] = []
+    scenario = Leo500(ImuSpacecraft())
+    ground = _StoppingThenRaising(order, scenario, at_ns=1_000_000_000)
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        scenario.run(_Marker("fsw", order), {}, duration_s=3.0, ground=ground)
+    kept = weakref.ref(ground)
+    del ground
+    assert kept() is None
 
 
 class _Exact(ImuSpacecraft):
