@@ -96,19 +96,6 @@ class Tableau:
                 raise ValueError(f"row {i} of a is not {stages} long and zero from column {i} on: {self}")
 
 
-def _check_spacecraft(craft: Any) -> None:
-    """Refuse anything but a Basilisk `Spacecraft`, whose address the library reads as its `DynamicObject`.
-
-    Args:
-        craft: What is passed as the spacecraft.
-
-    Raises:
-        TypeError: `craft` is not a Basilisk `Spacecraft`.
-    """
-    if not isinstance(craft, spacecraft.Spacecraft):
-        raise TypeError(f"the compiled integrator takes a Basilisk Spacecraft, not {type(craft).__name__}")
-
-
 def install(craft: Any, tableau: Tableau) -> None:
     """Give a Basilisk spacecraft the compiled integrator of `tableau`, which the spacecraft owns.
 
@@ -121,7 +108,8 @@ def install(craft: Any, tableau: Tableau) -> None:
         RuntimeError: The spacecraft did not take the integrator, as one whose integration is synced to
             another's does not, or it could not be built.
     """
-    _check_spacecraft(craft)
+    if not isinstance(craft, spacecraft.Spacecraft):
+        raise TypeError(f"the compiled integrator takes a Basilisk Spacecraft, not {type(craft).__name__}")
     stages = len(tableau.b)
     a = (ctypes.c_double * (stages * stages))(*(x for row in tableau.a for x in row))
     b = (ctypes.c_double * stages)(*tableau.b)
@@ -142,5 +130,6 @@ def integrates_here(craft: Any) -> bool:
     Raises:
         TypeError: `craft` is not a Basilisk `Spacecraft`.
     """
-    _check_spacecraft(craft)
+    if not isinstance(craft, spacecraft.Spacecraft):
+        raise TypeError(f"the compiled integrator takes a Basilisk Spacecraft, not {type(craft).__name__}")
     return _LIBRARY.wd_integrates_here(int(craft.this))
