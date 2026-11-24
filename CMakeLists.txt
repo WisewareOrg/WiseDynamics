@@ -3,7 +3,6 @@
 cmake_minimum_required(VERSION 3.26)
 project(wise_dynamics_native LANGUAGES NONE)
 
-# Parity with Basilisk's integrator is proven for its Linux x86_64 build only.
 if(NOT (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"))
   message(FATAL_ERROR
     "wise-dynamics builds its integrator for Linux x86_64 only, not "
@@ -35,9 +34,8 @@ add_library(runge_kutta SHARED native/runge_kutta.cpp)
 set_target_properties(runge_kutta PROPERTIES PREFIX "" OUTPUT_NAME "_runge_kutta_native" SUFFIX ".abi3.so")
 target_compile_features(runge_kutta PRIVATE cxx_std_17)
 target_compile_definitions(runge_kutta PRIVATE NDEBUG WD_BASILISK_REVISION="${basilisk_revision}")
-# The baseline x86-64 target, no fast math and no contraction into FMA, whatever the compiler defaults
-# to, so the arithmetic and Eigen's alignment are those of Basilisk's SSE2 build. An -m flag in CXXFLAGS
-# still enables its instructions; importing the library then refuses it, on the instruction set it reports.
+# The arithmetic and Eigen alignment of Basilisk's SSE2 build, whatever the compiler defaults to. An -m
+# flag in CXXFLAGS still enables its instructions, and importing the library then refuses it.
 target_compile_options(runge_kutta PRIVATE
   -march=x86-64 -mtune=generic -O2 -fno-fast-math -ffp-contract=off -fvisibility=hidden -fvisibility-inlines-hidden)
 target_include_directories(runge_kutta BEFORE PRIVATE native/include)

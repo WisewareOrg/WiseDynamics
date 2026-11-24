@@ -4,12 +4,12 @@
 // for every state element, so a run is bit-identical to one with Basilisk's integrator: each stage
 // sets the states to x0, sets each derivative to the first nonzero a_ij * k_j with each later nonzero
 // term added in j order, and propagates through DynParamManager::propagateStateVector, which adds
-// derivative * h to each state. Where Basilisk rebuilds string-keyed maps of heap matrices at every
-// stage, this holds each state's x0, k_j and increment in matrices sized once.
+// derivative * h to each state. It holds each state's x0, k_j and increment in matrices sized once.
+// ADR 0004 rev 1 records why WiseDynamics compiles it.
 //
 // It reads Basilisk's classes directly, so it is built against the headers of the exact Basilisk
 // build it links, whose source revision wd_basilisk_revision gives; wd_abi gives Basilisk's own
-// description of the layout this library was compiled with, for Python to compare with the one
+// description of the build facts this library was compiled with, for Python to compare with the ones
 // Basilisk records.
 
 #include <cstddef>
@@ -99,7 +99,7 @@ class RungeKutta : public StateVecIntegrator {
     std::vector<Slot> slots;
 };
 
-// Basilisk's own description of the layout this library is compiled with, as JSON keyed by the
+// Basilisk's own description of the build facts this library is compiled with, as JSON keyed by the
 // dotted keys of Basilisk.getBuildInfo()["abi"], each the fact Basilisk records there.
 std::string abiJson()
 {
@@ -153,7 +153,7 @@ __attribute__((visibility("default"))) bool wd_integrates_here(void* dynamics) n
 // The source revision of the Basilisk this library was built against.
 __attribute__((visibility("default"))) const char* wd_basilisk_revision() noexcept { return WD_BASILISK_REVISION; }
 
-// Basilisk's description of this library's layout, as `abiJson` gives it; the string lives as long as
+// Basilisk's description of this library's build facts, as `abiJson` gives it; the string lives as long as
 // the library.
 __attribute__((visibility("default"))) const char* wd_abi() noexcept
 {

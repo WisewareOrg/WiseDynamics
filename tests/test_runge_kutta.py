@@ -247,8 +247,8 @@ def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest
 
 
 @pytest.mark.parametrize("fact", sorted(json.loads(runge_kutta._LIBRARY.wd_abi())))
-def test_a_library_built_with_another_layout_than_basilisks_is_refused(fact: str, monkeypatch: pytest.MonkeyPatch):
-    """Loading the library under a Basilisk recording any layout fact other than the library's raises, naming it.
+def test_a_library_built_with_other_build_facts_than_basilisks_is_refused(fact: str, monkeypatch: pytest.MonkeyPatch):
+    """Loading the library under a Basilisk recording any build fact other than the library's raises, naming it.
 
     Args:
         fact: The dotted key, in `Basilisk.getBuildInfo()["abi"]`, of the fact Basilisk records differently.

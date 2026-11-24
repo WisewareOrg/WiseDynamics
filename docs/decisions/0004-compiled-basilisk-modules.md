@@ -1,7 +1,7 @@
 # 0004 — Augment Basilisk with compiled modules built against its SDK, delivered through the git pin
 
 **Status:** accepted
-**Decided:** 2026-11-23 (issue 52, sim-side cost)
+**Decided:** 2026-11-23 (issue 57, compiled Runge-Kutta)
 **Rev:** 1
 
 ## Revisions
@@ -17,7 +17,7 @@ stage, and dominated a case's native allocations and its dynamics. Nothing in Wi
 reach inside a Basilisk C++ module, and the Basilisk wheel cannot be changed from here.
 
 Whatever replaces stock Basilisk code has to keep every run file bit-identical, or it changes the data
-every analysis was judged on, and has to reach a consumer, which today takes WiseDynamics by a git pin and
+every analysis was judged on, and has to reach a consumer, which takes WiseDynamics by a git pin and
 nothing else.
 
 ## Decision
@@ -36,8 +36,7 @@ work needs. The first is the explicit Runge-Kutta integrator of the `lo` and `me
   merges itself when the build and the tests pass, and a consumer takes it with its next WiseDynamics pin.
 - **Refused, not trusted, on a mismatch.** Importing a module refuses a Basilisk whose source revision, or
   whose recorded build facts, differ from the module's: a layout mismatch corrupts memory rather than
-  raising, and another instruction set changes the arithmetic. The module computes its facts with
-  Basilisk's own ABI descriptor from `bsk-sdk`, and compares them with those the Basilisk wheel records.
+  raising, and another instruction set changes the arithmetic.
 - **Held to the code it replaces.** A module does the floating-point operations of the Basilisk code it
   replaces, in the same order, so a run is bit-identical; and it allocates nothing per step of its own.
   Both are tests in this repository, against stock Basilisk in the same process.
@@ -66,10 +65,9 @@ work needs. The first is the explicit Runge-Kutta integrator of the `lo` and `me
 
 ## Consequences
 
-Installing wise-dynamics compiles its modules, so every place it is installed needs a C++17 compiler; CMake
-and Ninja come from PyPI with the build. It builds for Linux x86_64 only, the platform whose parity with
-Basilisk is tested, for the baseline x86-64 target with no fast math and no fused multiply-adds, whatever
-the compiler defaults to; elsewhere the install fails at configure, saying so.
+Installing wise-dynamics compiles its modules, so every place it is installed needs a C++17 compiler. It
+builds for Linux x86_64 only, the platform whose parity with Basilisk is tested, with the arithmetic of
+Basilisk's own build whatever the compiler defaults to; elsewhere the install fails at configure, saying so.
 
 A consumer resolves exactly the Basilisk WiseDynamics pins and cannot move Basilisk ahead of it. A
 Basilisk release that changes what a module reads fails the update's build or tests and does not merge;

@@ -3,8 +3,9 @@
 The integrator, in `_runge_kutta_native`, does the arithmetic of Basilisk's `svIntegratorRungeKutta`
 in the same order, so a run is bit-identical to one with Basilisk's integrator, without allocating per
 step. It reads Basilisk's C++ classes directly, so importing this module refuses a Basilisk whose
-source revision is not the one the library was built against, and a library whose compile-time
-layout facts are not the ones Basilisk records: either mismatch would corrupt memory, not raise.
+source revision is not the one the library was built against, and a library whose build facts are
+not the ones Basilisk records: a layout mismatch would corrupt memory, not raise, and another
+instruction set would change the arithmetic.
 """
 
 import ctypes
@@ -29,7 +30,7 @@ def _load() -> ctypes.CDLL:
 
     Raises:
         ImportError: The library is missing, was built against another Basilisk source revision, or
-            with another layout than Basilisk's.
+            with other build facts than Basilisk's.
     """
     spec = importlib.util.find_spec(f"{__package__}._runge_kutta_native")
     if spec is None or spec.origin is None:
@@ -57,7 +58,7 @@ def _load() -> ctypes.CDLL:
     differing = {name: pair for name, pair in facts.items() if pair[0] != pair[1]}
     if differing:
         raise ImportError(
-            "the compiled integrator was built with another layout than Basilisk's, as (built, Basilisk):"
+            "the compiled integrator was built with other build facts than Basilisk's, as (built, Basilisk):"
             f" {differing}; reinstall wise-dynamics without CXXFLAGS that change them, such as -mavx or"
             " -D_GLIBCXX_USE_CXX11_ABI"
         )
