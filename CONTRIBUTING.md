@@ -31,8 +31,10 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 - `pytest` — the full suite, on wise-dynamics installed as a git pin of the commit under test, as a
   consumer installs it, so it tests the built package and its compiled integrator, not the checkout. Its
   dependencies stay at the lock's versions, which a consumer resolves to as well while `bsk` is pinned
-  exactly (ADR 0004 rev 1). `WISE_DYNAMICS_EXPECT_INSTALL=pinned` fails the suite if the install it
-  runs on is not that pin.
+  exactly (ADR 0004 rev 1). So it tests what the package contains, not which dependencies it declares:
+  one dropped from `[project.dependencies]` but still in a dev group passes here.
+  `WISE_DYNAMICS_EXPECT_INSTALL` (`pinned` here, `local` when unset) fails the suite if the install it
+  runs on is not the one expected.
 
 Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`, which
 tests the editable checkout.

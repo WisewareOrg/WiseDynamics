@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import textwrap
-from importlib.metadata import distribution, version
+from importlib.metadata import version
 from pathlib import Path
 
 import h5py
@@ -1147,30 +1147,26 @@ def test_an_editable_install_records_its_checkouts_commit_and_dirt(
     assert bool(found["dirty"]) is dirty
 
 
-def test_wise_dynamics_own_install_records_what_it_is(pytester: pytest.Pytester):
-    """With nothing patched, the install under test records what it is.
+def test_the_install_under_test_records_its_kind_and_the_commit_under_test(pytester: pytest.Pytester):
+    """With nothing patched, the install the suite runs on records its kind and the checkout's HEAD.
 
-    An editable install records `local` and the checkout's HEAD; a git pin records `pinned` and its commit.
-    `WISE_DYNAMICS_EXPECT_INSTALL`, when set, names the install the suite must be running on.
+    The kind expected is `WISE_DYNAMICS_EXPECT_INSTALL`, `local` when unset: an editable checkout, as a
+    development environment is, unless whoever installed the suite says otherwise. CI says `pinned`, so a CI
+    run that is not on the git pin of the commit under test fails here.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
-    direct_url = json.loads(distribution("wise-dynamics").read_text("direct_url.json") or "{}")
+    expected = os.environ.get("WISE_DYNAMICS_EXPECT_INSTALL", "local")
+    head = _git(REPOSITORY, "rev-parse", "HEAD")
     _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
 
     pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
-
     found = _provenance_attrs(pytester)
-    expected = os.environ.get("WISE_DYNAMICS_EXPECT_INSTALL")
-    assert expected in (None, found["install"]), f"the suite runs on a {found['install']!r} install, not {expected!r}"
-    if "vcs_info" in direct_url:
-        assert found["install"] == "pinned", f"a git pin recorded {found['install']!r}"
-        assert found["commit"] == direct_url["vcs_info"]["commit_id"], f"a git pin recorded {found['commit']!r}"
-    else:
-        assert found["install"] == "local", f"an editable install recorded {found['install']!r}"
-        assert found["commit"] == _git(REPOSITORY, "rev-parse", "HEAD"), f"it recorded {found['commit']!r}"
+
+    assert found["install"] == expected, f"the suite runs on a {found['install']!r} install, expected {expected!r}"
+    assert found["commit"] == head, f"the install records commit {found['commit']}, expected the checkout's {head}"
 
 
 @pytest.mark.parametrize("case", ["no-direct-url", "git-unavailable"])
