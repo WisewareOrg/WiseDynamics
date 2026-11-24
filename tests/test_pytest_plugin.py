@@ -5,6 +5,7 @@ own marks in source.
 """
 
 import json
+import os
 import re
 import subprocess
 import textwrap
@@ -1150,6 +1151,7 @@ def test_wise_dynamics_own_install_records_what_it_is(pytester: pytest.Pytester)
     """With nothing patched, the install under test records what it is.
 
     An editable install records `local` and the checkout's HEAD; a git pin records `pinned` and its commit.
+    `WISE_DYNAMICS_EXPECT_INSTALL`, when set, names the install the suite must be running on.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
@@ -1161,6 +1163,8 @@ def test_wise_dynamics_own_install_records_what_it_is(pytester: pytest.Pytester)
     pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
     found = _provenance_attrs(pytester)
+    expected = os.environ.get("WISE_DYNAMICS_EXPECT_INSTALL")
+    assert expected in (None, found["install"]), f"the suite runs on a {found['install']!r} install, not {expected!r}"
     if "vcs_info" in direct_url:
         assert found["install"] == "pinned", f"a git pin recorded {found['install']!r}"
         assert found["commit"] == direct_url["vcs_info"]["commit_id"], f"a git pin recorded {found['commit']!r}"

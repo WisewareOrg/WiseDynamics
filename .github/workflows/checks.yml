@@ -53,6 +53,9 @@ jobs:
           version: "0.13.9"
 
       - run: uv sync --locked --all-extras
-      # The suite runs on the package as a consumer's git pin installs it: built from this commit, not the checkout.
       - run: uv pip install --no-deps "wise-dynamics @ git+file://${GITHUB_WORKSPACE}@${GITHUB_SHA}"
+      # --no-sync, or uv run re-syncs and puts the editable checkout back over the pin; the variable makes the
+      # suite fail if it does.
       - run: uv run --no-sync pytest
+        env:
+          WISE_DYNAMICS_EXPECT_INSTALL: pinned

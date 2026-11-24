@@ -29,7 +29,11 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
   `uses:` names; the `check-python` dev dependency's `rev` in `pyproject.toml` names the same
   commit, so a local run sees the same versions. Renovate bumps the two together.
 - `pytest` — the full suite, on wise-dynamics installed as a git pin of the commit under test, as a
-  consumer installs it, so it tests the built package and its compiled integrator, not the checkout.
+  consumer installs it, so it tests the built package and its compiled integrator, not the checkout. Its
+  dependencies stay at the lock's versions, which a consumer resolves to as well while `bsk` is pinned
+  exactly (ADR 0004 rev 1). `WISE_DYNAMICS_EXPECT_INSTALL=pinned` fails the suite if the install it
+  runs on is not that pin.
 
-Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.
+Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`, which
+tests the editable checkout.
 `uv sync` compiles the integrator in `native/`, so it needs a C++17 compiler on `PATH`.
