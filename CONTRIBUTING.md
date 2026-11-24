@@ -31,3 +31,4 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
 - `pytest` — `uv run pytest`, the full suite.
 
 Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.
+`uv sync` compiles the integrator in `native/`, so it needs a C++17 compiler on `PATH`.

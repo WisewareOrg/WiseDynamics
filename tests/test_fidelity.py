@@ -8,23 +8,13 @@ import functools
 
 import numpy as np
 import pytest
-from Basilisk.fswAlgorithms import inertial3D
 
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios import SCENARIOS
 
 ORBIT_S = 5700.0
 BUDGET_M = {"lo": 1.0, "med": 1e-3}
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 @functools.cache
@@ -40,7 +30,7 @@ def _truth_position(scenario: str, fidelity: str) -> np.ndarray:
     """
     built = SCENARIOS[scenario](ImuSpacecraft())
     built.fidelity = fidelity
-    return built.run(_Guidance(), {}, duration_s=ORBIT_S)["truth/r_N"][0]
+    return built.run(Guidance(), {}, duration_s=ORBIT_S)["truth/r_N"][0]
 
 
 @pytest.mark.parametrize("fidelity", sorted(BUDGET_M))

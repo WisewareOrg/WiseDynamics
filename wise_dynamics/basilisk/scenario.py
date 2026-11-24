@@ -1,12 +1,15 @@
 """The Basilisk plumbing every scenario runs on: one simulation, run once and recorded."""
 
-from collections.abc import Mapping
+import functools
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk._runge_kutta import Tableau
+from wise_dynamics.basilisk._runge_kutta import install as install_runge_kutta
 from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.fsw_host import FswHost
 from wise_dynamics.basilisk.vehicle import Vehicle
@@ -35,25 +38,23 @@ _MAX_STEP_NS = 1_000_000_000
 _MIN_STEP_NS = 1_000_000
 
 
-def _ralston_rk3(spacecraft: Any) -> Any:
-    """Ralston's third-order Runge-Kutta.
+_RALSTON_RK3 = Tableau(
+    a=((0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0), (0.0, 3 / 4, 0.0)),
+    b=(2 / 9, 1 / 3, 4 / 9),
+    c=(0.0, 1 / 2, 3 / 4),
+)
+"""Ralston's third-order Runge-Kutta, which `lo` integrates with."""
 
-    Args:
-        spacecraft: The Basilisk dynamic object it integrates.
-
-    Returns:
-        The integrator.
-    """
-    return svIntegrators.svIntegratorRungeKutta3(
-        spacecraft,
-        [[0.0, 0.0, 0.0], [1 / 2, 0.0, 0.0], [0.0, 3 / 4, 0.0]],
-        [2 / 9, 1 / 3, 4 / 9],
-        [0.0, 1 / 2, 3 / 4],
-    )
+_RK4 = Tableau(
+    a=((0.0, 0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0, 0.0), (0.0, 1 / 2, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)),
+    b=(1 / 6, 1 / 3, 1 / 3, 1 / 6),
+    c=(0.0, 1 / 2, 1 / 2, 1.0),
+)
+"""The classical fourth-order Runge-Kutta, which `med` integrates with."""
 
 
 def _rkf78(spacecraft: Any) -> Any:
-    """Runge-Kutta-Fehlberg 7(8) at the tolerances it sets.
+    """Give a spacecraft Basilisk's Runge-Kutta-Fehlberg 7(8), at the tolerances it sets.
 
     Args:
         spacecraft: The Basilisk dynamic object it integrates.
@@ -64,11 +65,17 @@ def _rkf78(spacecraft: Any) -> Any:
     integrator = svIntegrators.svIntegratorRKF78(spacecraft)
     integrator.setRelativeTolerance(1e-10)
     integrator.setAbsoluteTolerance(1e-12)
+    spacecraft.setIntegrator(integrator)
     return integrator
 
 
-_FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_rk3}
-"""Fidelity to the factory building its integrator for a spacecraft."""
+_FIDELITY: dict[str, Callable[[Any], Any]] = {
+    "hi": _rkf78,
+    "med": functools.partial(install_runge_kutta, tableau=_RK4),
+    "lo": functools.partial(install_runge_kutta, tableau=_RALSTON_RK3),
+}
+"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns; `hi`'s returns
+Basilisk's integrator, which `run` keeps so a test can read its tolerances, the others nothing."""
 
 
 def _step_ns(fsw_ns: int) -> int:
@@ -240,12 +247,11 @@ class Scenario:
         self._executed = True
         hold = None
         try:
-            make_integrator = _FIDELITY[self.fidelity]
+            give_integrator = _FIDELITY[self.fidelity]
             fields = {}
             for vehicle in self.vehicles:
-                integrator = make_integrator(vehicle.spacecraft)
-                vehicle.spacecraft.setIntegrator(integrator)
-                self._integrators.append(integrator)
+                if (integrator := give_integrator(vehicle.spacecraft)) is not None:
+                    self._integrators.append(integrator)
                 fields.update(vehicle.recorded_fields())
             fields.update(fsw_fields)
             recorders = _recorders(fields, step_ns)
