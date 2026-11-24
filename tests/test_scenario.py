@@ -14,6 +14,7 @@ from Basilisk.simulation import svIntegrators
 
 from tests.allocations import assert_no_native_allocations_per_tick
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
+from wise_dynamics.basilisk import scenario as scenario_module
 from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
@@ -431,9 +432,6 @@ def test_a_tick_of_the_host_makes_no_native_allocation(tmp_path: Path, commandin
     )
 
 
-_CONTEXT: contextvars.ContextVar[int] = contextvars.ContextVar("_CONTEXT")
-
-
 class _Remembering(sysModel.SysModel):
     """A Python module that records, at each step, the time a thread-local and a context value were last set to.
 
@@ -453,6 +451,7 @@ class _Remembering(sysModel.SysModel):
         self.seen = []
         self.seen_in_context = []
         self._local = threading.local()
+        self._context: contextvars.ContextVar[int] = contextvars.ContextVar(f"context_{id(self)}")
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
         """Record the thread-local and the context value, then set both to this step's time.
@@ -461,9 +460,9 @@ class _Remembering(sysModel.SysModel):
             CurrentSimNanos: The simulation time, in nanoseconds.
         """
         self.seen.append(getattr(self._local, "t_ns", None))
-        self.seen_in_context.append(_CONTEXT.get(None))
+        self.seen_in_context.append(self._context.get(None))
         self._local.t_ns = CurrentSimNanos
-        _CONTEXT.set(CurrentSimNanos)
+        self._context.set(CurrentSimNanos)
 
 
 def test_the_python_modules_of_a_run_share_one_thread_state_for_the_run():
@@ -479,17 +478,21 @@ def test_the_python_modules_of_a_run_share_one_thread_state_for_the_run():
     assert fsw.seen == steps, "the flight software's thread-local value did not last"
     assert ground.seen == steps, "the ground's thread-local value did not last"
     assert fsw.seen_in_context == steps, "the flight software's context value did not last"
+    assert ground.seen_in_context == steps, "the ground's context value did not last"
+
+
+@pytest.fixture
+def flown_once() -> None:
+    """Fly one run, so the threads a process's first run starts, such as tqdm's monitor, are running."""
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=1.0)
 
 
 def _thread_states() -> int:
     """Count the interpreter's thread states, of live threads and of any left behind.
 
-    A run is flown first, so threads a first run starts, such as tqdm's monitor, are counted already.
-
     Returns:
         The count.
     """
-    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=1.0)
     api = ctypes.PyDLL(ctypes.pythonapi._name, handle=ctypes.pythonapi._handle)
     api.PyInterpreterState_Get.restype = ctypes.c_void_p
     api.PyInterpreterState_ThreadHead.restype = ctypes.c_void_p
@@ -502,6 +505,7 @@ def _thread_states() -> int:
     return count
 
 
+@pytest.mark.usefixtures("flown_once")
 def test_a_run_that_returns_leaves_no_thread_state_behind():
     """The thread state a run holds on Basilisk's thread is given back by the time the run returns."""
     before = _thread_states()
@@ -539,6 +543,7 @@ class _Raising(_Remembering):
             raise ValueError("raised by the flight software")
 
 
+@pytest.mark.usefixtures("flown_once")
 def test_a_run_that_raises_clears_the_thread_state_it_held_and_leaves_it_behind():
     """A run whose flight software raises keeps nothing of the failed call, and one cleared thread state.
 
@@ -570,6 +575,7 @@ class _RaisingAtReset(_Remembering):
         raise ValueError("raised by the ground at reset")
 
 
+@pytest.mark.usefixtures("flown_once")
 def test_a_run_whose_ground_raises_at_reset_leaves_no_thread_state_behind():
     """A module raising at reset raises before the hold, which resets last, takes a thread state."""
     before = _thread_states()
@@ -581,7 +587,7 @@ def test_a_run_whose_ground_raises_at_reset_leaves_no_thread_state_behind():
 
 
 def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
-    """The hold's process ranks below every other process of a run, the ground's included."""
+    """The hold's process ranks below every other process of a run, the ground's included, and not below 0."""
     scenario = Leo500(ImuSpacecraft())
     simulation = scenario._simulation
 
@@ -590,6 +596,7 @@ def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
     priorities = {process.Name: process.processData.processPriority for process in simulation.procList}
     hold = priorities.pop("thread_state_process")
     assert hold < min(priorities.values()), f"the hold at {hold} is not below {priorities}"
+    assert hold >= 0, f"the hold at {hold} is below 0, which Basilisk does not reach at a stop time"
 
 
 def test_a_run_of_no_duration_holds_no_thread_state():
@@ -599,7 +606,8 @@ def test_a_run_of_no_duration_holds_no_thread_state():
 
     scenario.run(_Remembering(), {}, duration_s=0.0)
 
-    assert "thread_state_process" not in [process.Name for process in simulation.procList]
+    names = [process.Name for process in simulation.procList]
+    assert "thread_state_process" not in names, f"a run of no duration made a thread-state process: {names}"
 
 
 def test_the_thread_state_is_given_back_only_on_the_thread_that_took_it():
@@ -611,3 +619,30 @@ def test_the_thread_state_is_given_back_only_on_the_thread_that_took_it():
 
     with pytest.raises(RuntimeError, match="another thread"):
         hold.UpdateState(0)
+
+
+def test_the_thread_state_is_given_back_once_at_the_stop_time(monkeypatch: pytest.MonkeyPatch):
+    """The hold's task fires once, at the run's final instant.
+
+    Args:
+        monkeypatch: Swaps a hold that notes its calls in for the run's.
+    """
+    calls: list[int] = []
+
+    class _Counting(ThreadStateHold):
+        """The hold, noting the time of each call to its `UpdateState`."""
+
+        def UpdateState(self, CurrentSimNanos: int) -> None:
+            """Note the call's time, then give the thread state back.
+
+            Args:
+                CurrentSimNanos: The simulation time, in nanoseconds.
+            """
+            calls.append(CurrentSimNanos)
+            super().UpdateState(CurrentSimNanos)
+
+    monkeypatch.setattr(scenario_module, "ThreadStateHold", _Counting)
+
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
+
+    assert calls == [3_000_000_000], f"the hold was called at {calls}"

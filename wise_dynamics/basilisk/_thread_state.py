@@ -72,9 +72,8 @@ class ThreadStateHold(sysModel.SysModel):
         That state still holds the error of the failed call, and so everything its traceback
         reaches. Clearing it from another thread is safe because nothing runs Python on it again:
         Basilisk's thread returns once a call on it raises, and a run that raised on the main thread
-        never steps its simulation again. Only its own thread may delete it, so it stays allocated,
-        in the interpreter's list of thread states, for the life of the process; a debug build of
-        CPython, which asserts a thread state is cleared once, aborts at exit after such a run.
+        never steps its simulation again. Only its own thread may delete it, so it stays allocated;
+        the basilisk README says what that leaves behind.
         """
         if self._gil_state is None:
             return

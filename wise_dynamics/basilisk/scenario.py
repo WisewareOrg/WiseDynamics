@@ -21,9 +21,7 @@ _GROUND_PROCESS_PRIORITY = 1
 _HOLD_PROCESS = "thread_state_process"
 _HOLD_TASK = "thread_state_task"
 _HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
-"""Below every other process of a run, so the hold resets after every module and gives the thread state back
-after the final instant's last call; not below 0, since Basilisk steps to a stop time with -1 standing for
-every priority, and a process below it is never reached there."""
+"""The thread-state hold's priority: below every other process, and not below 0, which a stop time never reaches."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -186,12 +184,8 @@ class Scenario:
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
 
-        Basilisk calls every Python module of the run, the flight software and the ground among
-        them, on one thread of its own, and the run holds one Python thread state there from its
-        reset to its final instant. So those calls share that thread state as calls on an ordinary
-        thread do: a `threading.local` value or a context variable set in one call is still set in
-        the next. A run that raises leaves that thread state cleared but allocated for the life of
-        the process, as the basilisk README describes.
+        The run holds one Python thread state on Basilisk's thread for its Python modules, as the
+        basilisk README's section on `run` describes.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
@@ -255,7 +249,7 @@ class Scenario:
             for recorder in recorders.values():
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
             stop_ns = macros.sec2nano(duration_s)
-            # A task's period cannot be 0, and a run of no duration calls into Python only at reset.
+            # A task's period cannot be 0.
             if stop_ns > 0:
                 hold_process = self._simulation.CreateNewProcess(_HOLD_PROCESS, _HOLD_PROCESS_PRIORITY)
                 # A period longer than the run, so the task fires once, at the stop time.

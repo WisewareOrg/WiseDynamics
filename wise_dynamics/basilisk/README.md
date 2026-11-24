@@ -104,13 +104,14 @@ The ground can end its own part of the run with `stop_ground()`.
 
 Basilisk calls every Python module of a run, the flight software and the ground among them, on one
 thread of its own, and `run` holds one Python thread state on that thread from the reset to the run's
-final instant, in a process of its own, `thread_state_process`, below every other process of the run. Without it each call into Python would create and destroy a thread state,
-which costs more than the call. So those calls share a thread state as calls on any ordinary thread
-do: a `threading.local` value or a context variable set in one call is still set in the next. A run
-that raises leaves that thread state cleared but allocated for the life of the process, CPython's
-16 KB frame stack with it, and listed among the interpreter's thread states, so a fault handler's dump
-of every thread shows one thread with no frame per such run, and a debug build of CPython, which
-asserts a thread state is cleared once, aborts at exit after one.
+final instant, in a process of its own, `thread_state_process`, below every other process of the run
+and never below priority 0, which Basilisk does not reach at a stop time. Without it each call into
+Python would create and destroy a thread state. So those calls share a thread state as calls on any
+ordinary thread do: a `threading.local` value or a context variable set in one call is still set in
+the next. A run that raises leaves that thread state cleared but allocated for the life of the
+process, CPython's 16 KB frame stack with it, and listed among the interpreter's thread states, so a
+fault handler's dump of every thread shows one thread with no frame per such run, and a debug build of
+CPython, which asserts a thread state is cleared once, aborts at exit after one.
 
 ## Flight-software host
 
