@@ -21,7 +21,27 @@ from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 from wise_dynamics.basilisk.vehicles import VEHICLES
 
 _BASILISK_ALLOCATING_IN_A_STEP = ["HubEffector::computeHubOnlyDerivatives", "Spacecraft::equationsOfMotion"]
-"""The Basilisk functions an integrator step calls that allocate per step, by Basilisk's own doing."""
+"""The Basilisk functions an integrator step calls that allocate per step, by Basilisk's own doing.
+
+The equations of motion are named where a vehicle has effectors; with the hub alone, the optimised
+build inlines them, and the hub's derivatives are the innermost Basilisk frame."""
+
+_BUILD_FACTS = [
+    "cxx.layoutCanaries.stdStringSize",
+    "cxx.layoutCanaries.stdVectorIntSize",
+    "cxx.layoutCanaries.sysModelAlignment",
+    "cxx.layoutCanaries.sysModelSize",
+    "cxx.standardLibrary.useCxx11Abi",
+    "dependencies.eigen.matrix3dSize",
+    "dependencies.eigen.maxAlignBytes",
+    "dependencies.eigen.maxStaticAlignBytes",
+    "dependencies.eigen.vectorXdSize",
+    "dependencies.eigen.vectorization",
+    "dependencies.eigen.version",
+    "target.architecture",
+    "target.instructionSet",
+]
+"""The build facts the library must report, by their keys in `Basilisk.getBuildInfo()["abi"]`."""
 
 
 def _basilisk_rk3(craft: Any) -> Any:
@@ -246,7 +266,12 @@ def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest
         runge_kutta._load()
 
 
-@pytest.mark.parametrize("fact", sorted(json.loads(runge_kutta._LIBRARY.wd_abi())))
+def test_the_library_reports_exactly_the_build_facts_held():
+    """The library reports each held build fact, and no fact the refusal test below does not hold."""
+    assert sorted(json.loads(runge_kutta._LIBRARY.wd_abi())) == _BUILD_FACTS
+
+
+@pytest.mark.parametrize("fact", _BUILD_FACTS)
 def test_a_library_built_with_other_build_facts_than_basilisks_is_refused(fact: str, monkeypatch: pytest.MonkeyPatch):
     """Loading the library under a Basilisk recording any build fact other than the library's raises, naming it.
 
