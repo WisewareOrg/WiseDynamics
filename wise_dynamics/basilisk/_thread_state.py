@@ -8,8 +8,9 @@ from Basilisk.architecture import sysModel
 __all__ = ["ThreadStateHold"]
 
 # PyDLL, not CDLL: ctypes keeps the GIL held across a PyDLL call, which these C-API calls require.
-# Prototypes are set on a handle of this module's own, not on ctypes.pythonapi, which others share.
-_PYTHON_API = ctypes.PyDLL(None)
+# Prototypes are set on a handle of this module's own to the interpreter's library, not on
+# ctypes.pythonapi, whose function objects others share.
+_PYTHON_API = ctypes.PyDLL(ctypes.pythonapi._name, handle=ctypes.pythonapi._handle)
 _gil_ensure = _PYTHON_API.PyGILState_Ensure
 _gil_ensure.restype = ctypes.c_int
 _gil_release = _PYTHON_API.PyGILState_Release

@@ -21,7 +21,9 @@ _GROUND_PROCESS_PRIORITY = 1
 _HOLD_PROCESS = "thread_state_process"
 _HOLD_TASK = "thread_state_task"
 _HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
-"""Below every other process, so the thread state is given back after the final instant's last call into Python."""
+"""Below every other process of a run, so the hold resets after every module and gives the thread state back
+after the final instant's last call; not below 0, since Basilisk steps to a stop time with -1 standing for
+every priority, and a process below it is never reached there."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -256,7 +258,8 @@ class Scenario:
             # A task's period cannot be 0, and a run of no duration calls into Python only at reset.
             if stop_ns > 0:
                 hold_process = self._simulation.CreateNewProcess(_HOLD_PROCESS, _HOLD_PROCESS_PRIORITY)
-                hold_process.addTask(self._simulation.CreateNewTask(_HOLD_TASK, stop_ns, FirstStart=stop_ns))
+                # A period longer than the run, so the task fires once, at the stop time.
+                hold_process.addTask(self._simulation.CreateNewTask(_HOLD_TASK, 2 * stop_ns, FirstStart=stop_ns))
                 hold = ThreadStateHold()
                 self._simulation.AddModelToTask(_HOLD_TASK, hold)
             try:

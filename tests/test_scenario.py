@@ -1,5 +1,6 @@
 """`Scenario.run`: what a run records, as run-file datasets, and that it runs once."""
 
+import contextvars
 import ctypes
 import threading
 import weakref
@@ -13,6 +14,7 @@ from Basilisk.simulation import svIntegrators
 
 from tests.allocations import assert_no_native_allocations_per_tick
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
+from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
@@ -429,51 +431,66 @@ def test_a_tick_of_the_host_makes_no_native_allocation(tmp_path: Path, commandin
     )
 
 
+_CONTEXT: contextvars.ContextVar[int] = contextvars.ContextVar("_CONTEXT")
+
+
 class _Remembering(sysModel.SysModel):
-    """A Python module that records, at each step, the time a thread-local value was last set to.
+    """A Python module that records, at each step, the time a thread-local and a context value were last set to.
 
     Attributes:
         period_s: The module's period, in seconds.
         seen: At each step, the time the thread-local value held, `None` while unset.
+        seen_in_context: At each step, the time the context variable held, `None` while unset.
     """
 
     period_s = 1.0
     seen: list[int | None]
+    seen_in_context: list[int | None]
 
     def __init__(self) -> None:
         """Start with nothing seen and an unset thread-local value."""
         super().__init__()
         self.seen = []
+        self.seen_in_context = []
         self._local = threading.local()
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
-        """Record the thread-local value, then set it to this step's time.
+        """Record the thread-local and the context value, then set both to this step's time.
 
         Args:
             CurrentSimNanos: The simulation time, in nanoseconds.
         """
         self.seen.append(getattr(self._local, "t_ns", None))
+        self.seen_in_context.append(_CONTEXT.get(None))
         self._local.t_ns = CurrentSimNanos
+        _CONTEXT.set(CurrentSimNanos)
 
 
 def test_the_python_modules_of_a_run_share_one_thread_state_for_the_run():
-    """A thread-local value the flight software or the ground sets at one step is still set at its next.
+    """A thread-local or context value the flight software or the ground sets at one step is still set at its next.
 
     That holds at the final instant too, for the ground, the last module to run there.
     """
     fsw, ground = _Remembering(), _Remembering()
+
     Leo500(ImuSpacecraft()).run(fsw, {}, duration_s=3.0, ground=ground)
-    assert fsw.seen == [None, 0, 1_000_000_000, 2_000_000_000]
-    assert ground.seen == [None, 0, 1_000_000_000, 2_000_000_000]
+
+    steps = [None, 0, 1_000_000_000, 2_000_000_000]
+    assert fsw.seen == steps, "the flight software's thread-local value did not last"
+    assert ground.seen == steps, "the ground's thread-local value did not last"
+    assert fsw.seen_in_context == steps, "the flight software's context value did not last"
 
 
 def _thread_states() -> int:
     """Count the interpreter's thread states, of live threads and of any left behind.
 
+    A run is flown first, so threads a first run starts, such as tqdm's monitor, are counted already.
+
     Returns:
         The count.
     """
-    api = ctypes.PyDLL(None)
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=1.0)
+    api = ctypes.PyDLL(ctypes.pythonapi._name, handle=ctypes.pythonapi._handle)
     api.PyInterpreterState_Get.restype = ctypes.c_void_p
     api.PyInterpreterState_ThreadHead.restype = ctypes.c_void_p
     api.PyInterpreterState_ThreadHead.argtypes = [ctypes.c_void_p]
@@ -488,29 +505,109 @@ def _thread_states() -> int:
 def test_a_run_that_returns_leaves_no_thread_state_behind():
     """The thread state a run holds on Basilisk's thread is given back by the time the run returns."""
     before = _thread_states()
+
     Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
-    assert _thread_states() == before
+
+    assert _thread_states() == before, "a run that returned left a thread state behind"
 
 
-def test_a_run_that_raises_leaves_one_cleared_thread_state_behind():
-    """A run whose flight software raises leaves the thread state it held, which only its thread could delete."""
+class _Held:
+    """An object a failing call holds, whose life shows whether that call's error was let go."""
 
-    class _Raising(_Remembering):
-        """A Python flight software that raises at its second step."""
 
-        def UpdateState(self, CurrentSimNanos: int) -> None:
-            """Raise at 1 s.
+class _Raising(_Remembering):
+    """A Python flight software that raises at its second step, holding a `_Held` as it does.
 
-            Args:
-                CurrentSimNanos: The simulation time, in nanoseconds.
+    Attributes:
+        marker: A weak reference to the marker the raising call held.
+    """
 
-            Raises:
-                ValueError: At 1 s.
-            """
-            if CurrentSimNanos == 1_000_000_000:
-                raise ValueError("raised by the flight software")
+    marker: weakref.ref
 
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Raise at 1 s.
+
+        Args:
+            CurrentSimNanos: The simulation time, in nanoseconds.
+
+        Raises:
+            ValueError: At 1 s.
+        """
+        if CurrentSimNanos == 1_000_000_000:
+            held = _Held()
+            self.marker = weakref.ref(held)
+            raise ValueError("raised by the flight software")
+
+
+def test_a_run_that_raises_clears_the_thread_state_it_held_and_leaves_it_behind():
+    """A run whose flight software raises keeps nothing of the failed call, and one cleared thread state.
+
+    The thread state still held the failed call's error, and so its frame and the marker in it, until the
+    run cleared it; only its own thread could delete it.
+    """
     before = _thread_states()
-    with pytest.raises(BaseException, match="SWIG director|raised by the flight software"):
-        Leo500(ImuSpacecraft()).run(_Raising(), {}, duration_s=3.0)
-    assert _thread_states() == before + 1
+    fsw = _Raising()
+
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        Leo500(ImuSpacecraft()).run(fsw, {}, duration_s=3.0)
+
+    assert fsw.marker() is None, "the failed call's frame is still alive"
+    assert _thread_states() == before + 1, "a run that raised did not leave exactly one thread state behind"
+
+
+class _RaisingAtReset(_Remembering):
+    """A Python ground that raises at reset, before the run's thread state is taken."""
+
+    def Reset(self, CurrentSimNanos: int) -> None:
+        """Raise.
+
+        Args:
+            CurrentSimNanos: The reset time, in nanoseconds.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError("raised by the ground at reset")
+
+
+def test_a_run_whose_ground_raises_at_reset_leaves_no_thread_state_behind():
+    """A module raising at reset raises before the hold, which resets last, takes a thread state."""
+    before = _thread_states()
+
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0, ground=_RaisingAtReset())
+
+    assert _thread_states() == before, "a run that raised at reset left a thread state behind"
+
+
+def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
+    """The hold's process ranks below every other process of a run, the ground's included."""
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+
+    scenario.run(_Remembering(), {}, duration_s=1.0, ground=_Remembering())
+
+    priorities = {process.Name: process.processData.processPriority for process in simulation.procList}
+    hold = priorities.pop("thread_state_process")
+    assert hold < min(priorities.values()), f"the hold at {hold} is not below {priorities}"
+
+
+def test_a_run_of_no_duration_holds_no_thread_state():
+    """A run of 0 s, whose stop time no task period could reach, has no thread-state process."""
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+
+    scenario.run(_Remembering(), {}, duration_s=0.0)
+
+    assert "thread_state_process" not in [process.Name for process in simulation.procList]
+
+
+def test_the_thread_state_is_given_back_only_on_the_thread_that_took_it():
+    """Giving the held thread state back on another thread than the one that took it raises."""
+    hold = ThreadStateHold()
+    taken = threading.Thread(target=hold.Reset, args=(0,))
+    taken.start()
+    taken.join()
+
+    with pytest.raises(RuntimeError, match="another thread"):
+        hold.UpdateState(0)
