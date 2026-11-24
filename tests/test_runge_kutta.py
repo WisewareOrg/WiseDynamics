@@ -1,5 +1,6 @@
 """The compiled Runge-Kutta: bit-identical to Basilisk's, allocating nothing per step, refusing what it cannot run."""
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,23 +9,26 @@ import Basilisk
 import numpy as np
 import pytest
 from Basilisk.architecture import messaging
-from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import spacecraft as bsk_spacecraft
 from Basilisk.simulation import svIntegrators
 
-from tests.allocations import native_allocations, native_allocations_by_function
+from tests.allocations import assert_no_native_allocations_per_tick
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft, scenario
 from wise_dynamics.basilisk import _runge_kutta as runge_kutta
 from wise_dynamics.basilisk.scenarios import SCENARIOS
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 from wise_dynamics.basilisk.vehicles import VEHICLES
 
+_BASILISK_ALLOCATING_IN_A_STEP = ["HubEffector::computeHubOnlyDerivatives", "Spacecraft::equationsOfMotion"]
+"""The Basilisk functions an integrator step calls that allocate per step, by Basilisk's own doing."""
+
 
 def _basilisk_rk3(craft: Any) -> Any:
     """Give a spacecraft Basilisk's own three-stage Runge-Kutta with Ralston's tableau, written out here.
 
-    The tableau is the literal `lo` integrated with before the compiled integrator, not
-    `scenario.RALSTON_RK3`, so a change to that constant fails the comparison.
+    The tableau is the literal `lo` integrated with before the compiled integrator, not the one
+    `scenario` holds, so a change to that one fails the comparison.
 
     Args:
         craft: The Basilisk spacecraft.
@@ -59,27 +63,27 @@ def _basilisk_rk4(craft: Any) -> Any:
 _BASILISK = {"lo": _basilisk_rk3, "med": _basilisk_rk4}
 
 
-def _fly(name: str, vehicle: str, fidelity: str, case: int, commanding: type, torque: Callable[[float], Any]) -> dict:
-    """Fly one dispersed case for 300 s, commanding a wheel, if the vehicle has one, every tick.
+def _assert_bit_identical(compiled: dict, basilisk: dict) -> None:
+    """Hold two runs' datasets to the same names, units, dtypes, shapes and bytes.
 
     Args:
-        name: The scenario's name in `SCENARIOS`.
-        vehicle: The vehicle's name in `VEHICLES`.
-        fidelity: The fidelity.
-        case: The case number.
-        commanding: The stub build class.
-        torque: Builds a wheel torque command.
-
-    Returns:
-        The run's datasets.
+        compiled: The run with the compiled integrator.
+        basilisk: The run with Basilisk's.
     """
-    flown = SCENARIOS[name](VEHICLES[vehicle]())
-    flown.fidelity = fidelity
-    flown.disperse_case(np.random.SeedSequence(0, spawn_key=(case,)))
-    commands = {"wheel": torque(0.02)} if "wheel" in flown.vehicle.writers() else {}
-    return flown.run(FswHost(commanding(commands), flown.vehicle), {}, duration_s=300.0)
+    assert list(compiled) == list(basilisk), f"the datasets differ: {list(compiled)} and {list(basilisk)}"
+    for dataset, (values, units) in compiled.items():
+        reference, reference_units = basilisk[dataset]
+        assert units == reference_units, f"{dataset} is in {units}, Basilisk's run in {reference_units}"
+        assert values.dtype == reference.dtype, f"{dataset} is {values.dtype}, Basilisk's run {reference.dtype}"
+        assert values.shape == reference.shape, f"{dataset} is {values.shape}, Basilisk's run {reference.shape}"
+        differing = np.argwhere(values.view(np.uint64) != reference.view(np.uint64))
+        assert not differing.size, (
+            f"{dataset} first differs at {tuple(differing[0])}: {values[tuple(differing[0])]!r},"
+            f" Basilisk's run {reference[tuple(differing[0])]!r}"
+        )
 
 
+@pytest.mark.parametrize("case", [0, 1])
 @pytest.mark.parametrize("fidelity", ["lo", "med"])
 @pytest.mark.parametrize("vehicle", sorted(VEHICLES))
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
@@ -87,41 +91,43 @@ def test_a_run_is_bit_identical_to_one_with_basilisks_integrator(
     name: str,
     vehicle: str,
     fidelity: str,
+    case: int,
     commanding: type,
     torque: Callable[[float], Any],
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Every dataset of two dispersed cases is bit for bit the same as with Basilisk's own integrator.
+    """Every dataset of a dispersed case is bit for bit the same as with Basilisk's own integrator.
+
+    A vehicle with a wheel is commanded a torque every tick.
 
     Args:
         name: The scenario's name in `SCENARIOS`.
         vehicle: The vehicle's name in `VEHICLES`.
         fidelity: The fidelity, whose compiled integrator is compared.
+        case: The dispersed case.
         commanding: The stub build class.
         torque: Builds a wheel torque command.
         monkeypatch: Swaps Basilisk's integrator in for the fidelity's.
     """
-    for case in range(2):
-        compiled = _fly(name, vehicle, fidelity, case, commanding, torque)
-        with monkeypatch.context() as patch:
-            patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
-            basilisk = _fly(name, vehicle, fidelity, case, commanding, torque)
-        assert list(compiled) == list(basilisk)
-        for dataset, (values, units) in compiled.items():
-            reference, reference_units = basilisk[dataset]
-            assert units == reference_units
-            assert values.dtype == reference.dtype and values.shape == reference.shape
-            assert values.tobytes() == reference.tobytes(), dataset
 
+    def fly() -> dict:
+        """Fly the case for 300 s.
 
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
+        Returns:
+            The run's datasets.
+        """
+        flown = SCENARIOS[name](VEHICLES[vehicle]())
+        flown.fidelity = fidelity
+        flown.disperse_case(np.random.SeedSequence(0, spawn_key=(case,)))
+        commands = {"wheel": torque(0.02)} if "wheel" in flown.vehicle.writers() else {}
+        return flown.run(FswHost(commanding(commands), flown.vehicle), {}, duration_s=300.0)
 
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
+    compiled = fly()
+    with monkeypatch.context() as patch:
+        patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
+        basilisk = fly()
 
-    period_s = 1.0
+    _assert_bit_identical(compiled, basilisk)
 
 
 class _WithMovingMoon(Leo500):
@@ -164,35 +170,48 @@ def test_a_run_whose_dynamics_depend_on_the_time_is_bit_identical_too(fidelity: 
         """
         flown = _WithMovingMoon(ImuSpacecraft())
         flown.fidelity = fidelity
-        return flown.run(_Guidance(), {}, duration_s=300.0)
+        return flown.run(Guidance(), {}, duration_s=300.0)
 
     compiled = fly()
     with monkeypatch.context() as patch:
         patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
         basilisk = fly()
-    assert list(compiled) == list(basilisk)
-    for dataset, (values, units) in compiled.items():
-        reference, reference_units = basilisk[dataset]
-        assert units == reference_units
-        assert values.dtype == reference.dtype and values.shape == reference.shape
-        assert values.tobytes() == reference.tobytes(), dataset
+
+    _assert_bit_identical(compiled, basilisk)
+
+
+@pytest.mark.parametrize(("fidelity", "compiled"), [("lo", True), ("med", True), ("hi", False)])
+def test_lo_and_med_integrate_with_the_compiled_integrator_and_hi_with_basilisks(fidelity: str, compiled: bool):
+    """The spacecraft of a run at `lo` or `med` integrates with the compiled integrator; at `hi`, with Basilisk's.
+
+    Args:
+        fidelity: The fidelity the run flies at.
+        compiled: Whether that fidelity's integrator is the compiled one.
+    """
+    flown = Leo500(ImuSpacecraft())
+    flown.fidelity = fidelity
+
+    flown.run(Guidance(), {}, duration_s=1.0)
+
+    assert runge_kutta.integrates_here(flown.vehicle.spacecraft) is compiled, f"{fidelity} runs the wrong integrator"
 
 
 @pytest.mark.parametrize("fidelity", ["lo", "med"])
-def test_a_step_of_the_compiled_integrator_makes_no_native_allocation(fidelity: str, tmp_path: Path, commanding: type):
-    """No allocation per step is the integrator's own; those of the equations of motion it calls are Basilisk's.
-
-    The integrator does allocate once, as it binds its states at its first step, which shows memray
-    names its frames.
+@pytest.mark.parametrize("vehicle", sorted(VEHICLES))
+def test_a_step_of_the_compiled_integrator_makes_no_native_allocation(
+    vehicle: str, fidelity: str, tmp_path: Path, commanding: type
+):
+    """Under the integrator's step, only the Basilisk functions it calls allocate, by their own doing.
 
     Args:
+        vehicle: The vehicle's name in `VEHICLES`.
         fidelity: The fidelity, whose compiled integrator is held.
         tmp_path: The test's own temporary directory.
         commanding: The stub build class.
     """
 
     def fly(ticks: int) -> int:
-        """Fly `ticks` ticks of the IMU spacecraft.
+        """Fly `ticks` ticks of the vehicle.
 
         Args:
             ticks: The number of ticks to fly.
@@ -200,16 +219,19 @@ def test_a_step_of_the_compiled_integrator_makes_no_native_allocation(fidelity: 
         Returns:
             How many times the spacecraft was stepped.
         """
-        flown = SCENARIOS["leo500"](ImuSpacecraft())
+        flown = SCENARIOS["leo500"](VEHICLES[vehicle]())
         flown.fidelity = fidelity
         build = commanding({})
         flown.run(FswHost(build, flown.vehicle), {}, duration_s=ticks * build.period_s)
         return flown.vehicle.spacecraft.CallCounts
 
-    integrate = "wise_dynamics::RungeKutta::integrate"
-    assert native_allocations(fly, within=integrate, ticks=10, directory=tmp_path) > 0
-    per_tick = native_allocations_by_function(fly, ticks=100, directory=tmp_path)
-    assert {function: n for function, n in per_tick.items() if function.startswith("wise_dynamics::")} == {}
+    assert_no_native_allocations_per_tick(
+        fly,
+        within="wise_dynamics::RungeKutta::integrate",
+        excluding=_BASILISK_ALLOCATING_IN_A_STEP,
+        ticks=100,
+        directory=tmp_path,
+    )
 
 
 def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest.MonkeyPatch):
@@ -219,20 +241,28 @@ def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest
         monkeypatch: Gives Basilisk another source revision.
     """
     monkeypatch.setattr(Basilisk, "getBuildInfo", lambda: {"artifact": {"sourceRevision": "0" * 40}})
+
     with pytest.raises(ImportError, match="built against Basilisk [0-9a-f]{40}, but Basilisk 0{40} is installed"):
         runge_kutta._load()
 
 
-def test_a_library_built_with_another_layout_than_basilisks_is_refused(monkeypatch: pytest.MonkeyPatch):
-    """Loading the library under a Basilisk recording another Eigen alignment raises, naming the fact.
+@pytest.mark.parametrize("fact", sorted(json.loads(runge_kutta._LIBRARY.wd_abi())))
+def test_a_library_built_with_another_layout_than_basilisks_is_refused(fact: str, monkeypatch: pytest.MonkeyPatch):
+    """Loading the library under a Basilisk recording any layout fact other than the library's raises, naming it.
 
     Args:
-        monkeypatch: Gives Basilisk another recorded alignment.
+        fact: The dotted key, in `Basilisk.getBuildInfo()["abi"]`, of the fact Basilisk records differently.
+        monkeypatch: Gives Basilisk the other fact.
     """
     info: Any = Basilisk.getBuildInfo()
-    info["abi"]["dependencies"]["eigen"]["maxAlignBytes"] = 32
+    *path, leaf = fact.split(".")
+    recorded = info["abi"]
+    for key in path:
+        recorded = recorded[key]
+    recorded[leaf] = f"{recorded[leaf]}-other" if isinstance(recorded[leaf], str) else recorded[leaf] + 1
     monkeypatch.setattr(Basilisk, "getBuildInfo", lambda: info)
-    with pytest.raises(ImportError, match=r"'dependencies.eigen.maxAlignBytes': \(16, 32\)"):
+
+    with pytest.raises(ImportError, match=f"'{fact}'"):
         runge_kutta._load()
 
 
@@ -240,11 +270,13 @@ def test_a_library_built_with_another_layout_than_basilisks_is_refused(monkeypat
     ("a", "b", "c"),
     [
         (((0.0, 0.0), (0.5,)), (0.5, 0.5), (0.0, 0.5)),
+        (((0.0, 0.0),), (0.5, 0.5), (0.0, 0.5)),
         (((0.0, 0.0), (0.5, 0.0)), (0.5, 0.5), (0.0,)),
         (((0.0, 0.5), (0.5, 0.0)), (0.5, 0.5), (0.0, 0.5)),
+        (((0.5, 0.0), (0.5, 0.0)), (0.5, 0.5), (0.0, 0.5)),
         ((), (), ()),
     ],
-    ids=["short row", "short c", "implicit", "no stage"],
+    ids=["short row", "too few rows", "short c", "above the diagonal", "on the diagonal", "no stage"],
 )
 def test_a_tableau_that_is_not_an_explicit_method_is_refused(a: tuple, b: tuple, c: tuple):
     """A tableau with a short row or array, a coefficient on or above the diagonal, or no stage raises.
@@ -262,5 +294,8 @@ def test_a_spacecraft_that_does_not_take_the_integrator_is_refused():
     """A spacecraft whose integration is synced to another's keeps its integrator, and installing says so."""
     primary, secondary = bsk_spacecraft.Spacecraft(), bsk_spacecraft.Spacecraft()
     primary.syncDynamicsIntegration(secondary)
+
     with pytest.raises(RuntimeError, match="did not take the compiled integrator"):
-        runge_kutta.install(secondary, scenario.RK4)
+        runge_kutta.install(secondary, scenario._RK4)
+
+    assert not runge_kutta.integrates_here(secondary), "the synced spacecraft integrates with the compiled integrator"

@@ -9,27 +9,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 from Basilisk.architecture import messaging, sysModel
-from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
 from scipy.spatial.transform import Rotation
 
 from tests.allocations import assert_no_native_allocations_per_tick
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk import scenario as scenario_module
 from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 def _guidance():
@@ -39,7 +29,7 @@ def _guidance():
         The guidance module, holding `GUIDANCE_SIGMA_RN`, and its `guidance/sigma_RN` field to
         record, as `fsw_fields`.
     """
-    guidance = _Guidance()
+    guidance = Guidance()
     guidance.sigma_R0N = GUIDANCE_SIGMA_RN
     return guidance, {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
 
@@ -67,7 +57,7 @@ def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances():
     """`hi` gives the vehicle that runs Basilisk's RKF78, at a relative 1e-10 and an absolute 1e-12."""
     scenario = Leo500(ImuSpacecraft())
     scenario.fidelity = "hi"
-    scenario.run(_Guidance(), {}, duration_s=1.0)
+    scenario.run(Guidance(), {}, duration_s=1.0)
     (integrator,) = scenario._integrators
     assert type(integrator) is svIntegrators.svIntegratorRKF78
     assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this)
@@ -97,7 +87,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
         step_ns: The dynamics task period the flight software's period gives, in nanoseconds.
     """
     scenario = Leo500(ImuSpacecraft())
-    fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
+    fsw = type("_Paced", (Guidance,), {"period_s": period_s})()
     simulation = scenario._simulation
     scenario.run(fsw, {}, duration_s=0.0)
     dynamics, sensors, flight, record = simulation.TaskList
@@ -110,7 +100,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
 def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
     """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
     scenario = Leo500(ImuSpacecraft())
-    fsw = type("_Paced", (_Guidance,), {"period_s": 1.000000007})()
+    fsw = type("_Paced", (Guidance,), {"period_s": 1.000000007})()
     with pytest.raises(ValueError, match=r"the 1000000007 ns flight-software period"):
         scenario.run(fsw, {}, duration_s=0.0)
 
@@ -120,7 +110,7 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
     simulation = scenario._simulation
-    scenario.run(_Guidance(), {}, duration_s=1.0)
+    scenario.run(Guidance(), {}, duration_s=1.0)
     tasks = {task.Name: task for task in simulation.TaskList}
     dynamics, sensors = tasks["dynamics_task"], tasks["sensor_task"]
     assert dynamics.TaskModels == vehicle.models()
@@ -139,7 +129,7 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
         scenario = Leo500(ImuSpacecraft())
         scenario.fidelity = fidelity
         scenario.disperse_case(np.random.SeedSequence(3))
-        datasets = scenario.run(_Guidance(), {}, duration_s=600.0)
+        datasets = scenario.run(Guidance(), {}, duration_s=600.0)
         gyro[fidelity] = datasets["imu/gyro_P"][0]
         truth[fidelity] = datasets["truth/omega_BN_B"][0]
     assert np.std(gyro["hi"], axis=0).min() > 1e-6
@@ -152,9 +142,9 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
 def test_a_scenario_runs_once():
     """A second `run` of the same scenario is refused."""
     scenario = Leo500(ImuSpacecraft())
-    scenario.run(_Guidance(), {}, duration_s=1.0)
+    scenario.run(Guidance(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
-        scenario.run(_Guidance(), {}, duration_s=1.0)
+        scenario.run(Guidance(), {}, duration_s=1.0)
 
 
 class _Stepping(sysModel.SysModel):
@@ -385,7 +375,7 @@ def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
     so the comparison starts at the next sample.
     """
     scenario = Leo500(_Exact())
-    datasets = scenario.run(_Guidance(), {}, duration_s=60.0)
+    datasets = scenario.run(Guidance(), {}, duration_s=60.0)
     omega = datasets["truth/omega_BN_B"][0]
     assert np.abs(np.diff(omega, axis=0)).max() > 1e-6
     assert np.array_equal(datasets["imu/gyro_P"][0][1:], omega[1:])
@@ -677,7 +667,7 @@ def test_each_field_read_from_a_shared_recorder_is_its_own():
     """
     vehicle = ImuSpacecraft()
 
-    datasets = Leo500(vehicle).run(_Guidance(), {}, duration_s=3.0)
+    datasets = Leo500(vehicle).run(Guidance(), {}, duration_s=3.0)
 
     state, imu = vehicle.spacecraft.scStateOutMsg.read(), vehicle.imu.sensorOutMsg.read()
     attitude = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)

@@ -1,6 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>WisewareOrg/wise-renovate#v1.7.0"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The CMake and Ninja scikit-build-core builds the compiled modules with.",
+      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "matchStrings": ["(?<depName>cmake|ninja)\\.version = \"==(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "pypi"
+    }
+  ],
   "packageRules": [
     {
       "description": "Basilisk and the SDK the integrator compiles against move together: one update, gated by the build and the parity tests.",

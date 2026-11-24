@@ -8,14 +8,18 @@
 // stage, this holds each state's x0, k_j and increment in matrices sized once.
 //
 // It reads Basilisk's classes directly, so it is built against the headers of the exact Basilisk
-// build it links, whose source revision wd_basilisk_revision gives, and reports with wd_abi_* the
-// compile-time facts their layout depends on, for Python to compare with the ones Basilisk records.
+// build it links, whose source revision wd_basilisk_revision gives; wd_abi gives Basilisk's own
+// description of the layout this library was compiled with, for Python to compare with the one
+// Basilisk records.
 
 #include <cstddef>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include <Eigen/Dense>
 
+#include "architecture/utilities/bskAbiDescriptor.h"
 #include "simulation/dynamics/_GeneralModuleFiles/dynamicObject.h"
 #include "simulation/dynamics/_GeneralModuleFiles/stateData.h"
 #include "simulation/dynamics/_GeneralModuleFiles/stateVecIntegrator.h"
@@ -24,14 +28,21 @@ namespace wise_dynamics {
 
 class RungeKutta : public StateVecIntegrator {
   public:
-    RungeKutta(DynamicObject* dynamics, std::size_t stages, const double* a, const double* b, const double* c)
-        : StateVecIntegrator(dynamics), stages(stages), a(a, a + stages * stages), b(b, b + stages), c(c, c + stages)
+    RungeKutta(DynamicObject* dynamics, std::size_t stageCount, const double* aRowMajor, const double* weights,
+               const double* nodes)
+        : StateVecIntegrator(dynamics),
+          stages(stageCount),
+          a(aRowMajor, aRowMajor + stageCount * stageCount),
+          b(weights, weights + stageCount),
+          c(nodes, nodes + stageCount)
     {
     }
 
+    // The states are registered when the simulation initialises, before the first step, so the
+    // slots are bound once, at the first step.
     void integrate(double currentTime, double timeStep) override
     {
-        if (!bound()) bind();
+        if (slots.empty()) bind();
         for (auto& slot : slots) slot.x0 = slot.data->getStateReference();
         for (std::size_t stage = 0; stage < stages; stage++) {
             propagate(timeStep, &a[stage * stages], stage);
@@ -49,22 +60,8 @@ class RungeKutta : public StateVecIntegrator {
         Eigen::MatrixXd increment;
     };
 
-    // Whether the slots are the states of dynPtrs, in their order.
-    bool bound() const
-    {
-        auto slot = slots.begin();
-        for (const auto* dynamics : dynPtrs) {
-            for (const auto& entry : dynamics->dynManager.stateContainer.stateMap) {
-                if (slot == slots.end() || slot->data != entry.second.get()) return false;
-                ++slot;
-            }
-        }
-        return slot == slots.end();
-    }
-
     void bind()
     {
-        slots.clear();
         for (auto* dynamics : dynPtrs) {
             for (auto& entry : dynamics->dynManager.stateContainer.stateMap) {
                 StateData* data = entry.second.get();
@@ -102,17 +99,37 @@ class RungeKutta : public StateVecIntegrator {
     std::vector<Slot> slots;
 };
 
-}  // namespace wise_dynamics
+// Basilisk's own description of the layout this library is compiled with, as JSON keyed by the
+// dotted keys of Basilisk.getBuildInfo()["abi"], each the fact Basilisk records there.
+std::string abiJson()
+{
+    const bsk::abi::CxxAbiInfo info = bsk::abi::createCxxAbiInfo();
+    std::ostringstream json;
+    json << "{"
+         << "\"target.architecture\": \"" << info.targetArchitecture << "\", "
+         << "\"target.instructionSet\": \"" << info.instructionSet << "\", "
+         << "\"cxx.standardLibrary.useCxx11Abi\": " << info.libstdcxxUseCxx11Abi << ", "
+         << "\"cxx.layoutCanaries.stdStringSize\": " << info.stdStringSize << ", "
+         << "\"cxx.layoutCanaries.stdVectorIntSize\": " << info.stdVectorIntSize << ", "
+         << "\"cxx.layoutCanaries.sysModelSize\": " << info.sysModelSize << ", "
+         << "\"cxx.layoutCanaries.sysModelAlignment\": " << info.sysModelAlignment << ", "
+         << "\"dependencies.eigen.version\": \"" << EIGEN_WORLD_VERSION << "." << EIGEN_MAJOR_VERSION << "."
+         << EIGEN_MINOR_VERSION << "\", "
+         << "\"dependencies.eigen.vectorization\": \"" << info.eigenVectorization << "\", "
+         << "\"dependencies.eigen.maxAlignBytes\": " << info.eigenMaxAlignBytes << ", "
+         << "\"dependencies.eigen.maxStaticAlignBytes\": " << info.eigenMaxStaticAlignBytes << ", "
+         << "\"dependencies.eigen.vectorXdSize\": " << info.eigenVectorXdSize << ", "
+         << "\"dependencies.eigen.matrix3dSize\": " << info.eigenMatrix3dSize << "}";
+    return json.str();
+}
 
-#define WD_STRINGIZE(x) #x
-#define WD_VERSION(x, y, z) WD_STRINGIZE(x) "." WD_STRINGIZE(y) "." WD_STRINGIZE(z)
+}  // namespace wise_dynamics
 
 extern "C" {
 
 // Gives `dynamics` an integrator of the `stages`-stage tableau (a row-major stages x stages, b and c
-// of stages each) and returns it, or nullptr when it cannot be built. `dynamics` owns it, unless it
-// refuses it, as one whose integration is synced to another's does: it then deletes it, and the
-// pointer returned dangles, which Python only compares with the spacecraft's integrator.
+// of stages each), which `dynamics` then owns, and returns it; returns nullptr when it cannot be built
+// or `dynamics` refuses it, as one whose integration is synced to another's does, deleting it.
 __attribute__((visibility("default"))) void* wd_install_runge_kutta(
     void* dynamics, std::size_t stages, const double* a, const double* b, const double* c) noexcept
 {
@@ -120,33 +137,27 @@ __attribute__((visibility("default"))) void* wd_install_runge_kutta(
         auto* owner = static_cast<DynamicObject*>(dynamics);
         auto* integrator = new wise_dynamics::RungeKutta(owner, stages, a, b, c);
         owner->setIntegrator(integrator);
-        return integrator;
+        return owner->integrator == integrator ? integrator : nullptr;
     }
     catch (...) {
         return nullptr;
     }
 }
 
+// Whether `dynamics` integrates with this library's integrator.
+__attribute__((visibility("default"))) bool wd_integrates_here(void* dynamics) noexcept
+{
+    return dynamic_cast<wise_dynamics::RungeKutta*>(static_cast<DynamicObject*>(dynamics)->integrator) != nullptr;
+}
+
 // The source revision of the Basilisk this library was built against.
 __attribute__((visibility("default"))) const char* wd_basilisk_revision() noexcept { return WD_BASILISK_REVISION; }
 
-// The compile-time facts the layout of Basilisk's classes depends on, as Basilisk's getBuildInfo()
-// "abi" names them.
-__attribute__((visibility("default"))) const char* wd_abi_architecture() noexcept
+// Basilisk's description of this library's layout, as `abiJson` gives it; the string lives as long as
+// the library.
+__attribute__((visibility("default"))) const char* wd_abi() noexcept
 {
-#if defined(__x86_64__)
-    return "x86_64";
-#else
-    return "unknown";
-#endif
-}
-
-__attribute__((visibility("default"))) int wd_abi_use_cxx11_abi() noexcept { return _GLIBCXX_USE_CXX11_ABI; }
-
-__attribute__((visibility("default"))) int wd_abi_eigen_max_align_bytes() noexcept { return EIGEN_MAX_ALIGN_BYTES; }
-
-__attribute__((visibility("default"))) const char* wd_abi_eigen_version() noexcept
-{
-    return WD_VERSION(EIGEN_WORLD_VERSION, EIGEN_MAJOR_VERSION, EIGEN_MINOR_VERSION);
+    static const std::string json = wise_dynamics::abiJson();
+    return json.c_str();
 }
 }

@@ -24,9 +24,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from Basilisk.fswAlgorithms import inertial3D
 
 from tests.allocations import native_allocations_by_function
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
@@ -50,16 +50,6 @@ BUDGET: dict[str, dict[str, float]] = {
 
 A figure over `TICKS` is a count of allocations a flight makes in blocks, such as a recorder's deque, whose
 per-tick slope depends on the flight's length and on the payload's size."""
-
-
-class _CppFlightSoftware(inertial3D.inertial3D):
-    """Basilisk's own C++ `inertial3D` in the flight-software slot, so no call crosses into Python.
-
-    Attributes:
-        period_s: Its period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 class _CommandingNothing:
@@ -138,7 +128,7 @@ def _fly(layer: str, ticks: int) -> None:
     """
     scenario = Leo500(_VEHICLE[layer]())
     scenario.disperse_case(np.random.SeedSequence(0, spawn_key=(0,)))
-    fsw = FswHost(_CommandingNothing(), scenario.vehicle) if layer == "host" else _CppFlightSoftware()
+    fsw = FswHost(_CommandingNothing(), scenario.vehicle) if layer == "host" else Guidance()
     scenario.run(fsw, {}, duration_s=float(ticks))
 
 

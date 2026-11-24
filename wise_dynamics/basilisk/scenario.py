@@ -38,14 +38,14 @@ _MAX_STEP_NS = 1_000_000_000
 _MIN_STEP_NS = 1_000_000
 
 
-RALSTON_RK3 = Tableau(
+_RALSTON_RK3 = Tableau(
     a=((0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0), (0.0, 3 / 4, 0.0)),
     b=(2 / 9, 1 / 3, 4 / 9),
     c=(0.0, 1 / 2, 3 / 4),
 )
 """Ralston's third-order Runge-Kutta, which `lo` integrates with."""
 
-RK4 = Tableau(
+_RK4 = Tableau(
     a=((0.0, 0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0, 0.0), (0.0, 1 / 2, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)),
     b=(1 / 6, 1 / 3, 1 / 3, 1 / 6),
     c=(0.0, 1 / 2, 1 / 2, 1.0),
@@ -71,11 +71,11 @@ def _rkf78(spacecraft: Any) -> Any:
 
 _FIDELITY: dict[str, Callable[[Any], Any]] = {
     "hi": _rkf78,
-    "med": functools.partial(install_runge_kutta, tableau=RK4),
-    "lo": functools.partial(install_runge_kutta, tableau=RALSTON_RK3),
+    "med": functools.partial(install_runge_kutta, tableau=_RK4),
+    "lo": functools.partial(install_runge_kutta, tableau=_RALSTON_RK3),
 }
-"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns; it returns
-the integrator, Basilisk's object or the compiled one's address, which `run` keeps for inspection only."""
+"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns; `hi`'s returns
+Basilisk's integrator, which `run` keeps so a test can read its tolerances, the others nothing."""
 
 
 def _step_ns(fsw_ns: int) -> int:
@@ -250,7 +250,8 @@ class Scenario:
             give_integrator = _FIDELITY[self.fidelity]
             fields = {}
             for vehicle in self.vehicles:
-                self._integrators.append(give_integrator(vehicle.spacecraft))
+                if (integrator := give_integrator(vehicle.spacecraft)) is not None:
+                    self._integrators.append(integrator)
                 fields.update(vehicle.recorded_fields())
             fields.update(fsw_fields)
             recorders = _recorders(fields, step_ns)

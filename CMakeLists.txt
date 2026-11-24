@@ -35,9 +35,11 @@ add_library(runge_kutta SHARED native/runge_kutta.cpp)
 set_target_properties(runge_kutta PROPERTIES PREFIX "" OUTPUT_NAME "_runge_kutta_native" SUFFIX ".abi3.so")
 target_compile_features(runge_kutta PRIVATE cxx_std_17)
 target_compile_definitions(runge_kutta PRIVATE NDEBUG WD_BASILISK_REVISION="${basilisk_revision}")
-# The baseline x86-64 target, no fast math and no contraction into FMA, after any CXXFLAGS and whatever
-# the compiler defaults to, so the arithmetic and Eigen's alignment stay those of Basilisk's SSE2 build.
+# The baseline x86-64 target, no fast math and no contraction into FMA, whatever the compiler defaults
+# to, so the arithmetic and Eigen's alignment are those of Basilisk's SSE2 build. An -m flag in CXXFLAGS
+# still enables its instructions; importing the library then refuses it, on the instruction set it reports.
 target_compile_options(runge_kutta PRIVATE
   -march=x86-64 -mtune=generic -O2 -fno-fast-math -ffp-contract=off -fvisibility=hidden -fvisibility-inlines-hidden)
+target_include_directories(runge_kutta BEFORE PRIVATE native/include)
 target_link_libraries(runge_kutta PRIVATE bsk::sdk_headers Eigen3::Eigen "${basilisk_dir}/libdynamicsLib.so")
 install(TARGETS runge_kutta LIBRARY DESTINATION wise_dynamics/basilisk)

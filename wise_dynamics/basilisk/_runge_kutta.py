@@ -8,14 +8,17 @@ layout facts are not the ones Basilisk records: either mismatch would corrupt me
 """
 
 import ctypes
+import functools
 import importlib.util
+import json
+import operator
 from dataclasses import dataclass
 from typing import Any
 
 import Basilisk
 from Basilisk.simulation import spacecraft  # noqa: F401 - loads the libdynamicsLib.so the library links
 
-__all__ = ["Tableau", "install"]
+__all__ = ["Tableau", "install", "integrates_here"]
 
 
 def _load() -> ctypes.CDLL:
@@ -34,8 +37,10 @@ def _load() -> ctypes.CDLL:
     library = ctypes.CDLL(spec.origin)
     library.wd_install_runge_kutta.restype = ctypes.c_void_p
     library.wd_install_runge_kutta.argtypes = [ctypes.c_void_p, ctypes.c_size_t] + [ctypes.POINTER(ctypes.c_double)] * 3
-    for name in ("wd_basilisk_revision", "wd_abi_architecture", "wd_abi_eigen_version"):
-        getattr(library, name).restype = ctypes.c_char_p
+    library.wd_basilisk_revision.restype = ctypes.c_char_p
+    library.wd_integrates_here.restype = ctypes.c_bool
+    library.wd_integrates_here.argtypes = [ctypes.c_void_p]
+    library.wd_abi.restype = ctypes.c_char_p
     info: Any = Basilisk.getBuildInfo()
     built = library.wd_basilisk_revision().decode()
     installed = info["artifact"]["sourceRevision"]
@@ -44,27 +49,16 @@ def _load() -> ctypes.CDLL:
             f"the compiled integrator was built against Basilisk {built}, but Basilisk {installed} is installed;"
             " reinstall wise-dynamics against the bsk it pins"
         )
-    abi = info["abi"]
+    recorded = info["abi"]
     facts = {
-        "target.architecture": (library.wd_abi_architecture().decode(), abi["target"]["architecture"]),
-        "cxx.standardLibrary.useCxx11Abi": (
-            library.wd_abi_use_cxx11_abi(),
-            abi["cxx"]["standardLibrary"]["useCxx11Abi"],
-        ),
-        "dependencies.eigen.version": (
-            library.wd_abi_eigen_version().decode(),
-            abi["dependencies"]["eigen"]["version"],
-        ),
-        "dependencies.eigen.maxAlignBytes": (
-            library.wd_abi_eigen_max_align_bytes(),
-            abi["dependencies"]["eigen"]["maxAlignBytes"],
-        ),
+        name: (built_fact, functools.reduce(operator.getitem, name.split("."), recorded))
+        for name, built_fact in json.loads(library.wd_abi()).items()
     }
     differing = {name: pair for name, pair in facts.items() if pair[0] != pair[1]}
     if differing:
         raise ImportError(
             "the compiled integrator was built with another layout than Basilisk's, as (built, Basilisk):"
-            f" {differing}; reinstall wise-dynamics without flags that change them, such as -march or"
+            f" {differing}; reinstall wise-dynamics without CXXFLAGS that change them, such as -mavx or"
             " -D_GLIBCXX_USE_CXX11_ABI"
         )
     return library
@@ -101,27 +95,32 @@ class Tableau:
                 raise ValueError(f"row {i} of a is not {stages} long and zero from column {i} on: {self}")
 
 
-def install(craft: Any, tableau: Tableau) -> int:
+def install(craft: Any, tableau: Tableau) -> None:
     """Give a Basilisk spacecraft the compiled integrator of `tableau`, which the spacecraft owns.
 
     Args:
         craft: The Basilisk `Spacecraft`.
         tableau: The method.
 
-    Returns:
-        The integrator's address, which the spacecraft's `integrator` now holds; the spacecraft owns
-        the integrator, so the address keeps nothing alive.
-
     Raises:
         RuntimeError: The spacecraft did not take the integrator, as one whose integration is synced to
             another's does not, or it could not be built.
     """
     stages = len(tableau.b)
-    doubles = ctypes.c_double * (stages * stages)
-    a = doubles(*(x for row in tableau.a for x in row))
+    a = (ctypes.c_double * (stages * stages))(*(x for row in tableau.a for x in row))
     b = (ctypes.c_double * stages)(*tableau.b)
     c = (ctypes.c_double * stages)(*tableau.c)
-    address = _LIBRARY.wd_install_runge_kutta(int(craft.this), stages, a, b, c)
-    if not address or int(craft.integrator.this) != address:
+    if not _LIBRARY.wd_install_runge_kutta(int(craft.this), stages, a, b, c):
         raise RuntimeError(f"spacecraft {craft.ModelTag!r} did not take the compiled integrator")
-    return address
+
+
+def integrates_here(craft: Any) -> bool:
+    """Whether a Basilisk spacecraft integrates with the compiled integrator.
+
+    Args:
+        craft: The Basilisk `Spacecraft`.
+
+    Returns:
+        True when its integrator is the compiled one.
+    """
+    return _LIBRARY.wd_integrates_here(int(craft.this))

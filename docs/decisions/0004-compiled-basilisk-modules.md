@@ -35,8 +35,9 @@ work needs. The first is the explicit Runge-Kutta integrator of the `lo` and `me
   `dependencies` and in `build-system.requires`, and move together as one Renovate update; the update
   merges itself when the build and the tests pass, and a consumer takes it with its next WiseDynamics pin.
 - **Refused, not trusted, on a mismatch.** Importing a module refuses a Basilisk whose source revision, or
-  whose recorded layout facts (architecture, the C++ library's string ABI, Eigen's version and alignment),
-  differ from the module's, since a layout mismatch corrupts memory rather than raising.
+  whose recorded build facts, differ from the module's: a layout mismatch corrupts memory rather than
+  raising, and another instruction set changes the arithmetic. The module computes its facts with
+  Basilisk's own ABI descriptor from `bsk-sdk`, and compares them with those the Basilisk wheel records.
 - **Held to the code it replaces.** A module does the floating-point operations of the Basilisk code it
   replaces, in the same order, so a run is bit-identical; and it allocates nothing per step of its own.
   Both are tests in this repository, against stock Basilisk in the same process.
@@ -75,7 +76,7 @@ Basilisk release that changes what a module reads fails the update's build or te
 it then waits for a WiseDynamics change.
 
 A consumer's machine compiles its own modules and runs none of this repository's tests; what holds its
-build to the tested arithmetic is that the build flags are fixed and that the layout facts are compared at
-import.
+build to the tested arithmetic is that the build flags are fixed, and that a module built with flags that
+change its instruction set or layout is refused at import.
 
 `hi` keeps Basilisk's adaptive RKF78, which no module replaces.

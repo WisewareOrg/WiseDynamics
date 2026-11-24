@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from Basilisk.fswAlgorithms import inertial3D
 
 from tests import allocations
 from tests.allocations import (
@@ -23,18 +22,9 @@ from tests.allocations import (
     native_allocations_by_function,
     native_allocations_per_tick,
 )
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 def _fly(ticks: int) -> int:
@@ -47,7 +37,7 @@ def _fly(ticks: int) -> int:
         How many times the IMU was updated.
     """
     vehicle = ImuSpacecraft()
-    Leo500(vehicle).run(_Guidance(), {}, duration_s=float(ticks))
+    Leo500(vehicle).run(Guidance(), {}, duration_s=float(ticks))
     return vehicle.imu.CallCounts
 
 
