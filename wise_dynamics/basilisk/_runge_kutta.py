@@ -1,11 +1,9 @@
 """WiseDynamics' explicit Runge-Kutta integrator, compiled against the exact Basilisk build it links.
 
 The integrator, in `_runge_kutta_native`, does the arithmetic of Basilisk's `svIntegratorRungeKutta`
-in the same order, so a run is bit-identical to one with Basilisk's integrator, without allocating per
-step. It reads Basilisk's C++ classes directly, so importing this module refuses a Basilisk whose
-source revision is not the one the library was built against, and a library whose build facts are
-not the ones Basilisk records: a layout mismatch would corrupt memory, not raise, and another
-instruction set would change the arithmetic.
+in the same order, without allocating per step. Importing this module refuses a Basilisk whose source
+revision is not the one the library was built against, and a library whose build facts are not the
+ones Basilisk records. ADR 0004 rev 1 records why.
 """
 
 import ctypes
@@ -22,6 +20,22 @@ from Basilisk.simulation import spacecraft  # loads the libdynamicsLib.so the li
 __all__ = ["Tableau", "install", "integrates_here"]
 
 
+def _recorded(abi: Any, name: str) -> Any:
+    """The build fact Basilisk records under a dotted key, or None when it records none.
+
+    Args:
+        abi: `Basilisk.getBuildInfo()["abi"]`.
+        name: The fact's dotted key.
+
+    Returns:
+        The fact, or None.
+    """
+    try:
+        return functools.reduce(operator.getitem, name.split("."), abi)
+    except (KeyError, TypeError):
+        return None
+
+
 def _load() -> ctypes.CDLL:
     """Load the compiled integrator and check it was built against the Basilisk that is installed.
 
@@ -32,6 +46,7 @@ def _load() -> ctypes.CDLL:
         ImportError: The library is missing, was built against another Basilisk source revision, or
             with other build facts than Basilisk's.
     """
+    # Found through the import system, as an editable install places the library outside this package.
     spec = importlib.util.find_spec(f"{__package__}._runge_kutta_native")
     if spec is None or spec.origin is None:
         raise ImportError("the compiled integrator _runge_kutta_native is not installed; reinstall wise-dynamics")
@@ -51,10 +66,7 @@ def _load() -> ctypes.CDLL:
             " reinstall wise-dynamics against the bsk it pins"
         )
     recorded = info["abi"]
-    facts = {
-        name: (built_fact, functools.reduce(operator.getitem, name.split("."), recorded))
-        for name, built_fact in json.loads(library.wd_abi()).items()
-    }
+    facts = {name: (built_fact, _recorded(recorded, name)) for name, built_fact in json.loads(library.wd_abi()).items()}
     differing = {name: pair for name, pair in facts.items() if pair[0] != pair[1]}
     if differing:
         raise ImportError(

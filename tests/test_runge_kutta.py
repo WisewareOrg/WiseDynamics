@@ -1,5 +1,6 @@
 """The compiled Runge-Kutta: bit-identical to Basilisk's, allocating nothing per step, refusing what it cannot run."""
 
+import importlib.util
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -44,7 +45,7 @@ _BUILD_FACTS = [
 """The build facts the library must report, by their keys in `Basilisk.getBuildInfo()["abi"]`."""
 
 
-def _basilisk_rk3(craft: Any) -> Any:
+def _basilisk_rk3(craft: Any) -> None:
     """Give a spacecraft Basilisk's own three-stage Runge-Kutta with Ralston's tableau, written out here.
 
     The tableau is the literal `lo` integrated with before the compiled integrator, not the one
@@ -52,9 +53,6 @@ def _basilisk_rk3(craft: Any) -> Any:
 
     Args:
         craft: The Basilisk spacecraft.
-
-    Returns:
-        The integrator.
     """
     integrator = svIntegrators.svIntegratorRungeKutta3(
         craft,
@@ -63,21 +61,16 @@ def _basilisk_rk3(craft: Any) -> Any:
         [0.0, 1 / 2, 3 / 4],
     )
     craft.setIntegrator(integrator)
-    return integrator
 
 
-def _basilisk_rk4(craft: Any) -> Any:
+def _basilisk_rk4(craft: Any) -> None:
     """Give a spacecraft Basilisk's own classical fourth-order Runge-Kutta, whose tableau it holds itself.
 
     Args:
         craft: The Basilisk spacecraft.
-
-    Returns:
-        The integrator.
     """
     integrator = svIntegrators.svIntegratorRK4(craft)
     craft.setIntegrator(integrator)
-    return integrator
 
 
 _BASILISK = {"lo": _basilisk_rk3, "med": _basilisk_rk4}
@@ -130,23 +123,25 @@ def test_a_run_is_bit_identical_to_one_with_basilisks_integrator(
         monkeypatch: Swaps Basilisk's integrator in for the fidelity's.
     """
 
-    def fly() -> dict:
+    def fly() -> tuple[dict, bool]:
         """Fly the case for 300 s.
 
         Returns:
-            The run's datasets.
+            The run's datasets, and whether it ran the compiled integrator.
         """
         flown = SCENARIOS[name](VEHICLES[vehicle]())
         flown.fidelity = fidelity
         flown.disperse_case(np.random.SeedSequence(0, spawn_key=(case,)))
         commands = {"wheel": torque(0.02)} if "wheel" in flown.vehicle.writers() else {}
-        return flown.run(FswHost(commanding(commands), flown.vehicle), {}, duration_s=300.0)
+        datasets = flown.run(FswHost(commanding(commands), flown.vehicle), {}, duration_s=300.0)
+        return datasets, runge_kutta.integrates_here(flown.vehicle.spacecraft)
 
-    compiled = fly()
+    compiled, ran_compiled = fly()
     with monkeypatch.context() as patch:
         patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
-        basilisk = fly()
+        basilisk, ran_compiled_instead = fly()
 
+    assert ran_compiled and not ran_compiled_instead, "the two flights did not run the two integrators"
     _assert_bit_identical(compiled, basilisk)
 
 
@@ -182,38 +177,25 @@ def test_a_run_whose_dynamics_depend_on_the_time_is_bit_identical_too(fidelity: 
         monkeypatch: Swaps Basilisk's integrator in for the fidelity's.
     """
 
-    def fly() -> dict:
+    def fly() -> tuple[dict, bool]:
         """Fly 300 s of the IMU spacecraft beside the moving Moon.
 
         Returns:
-            The run's datasets.
+            The run's datasets, and whether it ran the compiled integrator.
         """
         flown = _WithMovingMoon(ImuSpacecraft())
         flown.fidelity = fidelity
-        return flown.run(Guidance(), {}, duration_s=300.0)
+        datasets = flown.run(Guidance(), {}, duration_s=300.0)
+        return datasets, runge_kutta.integrates_here(flown.vehicle.spacecraft)
 
-    compiled = fly()
+    compiled, ran_compiled = fly()
     with monkeypatch.context() as patch:
         patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
-        basilisk = fly()
+        basilisk, ran_compiled_instead = fly()
+
+    assert ran_compiled and not ran_compiled_instead, "the two flights did not run the two integrators"
 
     _assert_bit_identical(compiled, basilisk)
-
-
-@pytest.mark.parametrize(("fidelity", "compiled"), [("lo", True), ("med", True), ("hi", False)])
-def test_lo_and_med_integrate_with_the_compiled_integrator_and_hi_with_basilisks(fidelity: str, compiled: bool):
-    """The spacecraft of a run at `lo` or `med` integrates with the compiled integrator; at `hi`, with Basilisk's.
-
-    Args:
-        fidelity: The fidelity the run flies at.
-        compiled: Whether that fidelity's integrator is the compiled one.
-    """
-    flown = Leo500(ImuSpacecraft())
-    flown.fidelity = fidelity
-
-    flown.run(Guidance(), {}, duration_s=1.0)
-
-    assert runge_kutta.integrates_here(flown.vehicle.spacecraft) is compiled, f"{fidelity} runs the wrong integrator"
 
 
 @pytest.mark.parametrize("fidelity", ["lo", "med"])
@@ -254,6 +236,37 @@ def test_a_step_of_the_compiled_integrator_makes_no_native_allocation(
     )
 
 
+def test_a_missing_library_is_refused(monkeypatch: pytest.MonkeyPatch):
+    """Loading with no compiled integrator installed raises, saying to reinstall.
+
+    Args:
+        monkeypatch: Hides the library from the import system.
+    """
+    find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *args: None if name.endswith("_runge_kutta_native") else find_spec(name, *args),
+    )
+
+    with pytest.raises(ImportError, match="_runge_kutta_native is not installed; reinstall wise-dynamics"):
+        runge_kutta._load()
+
+
+def test_a_build_fact_basilisk_does_not_record_is_refused(monkeypatch: pytest.MonkeyPatch):
+    """Loading under a Basilisk that records no instruction set raises, naming the fact.
+
+    Args:
+        monkeypatch: Gives Basilisk a record without the fact.
+    """
+    info: Any = Basilisk.getBuildInfo()
+    del info["abi"]["target"]["instructionSet"]
+    monkeypatch.setattr(Basilisk, "getBuildInfo", lambda: info)
+
+    with pytest.raises(ImportError, match=r"'target.instructionSet': \('SSE2', None\)"):
+        runge_kutta._load()
+
+
 def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest.MonkeyPatch):
     """Loading the library under a Basilisk of another source revision raises, naming both.
 
@@ -268,7 +281,9 @@ def test_a_library_built_against_another_basilisk_is_refused(monkeypatch: pytest
 
 def test_the_library_reports_exactly_the_build_facts_held():
     """The library reports each held build fact, and no fact the refusal test below does not hold."""
-    assert sorted(json.loads(runge_kutta._LIBRARY.wd_abi())) == _BUILD_FACTS
+    reported = sorted(json.loads(runge_kutta._LIBRARY.wd_abi()))
+
+    assert reported == _BUILD_FACTS, f"the library reports {reported}"
 
 
 @pytest.mark.parametrize("fact", _BUILD_FACTS)

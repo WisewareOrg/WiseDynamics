@@ -100,9 +100,8 @@ in seconds, after the models at each instant they share, so they sample that ins
 flight-software module runs in its own task at the same period, after the sensors, so it reads that
 instant's sensor output. The recorders run at every dynamics step, after the rest, so truth and
 flight output are recorded from the same instant. A message several fields are recorded from has one
-recorder. `fsw_fields` maps a dataset path to a
-flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
-empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
+recorder. `fsw_fields` maps a dataset path to a flight-software `(message, field, units)`, as
+`recorded_fields()` does for a vehicle, and may be empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
 then `fsw_fields`.
 
 A `ground` is any Basilisk module declaring `period_s`. It runs from t = 0 in a process of its own,
@@ -112,12 +111,12 @@ The ground can end its own part of the run with `stop_ground()`.
 
 Basilisk calls every Python module of a run, the flight software and the ground among them, on one
 thread of its own, and `run` holds one Python thread state on that thread from the reset to the run's
-final instant, in a process of its own, `thread_state_process`, below every other process of the run
-and never below priority -1, Basilisk's default, the lowest it reaches at a stop time. Without it
+final instant, in a process of its own, `thread_state_process`, which runs after every other process
+of the run. Without it
 each call into Python would create and destroy a thread state. So those calls share a thread state as
 calls on any ordinary thread do: a `threading.local` value or a context variable set in one call is
 still set in the next. A run that raises leaves that thread state cleared but allocated for the life
-of the process, CPython's 16 KB frame stack with it, and listed among the interpreter's thread
+of the process, its frame stack with it, and listed among the interpreter's thread
 states, so a fault handler's dump of every thread shows one thread with no frame per such run, and a
 debug build of CPython, which asserts a thread state is cleared once, aborts at exit after one.
 

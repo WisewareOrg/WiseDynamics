@@ -16,11 +16,10 @@ from tests import allocations
 from tests.allocations import (
     _name,
     _owner,
+    _stacks,
     _tracked,
     assert_no_native_allocations_per_tick,
-    native_allocations,
     native_allocations_by_function,
-    native_allocations_per_tick,
 )
 from tests.stubs import Guidance
 from wise_dynamics.basilisk import ImuSpacecraft
@@ -39,15 +38,6 @@ def _fly(ticks: int) -> int:
     vehicle = ImuSpacecraft()
     Leo500(vehicle).run(Guidance(), {}, duration_s=float(ticks))
     return vehicle.imu.CallCounts
-
-
-def test_a_path_that_allocates_every_tick_counts_each_allocation(tmp_path: Path):
-    """The IMU's update allocates twice a tick.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    assert native_allocations_per_tick(_fly, within="ImuSensor::UpdateState", ticks=50, directory=tmp_path) == 2.0
 
 
 def test_a_path_that_ran_and_allocates_nothing_per_tick_holds(tmp_path: Path):
@@ -102,7 +92,9 @@ def test_each_allocation_is_charged_to_the_function_that_made_it(tmp_path: Path)
     Args:
         tmp_path: The test's own temporary directory.
     """
-    assert native_allocations_by_function(_fly, ticks=50, directory=tmp_path)["Saturate::saturate"] == 2.0
+    per_tick = native_allocations_by_function(_fly, ticks=50, directory=tmp_path)
+
+    assert per_tick["Saturate::saturate"] == 2.0, f"charged per tick: {per_tick}"
 
 
 def test_a_tracked_flight_runs_in_another_process(tmp_path: Path):
@@ -111,7 +103,9 @@ def test_a_tracked_flight_runs_in_another_process(tmp_path: Path):
     Args:
         tmp_path: The test's own temporary directory.
     """
-    assert _tracked(lambda ticks: os.getpid(), 1, tmp_path / "capture.bin") != os.getpid()
+    _, tracked_pid = _stacks(lambda ticks: os.getpid(), 1, tmp_path / "capture.bin")
+
+    assert tracked_pid != os.getpid(), "the tracked flight ran in the test's own process"
 
 
 def _raises(ticks: int) -> None:
@@ -154,23 +148,13 @@ def test_a_bare_string_of_exclusions_is_refused(tmp_path: Path):
         tmp_path: The test's own temporary directory.
     """
     with pytest.raises(TypeError, match="not the string"):
-        native_allocations_per_tick(
+        assert_no_native_allocations_per_tick(
             _fly, within="ImuSensor::UpdateState", excluding="Saturate::saturate", ticks=5, directory=tmp_path
         )
 
 
-def test_a_path_is_named_by_its_whole_function_name(tmp_path: Path):
-    """A function name counts the allocations under it; part of one counts none.
-
-    Args:
-        tmp_path: The test's own temporary directory.
-    """
-    assert native_allocations(_fly, within="ImuSensor::UpdateState", ticks=5, directory=tmp_path) > 0
-    assert native_allocations(_fly, within="ImuSensor::Update", ticks=5, directory=tmp_path) == 0
-
-
 def test_a_name_no_allocation_has_on_its_stack_does_not_hold(tmp_path: Path):
-    """A held path whose name no allocation's stack holds fails, though the path ran and nothing allocated.
+    """A path named by part of a function's name holds no allocation, so the hold fails as misnamed.
 
     Args:
         tmp_path: The test's own temporary directory.
@@ -196,7 +180,7 @@ def test_a_frame_is_named_without_its_parameters_namespace_or_build_suffixes(res
         resolved: The function as memray resolves it.
         name: The name it is known by.
     """
-    assert _name(resolved) == name
+    assert _name(resolved) == name, f"{resolved!r} is named {_name(resolved)!r}"
 
 
 @pytest.mark.parametrize(
@@ -222,7 +206,7 @@ def test_an_allocation_is_charged_to_its_innermost_named_frame_past_the_plumbing
         functions: An allocation's function names, innermost first.
         owner: The function it is charged to.
     """
-    assert _owner(functions) == owner
+    assert _owner(functions) == owner, f"{functions} is charged to {_owner(functions)!r}"
 
 
 def test_a_tracked_flight_returns_a_result_larger_than_a_pipe_holds(tmp_path: Path):
@@ -231,7 +215,9 @@ def test_a_tracked_flight_returns_a_result_larger_than_a_pipe_holds(tmp_path: Pa
     Args:
         tmp_path: The test's own temporary directory.
     """
-    assert _tracked(lambda ticks: "x" * 200_000, 1, tmp_path / "capture.bin") == "x" * 200_000
+    result = _tracked(lambda ticks: "x" * 200_000, 1, tmp_path / "capture.bin")
+
+    assert result == "x" * 200_000, f"the result came back as {len(str(result))} characters"
 
 
 def test_a_tracked_flight_that_runs_past_its_time_is_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

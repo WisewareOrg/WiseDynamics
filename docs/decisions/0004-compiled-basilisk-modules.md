@@ -23,17 +23,16 @@ nothing else.
 ## Decision
 
 WiseDynamics augments Basilisk with C++ modules of its own where stock Basilisk code costs more than its
-work needs. The first is the explicit Runge-Kutta integrator of the `lo` and `med` fidelities
-(`native/runge_kutta.cpp`).
+work needs, such as the explicit Runge-Kutta integrator of the `lo` and `med` fidelities.
 
-- **Built against Basilisk's SDK, at install.** A module is compiled when wise-dynamics is installed, by
-  scikit-build-core, against the headers of `bsk-sdk`, Basilisk's own package for building against its
-  wheels, and links the installed wheel's libraries. A consumer's git pin is all it takes: no index, no
+- **Built against Basilisk's SDK, at install.** A module is compiled when wise-dynamics is installed,
+  against the headers of `bsk-sdk`, Basilisk's own package for building against its wheels, and links the installed wheel's libraries. A consumer's git pin is all it takes: no index, no
   wheel of ours.
 - **One exact Basilisk, moved by the tests.** A module reads Basilisk's classes directly, so it is correct
   only against the release it was compiled for. `bsk` and `bsk-sdk` are pinned to one release, in
-  `dependencies` and in `build-system.requires`, and move together as one Renovate update; the update
-  merges itself when the build and the tests pass, and a consumer takes it with its next WiseDynamics pin.
+  `dependencies` and in `build-system.requires`, and move together as one Renovate update; a minor or patch
+  update merges itself when the build and the tests pass, a major one waits for review, and a consumer
+  takes either with its next WiseDynamics pin.
 - **Refused, not trusted, on a mismatch.** Importing a module refuses a Basilisk whose source revision, or
   whose recorded build facts, differ from the module's: a layout mismatch corrupts memory rather than
   raising, and another instruction set changes the arithmetic.
@@ -77,4 +76,6 @@ A consumer's machine compiles its own modules and runs none of this repository's
 build to the tested arithmetic is that the build flags are fixed, and that a module whose build facts
 differ from Basilisk's is refused at import.
 
-`hi` keeps Basilisk's adaptive RKF78, which no module replaces.
+`hi` keeps Basilisk's adaptive RKF78, which no module replaces. The integrator costs that
+[ADR 0003 rev 2](0003-fidelity-tiers.md) weighs are those of Basilisk's own integrators, which `lo` and
+`med` no longer run; its choice of method for each fidelity rests on the accuracy budget, unchanged.

@@ -24,8 +24,8 @@ _GROUND_PROCESS_PRIORITY = 1
 _HOLD_PROCESS = "thread_state_process"
 _HOLD_TASK = "thread_state_task"
 _HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
-"""The thread-state hold's priority: below every other process, and not below -1, Basilisk's default, the lowest
-a stop time reaches."""
+"""The thread-state hold's priority: below every other process, and not below -1, since Basilisk runs the tasks
+due at the stop time only in processes of priority -1 or above."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -53,29 +53,24 @@ _RK4 = Tableau(
 """The classical fourth-order Runge-Kutta, which `med` integrates with."""
 
 
-def _rkf78(spacecraft: Any) -> Any:
-    """Give a spacecraft Basilisk's Runge-Kutta-Fehlberg 7(8), at the tolerances it sets.
+def _rkf78(spacecraft: Any) -> None:
+    """Give a spacecraft Basilisk's Runge-Kutta-Fehlberg 7(8), at the tolerances it sets, which it then owns.
 
     Args:
         spacecraft: The Basilisk dynamic object it integrates.
-
-    Returns:
-        The integrator.
     """
     integrator = svIntegrators.svIntegratorRKF78(spacecraft)
     integrator.setRelativeTolerance(1e-10)
     integrator.setAbsoluteTolerance(1e-12)
     spacecraft.setIntegrator(integrator)
-    return integrator
 
 
-_FIDELITY: dict[str, Callable[[Any], Any]] = {
+_FIDELITY: dict[str, Callable[[Any], None]] = {
     "hi": _rkf78,
     "med": functools.partial(install_runge_kutta, tableau=_RK4),
     "lo": functools.partial(install_runge_kutta, tableau=_RALSTON_RK3),
 }
-"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns; `hi`'s returns
-Basilisk's integrator, which `run` keeps so a test can read its tolerances, the others nothing."""
+"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns."""
 
 
 def _step_ns(fsw_ns: int) -> int:
@@ -148,7 +143,6 @@ class Scenario:
         self.vehicle = vehicle
         self.vehicles = [vehicle]
         self.draws = {}
-        self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
@@ -250,8 +244,7 @@ class Scenario:
             give_integrator = _FIDELITY[self.fidelity]
             fields = {}
             for vehicle in self.vehicles:
-                if (integrator := give_integrator(vehicle.spacecraft)) is not None:
-                    self._integrators.append(integrator)
+                give_integrator(vehicle.spacecraft)
                 fields.update(vehicle.recorded_fields())
             fields.update(fsw_fields)
             recorders = _recorders(fields, step_ns)

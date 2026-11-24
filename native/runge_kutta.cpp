@@ -128,8 +128,8 @@ std::string abiJson()
 extern "C" {
 
 // Gives `dynamics` an integrator of the `stages`-stage tableau (a row-major stages x stages, b and c
-// of stages each), which `dynamics` then owns, and returns it; returns nullptr when it cannot be built
-// or `dynamics` refuses it, as one whose integration is synced to another's does, deleting it.
+// of stages each), which `dynamics` then owns, and returns it. Returns nullptr when the integrator
+// cannot be built, or when `dynamics` refuses and deletes it, as one synced to another's integration does.
 __attribute__((visibility("default"))) void* wd_install_runge_kutta(
     void* dynamics, std::size_t stages, const double* a, const double* b, const double* c) noexcept
 {

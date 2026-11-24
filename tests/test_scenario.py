@@ -15,6 +15,7 @@ from scipy.spatial.transform import Rotation
 from tests.allocations import assert_no_native_allocations_per_tick
 from tests.stubs import Guidance
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
+from wise_dynamics.basilisk import _runge_kutta as runge_kutta
 from wise_dynamics.basilisk import scenario as scenario_module
 from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
@@ -53,16 +54,53 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)
 
 
-def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances():
-    """`hi` gives the vehicle that runs Basilisk's RKF78, at a relative 1e-10 and an absolute 1e-12."""
+def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances(monkeypatch: pytest.MonkeyPatch):
+    """`hi` gives the vehicle that runs Basilisk's RKF78, at a relative 1e-10 and an absolute 1e-12.
+
+    Args:
+        monkeypatch: Keeps each RKF78 Basilisk makes, to read.
+    """
+    made = []
+    make = svIntegrators.svIntegratorRKF78
+
+    def keep(spacecraft: object) -> object:
+        """Make Basilisk's RKF78 for `spacecraft`, and keep it.
+
+        Args:
+            spacecraft: The Basilisk dynamic object it integrates.
+
+        Returns:
+            The integrator.
+        """
+        made.append(make(spacecraft))
+        return made[-1]
+
+    monkeypatch.setattr(svIntegrators, "svIntegratorRKF78", keep)
     scenario = Leo500(ImuSpacecraft())
     scenario.fidelity = "hi"
+
     scenario.run(Guidance(), {}, duration_s=1.0)
-    (integrator,) = scenario._integrators
-    assert type(integrator) is svIntegrators.svIntegratorRKF78
-    assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this)
-    assert integrator.getRelativeTolerance() == 1e-10
-    assert integrator.getAbsoluteTolerance() == 1e-12
+
+    (integrator,) = made
+    assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this), "the vehicle runs another"
+    assert integrator.getRelativeTolerance() == 1e-10, "the relative tolerance is not 1e-10"
+    assert integrator.getAbsoluteTolerance() == 1e-12, "the absolute tolerance is not 1e-12"
+    assert not runge_kutta.integrates_here(scenario.vehicle.spacecraft), "hi runs the compiled integrator"
+
+
+@pytest.mark.parametrize("fidelity", ["lo", "med"])
+def test_lo_and_med_give_the_vehicle_that_runs_the_compiled_integrator(fidelity: str):
+    """`lo` and `med` give the vehicle that runs the compiled integrator.
+
+    Args:
+        fidelity: The fidelity the run flies at.
+    """
+    scenario = Leo500(ImuSpacecraft())
+    scenario.fidelity = fidelity
+
+    scenario.run(Guidance(), {}, duration_s=1.0)
+
+    assert runge_kutta.integrates_here(scenario.vehicle.spacecraft), f"{fidelity} runs Basilisk's integrator"
 
 
 @pytest.mark.parametrize(

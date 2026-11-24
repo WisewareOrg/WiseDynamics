@@ -17,9 +17,7 @@ import memray
 
 __all__ = [
     "assert_no_native_allocations_per_tick",
-    "native_allocations",
     "native_allocations_by_function",
-    "native_allocations_per_tick",
 ]
 
 _RELEASES = {memray.AllocatorType.FREE, memray.AllocatorType.MUNMAP, memray.AllocatorType.PYMALLOC_FREE}
@@ -187,21 +185,6 @@ def _count(stacks: Stacks, within: str, excluding: tuple[str, ...]) -> int:
     )
 
 
-def native_allocations(fly: Callable[[int], object], *, within: str, ticks: int, directory: Path) -> int:
-    """All the native allocations one flight makes under the function `within`, set-up included.
-
-    Args:
-        fly: Builds and runs a fresh simulation for the given number of ticks.
-        within: The function name, as `_name` gives it, that names the path.
-        ticks: The number of ticks to fly.
-        directory: Where the memray capture file is written and removed.
-
-    Returns:
-        The number of allocations.
-    """
-    return _count(_stacks(fly, ticks, directory / "flight.bin")[0], within, ())
-
-
 def _per_tick(
     fly: Callable[[int], object], within: str, excluding: tuple[str, ...], ticks: int, directory: Path
 ) -> tuple[float, int, list[object]]:
@@ -222,37 +205,6 @@ def _per_tick(
     long, long_result = _stacks(fly, 2 * ticks, directory / "long.bin")
     per_tick = (_count(long, within, excluding) - _count(short, within, excluding)) / ticks
     return per_tick, _count(long, within, ()), [short_result, long_result]
-
-
-def native_allocations_per_tick(
-    fly: Callable[[int], object],
-    *,
-    within: str,
-    excluding: Iterable[str] = (),
-    ticks: int,
-    directory: Path,
-) -> float:
-    """The native allocations per tick that a code path makes, net of its one-off setup and teardown.
-
-    An allocation counts when its native stack holds the function `within` and none of `excluding`, so
-    `excluding` carves out what the path calls but does not own. Names are matched whole, as `_name`
-    gives them. Python-object allocations from pymalloc are not native and are not counted. The path is
-    flown for `ticks` and then for `2 * ticks` ticks, each from a fresh simulation, and the difference
-    is divided by `ticks`, so the result is the per-tick slope, exact since the counts are
-    deterministic. A path that never ran reads 0 here; `assert_no_native_allocations_per_tick` rules
-    that out.
-
-    Args:
-        fly: Builds and runs a fresh simulation for the given number of ticks.
-        within: The function name that names the path.
-        excluding: Function names the path calls but does not own.
-        ticks: The number of ticks of the shorter flight.
-        directory: Where the memray capture files are written and removed.
-
-    Returns:
-        The allocations per tick.
-    """
-    return _per_tick(fly, within, _names(excluding), ticks, directory)[0]
 
 
 def assert_no_native_allocations_per_tick(
