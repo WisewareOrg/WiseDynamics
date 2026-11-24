@@ -28,7 +28,7 @@ for the GraphQL mutation; `Closes #N` in the body only writes that record on a d
   and format, interrogate, pydoclint and ty. The action's tool versions are wise-ci's at the commit
   `uses:` names; the `check-python` dev dependency's `rev` in `pyproject.toml` names the same
   commit, so a local run sees the same versions. Renovate bumps the two together.
-- `pytest` — the full suite, on this commit installed as a git pin, as a consumer installs it.
+- `pytest` — `uv run pytest`, the full suite.
 
 Locally, after `uv sync --all-extras`, run `uv run --locked check-python` and `uv run pytest`.
 `uv sync` compiles the integrator in `native/`, so it needs a C++17 compiler on `PATH`.
