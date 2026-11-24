@@ -11,21 +11,11 @@ from typing import TypedDict
 import numpy as np
 import pytest
 from Basilisk.architecture import sysModel
-from Basilisk.fswAlgorithms import inertial3D
 
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 from wise_dynamics.basilisk.vehicles.imu_spacecraft import Vector3
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 class _Dispersed(TypedDict):
@@ -146,7 +136,7 @@ def test_imu_reader_is_subscribed_to_the_imu_output():
     scenario = Leo500(ImuSpacecraft())
     reader = scenario.vehicle.readers()["imu"]
     assert reader.isLinked()
-    datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
+    datasets = scenario.run(Guidance(), {}, duration_s=20.0)
     gyro, _ = datasets["imu/gyro_P"]
     assert np.array_equal(reader().AngVelPlatform, gyro[-1])
 
@@ -191,7 +181,7 @@ def test_the_noise_per_sample_is_the_density_over_the_root_of_the_sample_period(
         period_s: The flight software's period, and so the IMU's sample period, in seconds.
     """
     scenario = Leo500(_Quiet())
-    fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
+    fsw = type("_Paced", (Guidance,), {"period_s": period_s})()
     datasets = scenario.run(fsw, {}, duration_s=2000 * period_s)
     expected = 1e-3 / np.sqrt(period_s)
     gyro_noise = datasets["imu/gyro_P"][0] - datasets["truth/omega_BN_B"][0]
@@ -206,7 +196,7 @@ def test_a_run_records_the_attitude_as_the_quaternion_of_the_placed_state():
     The first row is the placement's quaternion, and no row is an MRP.
     """
     scenario = Leo500(ImuSpacecraft())
-    datasets = scenario.run(_Guidance(), {}, duration_s=20.0)
+    datasets = scenario.run(Guidance(), {}, duration_s=20.0)
     assert "truth/sigma_BN" not in datasets
     assert set(scenario.vehicle.recorded_fields()) <= set(datasets)
     q, units = datasets["truth/q_BN"]
@@ -273,7 +263,7 @@ def test_a_ground_reads_through_tracking_the_recorded_truth_of_its_instant():
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
     tracker = _Tracker(vehicle.tracking())
-    datasets = scenario.run(_Guidance(), {}, duration_s=5.0, ground=tracker)
+    datasets = scenario.run(Guidance(), {}, duration_s=5.0, ground=tracker)
     assert len(tracker.read) == 6
     for k, state in enumerate(tracker.read):
         assert np.allclose(state["q_BN"], datasets["truth/q_BN"][0][k], rtol=0, atol=1e-15)

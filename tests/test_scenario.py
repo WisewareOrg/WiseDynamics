@@ -1,27 +1,26 @@
 """`Scenario.run`: what a run records, as run-file datasets, and that it runs once."""
 
+import contextvars
+import ctypes
+import threading
 import weakref
+from pathlib import Path
 
 import numpy as np
 import pytest
 from Basilisk.architecture import messaging, sysModel
-from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
+from scipy.spatial.transform import Rotation
 
-from wise_dynamics.basilisk import ImuSpacecraft
+from tests.allocations import assert_no_native_allocations_per_tick
+from tests.stubs import Guidance
+from wise_dynamics.basilisk import FswHost, ImuSpacecraft
+from wise_dynamics.basilisk import _runge_kutta as runge_kutta
+from wise_dynamics.basilisk import scenario as scenario_module
+from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 def _guidance():
@@ -31,7 +30,7 @@ def _guidance():
         The guidance module, holding `GUIDANCE_SIGMA_RN`, and its `guidance/sigma_RN` field to
         record, as `fsw_fields`.
     """
-    guidance = _Guidance()
+    guidance = Guidance()
     guidance.sigma_R0N = GUIDANCE_SIGMA_RN
     return guidance, {"guidance/sigma_RN": (guidance.attRefOutMsg, "sigma_RN", "MRP")}
 
@@ -55,31 +54,54 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)
 
 
-@pytest.mark.parametrize(
-    ("fidelity", "integrator_type"),
-    [
-        ("hi", svIntegrators.svIntegratorRKF78),
-        ("med", svIntegrators.svIntegratorRK4),
-        ("lo", svIntegrators.svIntegratorRungeKutta3),
-    ],
-)
-def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(fidelity: str, integrator_type: type):
-    """Each fidelity gives the vehicle that runs its integrator; `hi` states its tolerances.
+def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances(monkeypatch: pytest.MonkeyPatch):
+    """`hi` gives the vehicle that runs Basilisk's RKF78, at a relative 1e-10 and an absolute 1e-12.
 
     Args:
-        fidelity: The fidelity level set on the scenario.
-        integrator_type: The Basilisk integrator class the level gives.
+        monkeypatch: Keeps each RKF78 Basilisk makes, to read.
+    """
+    made = []
+    make = svIntegrators.svIntegratorRKF78
+
+    def keep(spacecraft: object) -> object:
+        """Make Basilisk's RKF78 for `spacecraft`, and keep it.
+
+        Args:
+            spacecraft: The Basilisk dynamic object it integrates.
+
+        Returns:
+            The integrator.
+        """
+        made.append(make(spacecraft))
+        return made[-1]
+
+    monkeypatch.setattr(svIntegrators, "svIntegratorRKF78", keep)
+    scenario = Leo500(ImuSpacecraft())
+    scenario.fidelity = "hi"
+
+    scenario.run(Guidance(), {}, duration_s=1.0)
+
+    assert len(made) == 1, f"hi made {len(made)} RKF78s for one vehicle"
+    (integrator,) = made
+    assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this), "the vehicle runs another"
+    assert integrator.getRelativeTolerance() == 1e-10, "the relative tolerance is not 1e-10"
+    assert integrator.getAbsoluteTolerance() == 1e-12, "the absolute tolerance is not 1e-12"
+    assert not runge_kutta.integrates_here(scenario.vehicle.spacecraft), "hi runs the compiled integrator"
+
+
+@pytest.mark.parametrize("fidelity", ["lo", "med"])
+def test_lo_and_med_give_the_vehicle_that_runs_the_compiled_integrator(fidelity: str):
+    """`lo` and `med` give the vehicle that runs the compiled integrator.
+
+    Args:
+        fidelity: The fidelity the run flies at.
     """
     scenario = Leo500(ImuSpacecraft())
     scenario.fidelity = fidelity
-    scenario.disperse_case(np.random.SeedSequence(0))
-    scenario.run(_Guidance(), {}, duration_s=1.0)
-    (integrator,) = scenario._integrators
-    assert type(integrator) is integrator_type
-    assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this)
-    if fidelity == "hi":
-        assert integrator.getRelativeTolerance() == 1e-10
-        assert integrator.getAbsoluteTolerance() == 1e-12
+
+    scenario.run(Guidance(), {}, duration_s=1.0)
+
+    assert runge_kutta.integrates_here(scenario.vehicle.spacecraft), f"{fidelity} runs Basilisk's integrator"
 
 
 @pytest.mark.parametrize(
@@ -104,7 +126,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
         step_ns: The dynamics task period the flight software's period gives, in nanoseconds.
     """
     scenario = Leo500(ImuSpacecraft())
-    fsw = type("_Paced", (_Guidance,), {"period_s": period_s})()
+    fsw = type("_Paced", (Guidance,), {"period_s": period_s})()
     simulation = scenario._simulation
     scenario.run(fsw, {}, duration_s=0.0)
     dynamics, sensors, flight, record = simulation.TaskList
@@ -117,7 +139,7 @@ def test_the_step_is_the_largest_of_at_most_1_s_dividing_the_fsw_period(period_s
 def test_a_flight_software_period_with_no_step_of_at_least_1_ms_is_refused():
     """A period of 1000000007 ns, a prime, divides into no step between 1 ms and 1 s."""
     scenario = Leo500(ImuSpacecraft())
-    fsw = type("_Paced", (_Guidance,), {"period_s": 1.000000007})()
+    fsw = type("_Paced", (Guidance,), {"period_s": 1.000000007})()
     with pytest.raises(ValueError, match=r"the 1000000007 ns flight-software period"):
         scenario.run(fsw, {}, duration_s=0.0)
 
@@ -127,10 +149,13 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
     simulation = scenario._simulation
-    scenario.run(_Guidance(), {}, duration_s=1.0)
-    dynamics, sensors, _, _ = simulation.TaskList
-    assert dynamics.TaskModels == vehicle.models()
-    assert sensors.TaskModels == [vehicle.imu]
+
+    scenario.run(Guidance(), {}, duration_s=1.0)
+
+    tasks = {task.Name: task for task in simulation.TaskList}
+    dynamics, sensors = tasks["dynamics_task"], tasks["sensor_task"]
+    assert dynamics.TaskModels == vehicle.models(), "the dynamics task holds other models than the vehicle's"
+    assert sensors.TaskModels == [vehicle.imu], "the sensor task holds other models than the IMU"
 
 
 def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
@@ -145,7 +170,7 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
         scenario = Leo500(ImuSpacecraft())
         scenario.fidelity = fidelity
         scenario.disperse_case(np.random.SeedSequence(3))
-        datasets = scenario.run(_Guidance(), {}, duration_s=600.0)
+        datasets = scenario.run(Guidance(), {}, duration_s=600.0)
         gyro[fidelity] = datasets["imu/gyro_P"][0]
         truth[fidelity] = datasets["truth/omega_BN_B"][0]
     assert np.std(gyro["hi"], axis=0).min() > 1e-6
@@ -158,9 +183,9 @@ def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
 def test_a_scenario_runs_once():
     """A second `run` of the same scenario is refused."""
     scenario = Leo500(ImuSpacecraft())
-    scenario.run(_Guidance(), {}, duration_s=1.0)
+    scenario.run(Guidance(), {}, duration_s=1.0)
     with pytest.raises(RuntimeError, match="already run"):
-        scenario.run(_Guidance(), {}, duration_s=1.0)
+        scenario.run(Guidance(), {}, duration_s=1.0)
 
 
 class _Stepping(sysModel.SysModel):
@@ -278,13 +303,15 @@ def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
     scenario = Leo500(ImuSpacecraft())
     ground = _Marker("ground", order, period_s=2.0)
     simulation = scenario._simulation
+
     scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
-    assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
-    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(5)]
-    assert [process.Name for process in simulation.procList] == [
-        "scenario_process",
-        "ground_process",
-    ]
+
+    ground_ns = [t for t, name in order if name == "ground"]
+    fsw_ns = [t for t, name in order if name == "fsw"]
+    processes = [process.Name for process in simulation.procList]
+    assert ground_ns == [k * 2_000_000_000 for k in range(3)], f"the ground ran at {ground_ns} ns"
+    assert fsw_ns == [k * 1_000_000_000 for k in range(5)], f"the flight software ran at {fsw_ns} ns"
+    assert processes == ["scenario_process", "ground_process", "thread_state_process"], f"the processes are {processes}"
 
 
 class _Stopping(_Marker):
@@ -390,7 +417,309 @@ def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
     so the comparison starts at the next sample.
     """
     scenario = Leo500(_Exact())
-    datasets = scenario.run(_Guidance(), {}, duration_s=60.0)
+    datasets = scenario.run(Guidance(), {}, duration_s=60.0)
     omega = datasets["truth/omega_BN_B"][0]
     assert np.abs(np.diff(omega, axis=0)).max() > 1e-6
     assert np.array_equal(datasets["imu/gyro_P"][0][1:], omega[1:])
+
+
+def test_a_tick_of_the_host_makes_no_native_allocation(tmp_path: Path, commanding: type):
+    """Basilisk's call into `FswHost` and back, with a build commanding nothing, allocates nothing per tick.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+        commanding: The stub build class.
+    """
+
+    def fly(ticks: int) -> int:
+        """Fly `ticks` ticks of a build commanding nothing.
+
+        Args:
+            ticks: The number of ticks to fly.
+
+        Returns:
+            The ticks the build ran.
+        """
+        build = commanding({})
+        scenario = Leo500(ImuSpacecraft())
+        scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=ticks * build.period_s)
+        return build.ticked
+
+    assert_no_native_allocations_per_tick(
+        fly, within="SwigDirector__SysModel::UpdateState", ticks=100, directory=tmp_path
+    )
+
+
+class _Remembering(sysModel.SysModel):
+    """A Python module that records, at each step, the time a thread-local and a context value were last set to.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+        seen: At each step, the time the thread-local value held, `None` while unset.
+        seen_in_context: At each step, the time the context variable held, `None` while unset.
+    """
+
+    period_s = 1.0
+    seen: list[int | None]
+    seen_in_context: list[int | None]
+
+    def __init__(self) -> None:
+        """Start with nothing seen and an unset thread-local value."""
+        super().__init__()
+        self.seen = []
+        self.seen_in_context = []
+        self._local = threading.local()
+        self._context: contextvars.ContextVar[int] = contextvars.ContextVar(f"context_{id(self)}")
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Record the thread-local and the context value, then set both to this step's time.
+
+        Args:
+            CurrentSimNanos: The simulation time, in nanoseconds.
+        """
+        self.seen.append(getattr(self._local, "t_ns", None))
+        self.seen_in_context.append(self._context.get(None))
+        self._local.t_ns = CurrentSimNanos
+        self._context.set(CurrentSimNanos)
+
+
+def test_the_python_modules_of_a_run_share_one_thread_state_for_the_run():
+    """A thread-local or context value the flight software or the ground sets at one step is still set at its next.
+
+    That holds at the final instant too, for the ground, the last module to run there.
+    """
+    fsw, ground = _Remembering(), _Remembering()
+
+    Leo500(ImuSpacecraft()).run(fsw, {}, duration_s=3.0, ground=ground)
+
+    steps = [None, 0, 1_000_000_000, 2_000_000_000]
+    assert fsw.seen == steps, "the flight software's thread-local value did not last"
+    assert ground.seen == steps, "the ground's thread-local value did not last"
+    assert fsw.seen_in_context == steps, "the flight software's context value did not last"
+    assert ground.seen_in_context == steps, "the ground's context value did not last"
+
+
+@pytest.fixture
+def flown_once() -> None:
+    """Fly one run, so the threads a process's first run starts, such as tqdm's monitor, are running."""
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=1.0)
+
+
+def _thread_states() -> int:
+    """Count the interpreter's thread states, of live threads and of any left behind.
+
+    Returns:
+        The count.
+    """
+    api = ctypes.PyDLL(ctypes.pythonapi._name, handle=ctypes.pythonapi._handle)
+    api.PyInterpreterState_Get.restype = ctypes.c_void_p
+    api.PyInterpreterState_ThreadHead.restype = ctypes.c_void_p
+    api.PyInterpreterState_ThreadHead.argtypes = [ctypes.c_void_p]
+    api.PyThreadState_Next.restype = ctypes.c_void_p
+    api.PyThreadState_Next.argtypes = [ctypes.c_void_p]
+    count, state = 0, api.PyInterpreterState_ThreadHead(api.PyInterpreterState_Get())
+    while state:
+        count, state = count + 1, api.PyThreadState_Next(state)
+    return count
+
+
+@pytest.mark.usefixtures("flown_once")
+def test_a_run_that_returns_leaves_no_thread_state_behind():
+    """The thread state a run holds on Basilisk's thread is given back by the time the run returns."""
+    before = _thread_states()
+
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
+
+    assert _thread_states() == before, "a run that returned left a thread state behind"
+
+
+class _Held:
+    """An object a failing call holds, whose life shows whether that call's error was let go."""
+
+
+class _Raising(_Remembering):
+    """A Python flight software that raises at its second step, holding a `_Held` as it does.
+
+    Attributes:
+        marker: A weak reference to the marker the raising call held.
+    """
+
+    marker: weakref.ref
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Raise at 1 s.
+
+        Args:
+            CurrentSimNanos: The simulation time, in nanoseconds.
+
+        Raises:
+            ValueError: At 1 s.
+        """
+        if CurrentSimNanos == 1_000_000_000:
+            held = _Held()
+            self.marker = weakref.ref(held)
+            raise ValueError("raised by the flight software")
+
+
+@pytest.mark.usefixtures("flown_once")
+def test_a_run_that_raises_clears_the_thread_state_it_held_and_leaves_it_behind():
+    """A run whose flight software raises keeps nothing of the failed call, and one cleared thread state.
+
+    The thread state still held the failed call's error, and so its frame and the marker in it, until the
+    run cleared it; only its own thread could delete it.
+    """
+    before = _thread_states()
+    fsw = _Raising()
+
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        Leo500(ImuSpacecraft()).run(fsw, {}, duration_s=3.0)
+
+    assert fsw.marker() is None, "the failed call's frame is still alive"
+    assert _thread_states() == before + 1, "a run that raised did not leave exactly one thread state behind"
+
+
+class _RaisingAtReset(_Remembering):
+    """A Python ground that raises at reset, before the run's thread state is taken."""
+
+    def Reset(self, CurrentSimNanos: int) -> None:
+        """Raise.
+
+        Args:
+            CurrentSimNanos: The reset time, in nanoseconds.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError("raised by the ground at reset")
+
+
+@pytest.mark.usefixtures("flown_once")
+def test_a_run_whose_ground_raises_at_reset_leaves_no_thread_state_behind():
+    """A module raising at reset raises before the hold, which resets last, takes a thread state."""
+    before = _thread_states()
+
+    with pytest.raises(RuntimeError, match="SWIG director method error"):
+        Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0, ground=_RaisingAtReset())
+
+    assert _thread_states() == before, "a run that raised at reset left a thread state behind"
+
+
+def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
+    """The hold's process ranks below every other process of a run, the ground's included, and not below -1.
+
+    The floor is checked before the run, since a run whose hold is below -1 never returns.
+    """
+    floor = scenario_module._HOLD_PROCESS_PRIORITY
+    assert floor >= -1, f"the hold at {floor} is below -1, which Basilisk does not reach at a stop time"
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+
+    scenario.run(_Remembering(), {}, duration_s=1.0, ground=_Remembering())
+
+    priorities = {process.Name: process.processData.processPriority for process in simulation.procList}
+    hold = priorities.pop("thread_state_process")
+    assert hold < min(priorities.values()), f"the hold at {hold} is not below {priorities}"
+
+
+def test_a_run_of_no_duration_holds_no_thread_state():
+    """A run of 0 s, whose stop time no task period could reach, has no thread-state process."""
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+
+    scenario.run(_Remembering(), {}, duration_s=0.0)
+
+    names = [process.Name for process in simulation.procList]
+    assert "thread_state_process" not in names, f"a run of no duration made a thread-state process: {names}"
+
+
+def test_the_thread_state_is_given_back_only_on_the_thread_that_took_it():
+    """Giving the held thread state back on another thread than the one that took it raises."""
+    hold = ThreadStateHold()
+    taken = threading.Thread(target=hold.Reset, args=(0,))
+    taken.start()
+    taken.join()
+
+    with pytest.raises(RuntimeError, match="another thread"):
+        hold.UpdateState(0)
+
+
+def test_the_thread_state_is_given_back_once_at_the_stop_time(monkeypatch: pytest.MonkeyPatch):
+    """The hold's task fires once, at the run's final instant.
+
+    Args:
+        monkeypatch: Swaps a hold that notes its calls in for the run's.
+    """
+    calls: list[int] = []
+
+    class _Counting(ThreadStateHold):
+        """The hold, noting the time of each call to its `UpdateState`."""
+
+        def UpdateState(self, CurrentSimNanos: int) -> None:
+            """Note the call's time, then give the thread state back.
+
+            Args:
+                CurrentSimNanos: The simulation time, in nanoseconds.
+            """
+            calls.append(CurrentSimNanos)
+            super().UpdateState(CurrentSimNanos)
+
+    monkeypatch.setattr(scenario_module, "ThreadStateHold", _Counting)
+
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
+
+    assert calls == [3_000_000_000], f"the hold was called at {calls}"
+
+
+def test_a_run_records_each_message_once():
+    """The spacecraft's state message, the IMU's and the flight software's take one recorder each.
+
+    The vehicle's `recorded_fields()` reads several fields of the first two.
+    """
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+    guidance, fsw_fields = _guidance()
+
+    scenario.run(guidance, fsw_fields, duration_s=1.0)
+
+    tasks = {task.Name: task for task in simulation.TaskList}
+    recorders = tasks[scenario_module._RECORD_TASK].TaskModels
+    assert len(recorders) == 3, f"the record task holds {len(recorders)} recorders, not 3"
+
+
+def test_a_message_reached_twice_takes_one_recorder_and_two_messages_of_a_type_two():
+    """Fields of one message share its recorder however it was reached; another message has its own."""
+    first, second = ImuSpacecraft(), ImuSpacecraft()
+    fields = {
+        "position": (first.spacecraft.scStateOutMsg, "r_BN_N", "m"),
+        "velocity": (first.spacecraft.scStateOutMsg, "v_BN_N", "m/s"),
+        "other": (second.spacecraft.scStateOutMsg, "r_BN_N", "m"),
+    }
+
+    recorders = scenario_module._recorders(fields, 1_000_000_000)
+
+    assert recorders["position"] is recorders["velocity"], "two accesses to one message took two recorders"
+    assert recorders["position"] is not recorders["other"], "two messages of one type took one recorder"
+
+
+def test_each_field_read_from_a_shared_recorder_is_its_own():
+    """Each field recorded from a message several fields share holds that field of the message.
+
+    At the final instant, each dataset's last row is its own field of the message's last payload; the
+    attitude is recorded as Basilisk's MRP and finished into a quaternion.
+    """
+    vehicle = ImuSpacecraft()
+
+    datasets = Leo500(vehicle).run(Guidance(), {}, duration_s=3.0)
+
+    state, imu = vehicle.spacecraft.scStateOutMsg.read(), vehicle.imu.sensorOutMsg.read()
+    attitude = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)
+    for dataset, last in {
+        "truth/q_BN": attitude,
+        "truth/r_N": state.r_BN_N,
+        "truth/v_N": state.v_BN_N,
+        "truth/omega_BN_B": state.omega_BN_B,
+        "imu/gyro_P": imu.AngVelPlatform,
+        "imu/accel_P": imu.AccelPlatform,
+    }.items():
+        recorded = datasets[dataset][0][-1]
+        assert np.array_equal(recorded, np.asarray(last)), f"{dataset} ends at {recorded}, its field at {last}"

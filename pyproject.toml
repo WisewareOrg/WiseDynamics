@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Wiseware" }]
 requires-python = ">=3.12"
 dependencies = [
-    "bsk[all]~=2.12.1",
+    "bsk[all]==2.12.2",
     "numpy>=2.0",
     "h5py>=3.11",
     "pytest>=9.1.1",
@@ -28,21 +28,29 @@ notebook = [
 wisedynamics = "wise_dynamics.pytest_plugin"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# bsk-sdk provides the headers of the Basilisk the integrator links, bsk its libdynamicsLib.so; every
+# requirement is pinned exactly, cmake and ninja below, since uv does not lock the build environment.
+requires = ["scikit-build-core==1.1.2", "bsk==2.12.2", "bsk-sdk==2.12.2"]
+build-backend = "scikit_build_core.build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["wise_dynamics"]
+[tool.scikit-build]
+wheel.packages = ["wise_dynamics"]
+cmake.version = "==4.4.5"
+ninja.version = "==1.13.2"
+# Kept unstripped, so memray names the integrator's frames when a test holds it to no allocation.
+install.strip = false
 
 [dependency-groups]
 dev = [
     "check-python",
     "ipykernel>=7.4.0",
+    "memray>=1.20.0",
     "nbclient>=0.11.0",
     "pytest-xdist>=3.6",
 ]
 
 [tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "CMakeLists.txt" }, { file = "native/**" }]
 # bsk caps Pillow at 12.2.0, below its security fixes. Basilisk never imports Pillow; matplotlib
 # and bokeh, which do, accept 13. Drop the override once a Basilisk release lifts the cap.
 override-dependencies = ["pillow>=13"]
@@ -52,6 +60,10 @@ check-python = { git = "https://github.com/WisewareOrg/wise-ci", subdirectory = 
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# An editable install's import hook is imported before pytest, which can then not rewrite it.
+filterwarnings = [
+    "ignore:Module already imported so cannot be rewritten. _editable_skbc_wise_dynamics:pytest.PytestAssertRewriteWarning",
+]
 
 [tool.ruff]
 line-length = 120

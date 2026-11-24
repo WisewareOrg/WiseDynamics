@@ -5,24 +5,14 @@ import math
 
 import numpy as np
 import pytest
-from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.utilities import orbitalMotion
 from scipy.spatial.transform import Rotation
 
+from tests.stubs import Guidance
 from wise_dynamics.basilisk import ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 D2R = math.pi / 180.0
-
-
-class _Guidance(inertial3D.inertial3D):
-    """Basilisk's stock `inertial3D` standing in for flight software, stepping at 1 Hz.
-
-    Attributes:
-        period_s: The module's period, in seconds.
-    """
-
-    period_s = 1.0
 
 
 class Placed(Leo500):
@@ -72,7 +62,7 @@ def test_the_placement_reaches_the_basilisk_objects():
     vehicle = scenario.vehicle
     state = scenario.initial_state()
     simulation = scenario._simulation
-    scenario.run(_Guidance(), {}, duration_s=1.0)
+    scenario.run(Guidance(), {}, duration_s=1.0)
 
     (earth,) = vehicle.spacecraft.gravField.gravBodies
     assert earth.isCentralBody

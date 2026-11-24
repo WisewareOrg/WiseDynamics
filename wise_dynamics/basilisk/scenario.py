@@ -1,12 +1,16 @@
 """The Basilisk plumbing every scenario runs on: one simulation, run once and recorded."""
 
-from collections.abc import Mapping
+import functools
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk._runge_kutta import Tableau
+from wise_dynamics.basilisk._runge_kutta import install as install_runge_kutta
+from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.fsw_host import FswHost
 from wise_dynamics.basilisk.vehicle import Vehicle
 
@@ -17,6 +21,11 @@ _GROUND_PROCESS = "ground_process"
 _GROUND_TASK = "ground_task"
 _PROCESS_PRIORITY = 2
 _GROUND_PROCESS_PRIORITY = 1
+_HOLD_PROCESS = "thread_state_process"
+_HOLD_TASK = "thread_state_task"
+_HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
+"""The thread-state hold's priority: below every other process, and not below -1, since Basilisk runs the tasks
+due at the stop time only in processes of priority -1 or above."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -29,40 +38,39 @@ _MAX_STEP_NS = 1_000_000_000
 _MIN_STEP_NS = 1_000_000
 
 
-def _ralston_rk3(spacecraft: Any) -> Any:
-    """Ralston's third-order Runge-Kutta.
+_RALSTON_RK3 = Tableau(
+    a=((0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0), (0.0, 3 / 4, 0.0)),
+    b=(2 / 9, 1 / 3, 4 / 9),
+    c=(0.0, 1 / 2, 3 / 4),
+)
+"""Ralston's third-order Runge-Kutta, which `lo` integrates with."""
+
+_RK4 = Tableau(
+    a=((0.0, 0.0, 0.0, 0.0), (1 / 2, 0.0, 0.0, 0.0), (0.0, 1 / 2, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)),
+    b=(1 / 6, 1 / 3, 1 / 3, 1 / 6),
+    c=(0.0, 1 / 2, 1 / 2, 1.0),
+)
+"""The classical fourth-order Runge-Kutta, which `med` integrates with."""
+
+
+def _rkf78(spacecraft: Any) -> None:
+    """Give a spacecraft Basilisk's Runge-Kutta-Fehlberg 7(8), at the tolerances it sets, which it then owns.
 
     Args:
         spacecraft: The Basilisk dynamic object it integrates.
-
-    Returns:
-        The integrator.
-    """
-    return svIntegrators.svIntegratorRungeKutta3(
-        spacecraft,
-        [[0.0, 0.0, 0.0], [1 / 2, 0.0, 0.0], [0.0, 3 / 4, 0.0]],
-        [2 / 9, 1 / 3, 4 / 9],
-        [0.0, 1 / 2, 3 / 4],
-    )
-
-
-def _rkf78(spacecraft: Any) -> Any:
-    """Runge-Kutta-Fehlberg 7(8) at the tolerances it sets.
-
-    Args:
-        spacecraft: The Basilisk dynamic object it integrates.
-
-    Returns:
-        The integrator.
     """
     integrator = svIntegrators.svIntegratorRKF78(spacecraft)
     integrator.setRelativeTolerance(1e-10)
     integrator.setAbsoluteTolerance(1e-12)
-    return integrator
+    spacecraft.setIntegrator(integrator)
 
 
-_FIDELITY = {"hi": _rkf78, "med": svIntegrators.svIntegratorRK4, "lo": _ralston_rk3}
-"""Fidelity to the factory building its integrator for a spacecraft."""
+_FIDELITY: dict[str, Callable[[Any], None]] = {
+    "hi": _rkf78,
+    "med": functools.partial(install_runge_kutta, tableau=_RK4),
+    "lo": functools.partial(install_runge_kutta, tableau=_RALSTON_RK3),
+}
+"""Fidelity to the function giving a spacecraft its integrator, which the spacecraft then owns."""
 
 
 def _step_ns(fsw_ns: int) -> int:
@@ -83,6 +91,27 @@ def _step_ns(fsw_ns: int) -> int:
     if count is None:
         raise ValueError(f"no step of 1 ms to 1 s divides the {fsw_ns} ns flight-software period")
     return fsw_ns // count
+
+
+def _recorders(fields: Mapping[str, tuple[Any, str, str]], step_ns: int) -> dict[str, Any]:
+    """One Basilisk recorder per distinct message among `fields`, each field mapped to its message's.
+
+    Args:
+        fields: Dataset path to the `(message, field, units)` it records.
+        step_ns: The recording period, in nanoseconds.
+
+    Returns:
+        Dataset path to its message's recorder, a recorder shared by the paths of one message.
+    """
+    by_message: dict[int, Any] = {}
+    recorders = {}
+    for path, (message, _, _) in fields.items():
+        # Each attribute access gives a new SWIG proxy, so a message is known by its C++ address.
+        address = int(message.this)
+        if address not in by_message:
+            by_message[address] = message.recorder(step_ns)
+        recorders[path] = by_message[address]
+    return recorders
 
 
 class Scenario:
@@ -114,7 +143,6 @@ class Scenario:
         self.vehicle = vehicle
         self.vehicles = [vehicle]
         self.draws = {}
-        self._integrators: list[Any] = []
         self._simulation = SimulationBaseClass.SimBaseClass()
         self._executed = False
 
@@ -172,18 +200,23 @@ class Scenario:
         that divides `fsw_module.period_s`. The sensor task, every `fsw_module.period_s`, holds each
         vehicle's `sensor_models` for that period, which so sample the state of that instant. The
         flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
-        sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
-        Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
-        truth and flight output are recorded from the same instant. Runs from t = 0 for
+        sensors' output of that instant. The record task, every dynamics step from t = 0, holds the
+        recorders, so truth and flight output are recorded from the same instant: one Basilisk
+        recorder per distinct message among the entries of each vehicle's `recorded_fields()` and of
+        `fsw_fields`, each entry's field read from its message's recorder. Runs from t = 0 for
         `duration_s`. A period that no step of at least 1 ms divides is refused with a
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
+
+        The run holds one Python thread state on Basilisk's thread for its Python modules, as the
+        basilisk README's section on `run` describes.
 
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
                 example one reading a vehicle's `readers()`.
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
-                flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
+                flight software, each message a Basilisk (SWIG) message, in the shape of a vehicle's
+                `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
             ground: Optionally, any Basilisk module declaring `period_s`, its period in seconds,
                 run from t = 0 in `ground_process`, after every scenario task at each instant they
@@ -206,16 +239,15 @@ class Scenario:
         fsw_ns = macros.sec2nano(fsw_module.period_s)
         step_ns = _step_ns(fsw_ns)
         self._executed = True
+        hold = None
         try:
-            make_integrator = _FIDELITY[self.fidelity]
+            give_integrator = _FIDELITY[self.fidelity]
             fields = {}
             for vehicle in self.vehicles:
-                integrator = make_integrator(vehicle.spacecraft)
-                vehicle.spacecraft.setIntegrator(integrator)
-                self._integrators.append(integrator)
+                give_integrator(vehicle.spacecraft)
                 fields.update(vehicle.recorded_fields())
             fields.update(fsw_fields)
-            recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
+            recorders = _recorders(fields, step_ns)
 
             tasks = (
                 (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
@@ -237,11 +269,19 @@ class Scenario:
                 ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
                 ground_process.addTask(ground_task)
                 self._simulation.AddModelToTask(_GROUND_TASK, ground)
-            for recorder in recorders.values():
+            for recorder in dict.fromkeys(recorders.values()):
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
+            stop_ns = macros.sec2nano(duration_s)
+            # A task's period cannot be 0.
+            if stop_ns > 0:
+                hold_process = self._simulation.CreateNewProcess(_HOLD_PROCESS, _HOLD_PROCESS_PRIORITY)
+                # A period longer than the run, so the task fires once, at the stop time.
+                hold_process.addTask(self._simulation.CreateNewTask(_HOLD_TASK, 2 * stop_ns, FirstStart=stop_ns))
+                hold = ThreadStateHold()
+                self._simulation.AddModelToTask(_HOLD_TASK, hold)
             try:
                 self._simulation.InitializeSimulation()
-                self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
+                self._simulation.ConfigureStopTime(stop_ns)
                 self._simulation.ExecuteSimulation()
             except BaseException:
                 if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
@@ -257,3 +297,5 @@ class Scenario:
             return datasets
         finally:
             del self._simulation
+            if hold is not None:
+                hold.abandon()
