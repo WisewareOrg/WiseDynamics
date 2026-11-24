@@ -63,31 +63,16 @@ def test_a_run_records_the_vehicle_and_fsw_fields_at_every_dynamics_step():
     assert np.allclose(sigma_RN[-1], GUIDANCE_SIGMA_RN)
 
 
-@pytest.mark.parametrize(
-    ("fidelity", "integrator_type"),
-    [
-        ("hi", svIntegrators.svIntegratorRKF78),
-        ("med", svIntegrators.svIntegratorRK4),
-        ("lo", svIntegrators.svIntegratorRungeKutta3),
-    ],
-)
-def test_each_fidelity_gives_its_integrator_to_the_vehicle_that_runs(fidelity: str, integrator_type: type):
-    """Each fidelity gives the vehicle that runs its integrator; `hi` states its tolerances.
-
-    Args:
-        fidelity: The fidelity level set on the scenario.
-        integrator_type: The Basilisk integrator class the level gives.
-    """
+def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances():
+    """`hi` gives the vehicle that runs Basilisk's RKF78, at a relative 1e-10 and an absolute 1e-12."""
     scenario = Leo500(ImuSpacecraft())
-    scenario.fidelity = fidelity
-    scenario.disperse_case(np.random.SeedSequence(0))
+    scenario.fidelity = "hi"
     scenario.run(_Guidance(), {}, duration_s=1.0)
     (integrator,) = scenario._integrators
-    assert type(integrator) is integrator_type
+    assert type(integrator) is svIntegrators.svIntegratorRKF78
     assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this)
-    if fidelity == "hi":
-        assert integrator.getRelativeTolerance() == 1e-10
-        assert integrator.getAbsoluteTolerance() == 1e-12
+    assert integrator.getRelativeTolerance() == 1e-10
+    assert integrator.getAbsoluteTolerance() == 1e-12
 
 
 @pytest.mark.parametrize(

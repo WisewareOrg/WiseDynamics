@@ -37,9 +37,6 @@ LAYERS = ("dynamics", "sensors", "recorders", "host")
 
 BUDGET: dict[str, dict[str, float]] = {
     "dynamics": {
-        "ExtendedStateVector::fromStateData": 91.0,
-        "ExtendedStateVector::map": 65.0,
-        "svIntegratorRungeKutta<3ul>::propagateStateWithKVectors": 13.0,
         "HubEffector::computeHubOnlyDerivatives": 12.0,
         "Recorder<SCStatesMsgPayload>::UpdateState": 209 / TICKS,
         "HubEffector::matchGravitytoVelocityState": 1.0,

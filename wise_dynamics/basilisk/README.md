@@ -86,6 +86,13 @@ anything runs, a period no step of at least 1 ms divides.
 
 [ADR 0003 rev 2](../../docs/decisions/0003-fidelity-tiers.md) records why, with the measurements.
 
+`lo` and `med` integrate with WiseDynamics' own Runge-Kutta, compiled against the exact bsk
+WiseDynamics pins, which does the arithmetic of Basilisk's own in the same order: a run is
+bit-identical to one with Basilisk's integrator, and the integrator allocates nothing per step.
+Importing `wise_dynamics.basilisk` under a Basilisk of another source revision, or of another recorded
+layout, raises an `ImportError` naming both. `hi` integrates with Basilisk's RKF78.
+[ADR 0004 rev 1](../../docs/decisions/0004-compiled-basilisk-modules.md) records why.
+
 `run(fsw_module, fsw_fields, *, duration_s, ground=None)`, from `Scenario`, builds the simulation
 from `vehicles` and `fidelity`, and runs once. The vehicles' `models()` run every step. Their
 `sensor_models` run in their own task at the flight software's `period_s`, an attribute it declares

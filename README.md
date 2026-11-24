@@ -25,6 +25,9 @@ sim = ["wise-dynamics"]
 wise-dynamics = { git = "https://github.com/WisewareOrg/WiseDynamics", tag = "v0.1.0" }
 ```
 
+Installing it compiles its integrator, so the machine installing it needs a C++17 compiler on its
+`PATH`, and it installs on Linux x86_64 only, and the install fails elsewhere; it pins the bsk it
+was built against exactly.
 Installing it registers the pytest plugin. Each consumer test that uses a `sim_` fixture is one
 Monte Carlo campaign, configured by marks (see the basilisk README); `-n` runs workers in parallel
 and needs `pytest-xdist`, which the consumer adds itself:
