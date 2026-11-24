@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: WisewareOrg/wise-ci/check-adrs@491858538bf01b19cfb86aab1195ad3822b59903
+      - uses: WisewareOrg/wise-ci/check-adrs@b27c5858566679b604bfcbf56f07ff93aeb5c81f
 
   check-python:
     name: check-python
@@ -33,12 +33,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "0.13.9"
 
       - run: uv sync --locked --all-extras
-      - uses: WisewareOrg/wise-ci/check-python@491858538bf01b19cfb86aab1195ad3822b59903
+      - uses: WisewareOrg/wise-ci/check-python@b27c5858566679b604bfcbf56f07ff93aeb5c81f
 
   pytest:
     name: pytest
@@ -48,7 +48,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "0.13.9"
 
