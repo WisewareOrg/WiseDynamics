@@ -199,10 +199,10 @@ class Scenario:
         that divides `fsw_module.period_s`. The sensor task, every `fsw_module.period_s`, holds each
         vehicle's `sensor_models` for that period, which so sample the state of that instant. The
         flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
-        sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
-        Basilisk recorder per distinct message among the entries of each vehicle's
-        `recorded_fields()` and of `fsw_fields`, each entry's field read from its message's
-        recorder, so truth and flight output are recorded from the same instant. Runs from t = 0 for
+        sensors' output of that instant. The record task, every dynamics step from t = 0, holds the
+        recorders, so truth and flight output are recorded from the same instant: one Basilisk
+        recorder per distinct message among the entries of each vehicle's `recorded_fields()` and of
+        `fsw_fields`, each entry's field read from its message's recorder. Runs from t = 0 for
         `duration_s`. A period that no step of at least 1 ms divides is refused with a
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
@@ -270,7 +270,7 @@ class Scenario:
                 ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
                 ground_process.addTask(ground_task)
                 self._simulation.AddModelToTask(_GROUND_TASK, ground)
-            for recorder in {id(recorder): recorder for recorder in recorders.values()}.values():
+            for recorder in dict.fromkeys(recorders.values()):
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
             stop_ns = macros.sec2nano(duration_s)
             # A task's period cannot be 0.

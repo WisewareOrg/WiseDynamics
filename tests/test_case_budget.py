@@ -52,7 +52,7 @@ BUDGET: dict[str, dict[str, float]] = {
 """Each layer's native allocations per tick in C++ functions, beyond the layer before it, by function.
 
 A figure over `TICKS` is a count of allocations a flight makes in blocks, such as a recorder's deque, whose
-per-tick slope depends on the flight's length."""
+per-tick slope depends on the flight's length and on the payload's size."""
 
 
 class _CppFlightSoftware(inertial3D.inertial3D):
