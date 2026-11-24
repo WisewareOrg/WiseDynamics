@@ -9,13 +9,13 @@ A warm Leo500 case of the IMU spacecraft is built up one layer at a time, every 
 3. `recorders`: every field the vehicle records;
 4. `host`: `FswHost` ticking a stub build that commands nothing, in place of the C++ flight software.
 
-Each layer's budget is what it adds to the layer before it, by the function that makes each allocation,
-as `native_allocations_by_function` charges them. The counts are deterministic, so a budget is an
-exact figure: an allocation added, removed or moved fails the layer it lands in. The counts are of the
-bsk this repository locks; Python's own allocations depend on its minor version.
+Each layer's budget is what Basilisk's and WiseDynamics' C++ adds to the layer before it, by the function
+that makes each allocation, as `native_allocations_by_function` charges them: a C++ function is one
+whose name is qualified with `::`. The counts are deterministic, so a budget is an exact figure: an
+allocation added, removed or moved fails the layer it lands in. The C functions of the interpreter and
+the C library are left out, since how their builds inline them moves an allocation between them.
 """
 
-import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -24,7 +24,7 @@ import pytest
 from Basilisk.fswAlgorithms import inertial3D
 
 from tests.allocations import native_allocations_by_function
-from wise_dynamics.basilisk import FswHost, ImuSpacecraft, Vehicle
+from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 TICKS = 200
@@ -32,36 +32,27 @@ TICKS = 200
 
 LAYERS = ("dynamics", "sensors", "recorders", "host")
 
-_THREAD_STATE_PER_CALL = {
-    (3, 12): {"new_threadstate": 1.0, "_PyMem_ArenaAlloc": 1.0},
-    (3, 14): {
-        "new_threadstate": 1.0,
-        "_PyMem_ArenaAlloc": 1.0,
-        "pthread_getattr_np": 1.0,
-        "__pthread_attr_extension": 1.0,
-        "pthread_attr_setaffinity_np": 1.0,
-    },
-}
-"""What CPython allocates as Basilisk's thread calls into Python with no thread state, by version."""
-
 BUDGET: dict[str, dict[str, float]] = {
     "dynamics": {
         "ExtendedStateVector::fromStateData": 91.0,
         "ExtendedStateVector::map": 65.0,
         "svIntegratorRungeKutta<3ul>::propagateStateWithKVectors": 13.0,
         "HubEffector::computeHubOnlyDerivatives": 12.0,
-        "Recorder<SCStatesMsgPayload>::UpdateState": 1.045,
+        "Recorder<SCStatesMsgPayload>::UpdateState": 209 / TICKS,
         "HubEffector::matchGravitytoVelocityState": 1.0,
-        "HubEffector::modifyStates": 0.005,
+        "HubEffector::modifyStates": 1 / TICKS,
     },
     "sensors": {"Saturate::saturate": 2.0},
     "recorders": {
-        "Recorder<SCStatesMsgPayload>::UpdateState": 3.135,
-        "Recorder<IMUSensorMsgPayload>::UpdateState": 0.49,
+        "Recorder<SCStatesMsgPayload>::UpdateState": 627 / TICKS,
+        "Recorder<IMUSensorMsgPayload>::UpdateState": 98 / TICKS,
     },
-    "host": _THREAD_STATE_PER_CALL.get(sys.version_info[:2], {}),
+    "host": {},
 }
-"""Each layer's native allocations per tick, beyond the layer before it, by the function that makes them."""
+"""Each layer's C++ native allocations per tick, beyond the layer before it, by the function that makes them.
+
+A figure over `TICKS` is a count of allocations a flight makes in blocks, such as a recorder's deque, whose
+per-tick slope depends on the flight's length."""
 
 
 class _CppFlightSoftware(inertial3D.inertial3D):
@@ -74,7 +65,7 @@ class _CppFlightSoftware(inertial3D.inertial3D):
     period_s = 1.0
 
 
-class _Commanding:
+class _CommandingNothing:
     """A flight-software build that commands nothing.
 
     Attributes:
@@ -100,7 +91,7 @@ class _Commanding:
 
 
 class _Stripped(ImuSpacecraft):
-    """The IMU spacecraft recording its first field only, leaving it unfinished, and with no sensors.
+    """The IMU spacecraft recording its attitude only, and with no sensors.
 
     Attributes:
         sensing: Whether the stand-in keeps its sensors.
@@ -120,23 +111,12 @@ class _Stripped(ImuSpacecraft):
         return super().sensor_models(sample_period_s) if self.sensing else []
 
     def recorded_fields(self) -> dict[str, tuple[Any, str, str]]:
-        """Declare the vehicle's first recorded field only.
+        """Declare the vehicle's attitude only, `truth/q_BN`.
 
         Returns:
             That field.
         """
-        return dict([next(iter(super().recorded_fields().items()))])
-
-    def finish(self, datasets: Mapping[str, tuple[Any, str]]) -> dict[str, tuple[Any, str]]:
-        """Return the datasets as recorded.
-
-        Args:
-            datasets: Dataset name to `(array, units)`.
-
-        Returns:
-            The same datasets.
-        """
-        return Vehicle.finish(self, datasets)
+        return {"truth/q_BN": super().recorded_fields()["truth/q_BN"]}
 
 
 class _Sensing(_Stripped):
@@ -161,7 +141,7 @@ def _fly(layer: str, ticks: int) -> None:
     """
     scenario = Leo500(_VEHICLE[layer]())
     scenario.disperse_case(np.random.SeedSequence(0, spawn_key=(0,)))
-    fsw = FswHost(_Commanding(), scenario.vehicle) if layer == "host" else _CppFlightSoftware()
+    fsw = FswHost(_CommandingNothing(), scenario.vehicle) if layer == "host" else _CppFlightSoftware()
     scenario.run(fsw, {}, duration_s=float(ticks))
 
 
@@ -186,16 +166,20 @@ def per_layer(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, f
 
 @pytest.mark.parametrize("layer", LAYERS)
 def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: dict[str, dict[str, float]]):
-    """What the layer allocates per tick beyond the layer before it is its budget, function by function.
+    """What the layer's C++ allocates per tick beyond the layer before it is its budget, function by function.
+
+    A function the layer stops allocating in shows as a negative figure.
 
     Args:
         layer: The layer under test.
         per_layer: Every layer's allocations per tick, by function.
     """
+    here = {function: n for function, n in per_layer[layer].items() if "::" in function}
     below = per_layer[LAYERS[LAYERS.index(layer) - 1]] if layer != LAYERS[0] else {}
+    below = {function: n for function, n in below.items() if "::" in function}
     added = {
-        function: per_tick - below.get(function, 0.0)
-        for function, per_tick in per_layer[layer].items()
-        if per_tick != below.get(function, 0.0)
+        function: here.get(function, 0.0) - below.get(function, 0.0)
+        for function in here.keys() | below.keys()
+        if here.get(function, 0.0) != below.get(function, 0.0)
     }
     assert added == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer adds {added}"
