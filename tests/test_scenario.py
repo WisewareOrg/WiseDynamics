@@ -587,7 +587,7 @@ def test_a_run_whose_ground_raises_at_reset_leaves_no_thread_state_behind():
 
 
 def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
-    """The hold's process ranks below every other process of a run, the ground's included, and not below 0."""
+    """The hold's process ranks below every other process of a run, the ground's included, and not below -1."""
     scenario = Leo500(ImuSpacecraft())
     simulation = scenario._simulation
 
@@ -596,7 +596,7 @@ def test_the_thread_state_is_held_at_the_lowest_priority_of_the_run():
     priorities = {process.Name: process.processData.processPriority for process in simulation.procList}
     hold = priorities.pop("thread_state_process")
     assert hold < min(priorities.values()), f"the hold at {hold} is not below {priorities}"
-    assert hold >= 0, f"the hold at {hold} is below 0, which Basilisk does not reach at a stop time"
+    assert hold >= -1, f"the hold at {hold} is below -1, which Basilisk does not reach at a stop time"
 
 
 def test_a_run_of_no_duration_holds_no_thread_state():

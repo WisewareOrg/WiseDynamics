@@ -21,7 +21,8 @@ _GROUND_PROCESS_PRIORITY = 1
 _HOLD_PROCESS = "thread_state_process"
 _HOLD_TASK = "thread_state_task"
 _HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
-"""The thread-state hold's priority: below every other process, and not below 0, which a stop time never reaches."""
+"""The thread-state hold's priority: below every other process, and not below -1, Basilisk's default, the lowest
+a stop time reaches."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
