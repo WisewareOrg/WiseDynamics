@@ -74,7 +74,7 @@ Basilisk release that changes what a module reads fails the update's build or te
 it then waits for a WiseDynamics change.
 
 A consumer's machine compiles its own modules and runs none of this repository's tests; what holds its
-build to the tested arithmetic is that the build flags are fixed, and that a module built with flags that
-change its instruction set or layout is refused at import.
+build to the tested arithmetic is that the build flags are fixed, and that a module whose build facts
+differ from Basilisk's is refused at import.
 
 `hi` keeps Basilisk's adaptive RKF78, which no module replaces.

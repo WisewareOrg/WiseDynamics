@@ -59,8 +59,8 @@ def _load() -> ctypes.CDLL:
     if differing:
         raise ImportError(
             "the compiled integrator was built with other build facts than Basilisk's, as (built, Basilisk):"
-            f" {differing}; reinstall wise-dynamics without CXXFLAGS that change them, such as -mavx or"
-            " -D_GLIBCXX_USE_CXX11_ABI"
+            f" {differing}; this machine's C++ compiler builds for another target or library ABI than"
+            " Basilisk's build, so reinstall wise-dynamics with one that matches it"
         )
     return library
 
