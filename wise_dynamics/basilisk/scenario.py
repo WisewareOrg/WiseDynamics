@@ -7,6 +7,7 @@ import numpy as np
 from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.fsw_host import FswHost
 from wise_dynamics.basilisk.vehicle import Vehicle
 
@@ -17,6 +18,11 @@ _GROUND_PROCESS = "ground_process"
 _GROUND_TASK = "ground_task"
 _PROCESS_PRIORITY = 2
 _GROUND_PROCESS_PRIORITY = 1
+_HOLD_PROCESS = "thread_state_process"
+_HOLD_TASK = "thread_state_task"
+_HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
+"""The thread-state hold's priority: below every other process, and not below -1, Basilisk's default, the lowest
+a stop time reaches."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -179,6 +185,9 @@ class Scenario:
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
 
+        The run holds one Python thread state on Basilisk's thread for its Python modules, as the
+        basilisk README's section on `run` describes.
+
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
                 example one reading a vehicle's `readers()`.
@@ -206,6 +215,7 @@ class Scenario:
         fsw_ns = macros.sec2nano(fsw_module.period_s)
         step_ns = _step_ns(fsw_ns)
         self._executed = True
+        hold = None
         try:
             make_integrator = _FIDELITY[self.fidelity]
             fields = {}
@@ -239,9 +249,17 @@ class Scenario:
                 self._simulation.AddModelToTask(_GROUND_TASK, ground)
             for recorder in recorders.values():
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
+            stop_ns = macros.sec2nano(duration_s)
+            # A task's period cannot be 0.
+            if stop_ns > 0:
+                hold_process = self._simulation.CreateNewProcess(_HOLD_PROCESS, _HOLD_PROCESS_PRIORITY)
+                # A period longer than the run, so the task fires once, at the stop time.
+                hold_process.addTask(self._simulation.CreateNewTask(_HOLD_TASK, 2 * stop_ns, FirstStart=stop_ns))
+                hold = ThreadStateHold()
+                self._simulation.AddModelToTask(_HOLD_TASK, hold)
             try:
                 self._simulation.InitializeSimulation()
-                self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
+                self._simulation.ConfigureStopTime(stop_ns)
                 self._simulation.ExecuteSimulation()
             except BaseException:
                 if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
@@ -257,3 +275,5 @@ class Scenario:
             return datasets
         finally:
             del self._simulation
+            if hold is not None:
+                hold.abandon()
