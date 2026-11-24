@@ -11,7 +11,8 @@ endif()
 enable_language(CXX)
 # Only the flags below build the integrator: CXXFLAGS and the build type's flags would change its arithmetic.
 set(CMAKE_CXX_FLAGS "")
-set(CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE} "")
+string(TOUPPER "${CMAKE_BUILD_TYPE}" build_type)
+set(CMAKE_CXX_FLAGS_${build_type} "")
 
 find_package(Python COMPONENTS Interpreter REQUIRED)
 execute_process(
