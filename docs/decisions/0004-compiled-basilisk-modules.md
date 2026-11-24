@@ -26,8 +26,8 @@ WiseDynamics augments Basilisk with C++ modules of its own where stock Basilisk 
 work needs, such as the explicit Runge-Kutta integrator of the `lo` and `med` fidelities.
 
 - **Built against Basilisk's SDK, at install.** A module is compiled when wise-dynamics is installed,
-  against the headers of `bsk-sdk`, Basilisk's own package for building against its wheels, and links the installed wheel's libraries. A consumer's git pin is all it takes: no index, no
-  wheel of ours.
+  against the headers of `bsk-sdk`, Basilisk's own package for building against its wheels, and links
+  the installed wheel's libraries. A consumer's git pin is all it takes: no index, no wheel of ours.
 - **One exact Basilisk, moved by the tests.** A module reads Basilisk's classes directly, so it is correct
   only against the release it was compiled for. `bsk` and `bsk-sdk` are pinned to one release, in
   `dependencies` and in `build-system.requires`, and move together as one Renovate update; a minor or patch

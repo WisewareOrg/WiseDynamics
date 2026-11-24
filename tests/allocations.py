@@ -251,7 +251,7 @@ def native_allocations_by_function(fly: Callable[[int], object], *, ticks: int, 
     An allocation belongs to its `_owner`: the innermost frame of its stack that is not allocator plumbing
     (`operator new`, the standard library, Eigen) and that memray can name, so an Eigen temporary is
     charged to the function that built it, and an allocation in an unnamed lambda to the function that
-    called it. The slope is taken as `native_allocations_per_tick` takes it.
+    called it. The slope is taken as `_per_tick` takes it.
 
     Args:
         fly: Builds and runs a fresh simulation for the given number of ticks.

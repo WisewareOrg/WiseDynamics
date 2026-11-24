@@ -15,8 +15,9 @@ as Basilisk's modules and WiseDynamics' integrator) has an exact figure of its o
 (C, such as the interpreter's, the C library's, and Basilisk's C modules) counts in one total, since how
 those libraries' builds inline them moves an allocation between functions, not in or out of the total.
 The counts are deterministic, so a budget is exact: an allocation added, removed or moved fails the layer
-it lands in. They are those of the Basilisk this repository locks and of its runner's C++ library, so a
-change to either can move a figure with no defect here; the layer that fails names the function. Every
+it lands in. They are those of the Basilisk, CPython and memray this repository locks: an update to any of
+them can move a figure with no defect here, Basilisk's by changing what allocates, memray's by changing how
+it names a frame; the layer that fails names the function. Every
 layer's C total is zero, the host layer's included, since a run holds one thread state for its calls into
 Python.
 """
