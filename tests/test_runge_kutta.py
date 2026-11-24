@@ -326,7 +326,11 @@ def test_a_spacecraft_that_does_not_take_the_integrator_is_refused():
     assert not runge_kutta.integrates_here(secondary), "the synced spacecraft integrates with the compiled integrator"
 
 
-@pytest.mark.parametrize("call", [lambda craft: runge_kutta.install(craft, scenario._RK4), runge_kutta.integrates_here])
+@pytest.mark.parametrize(
+    "call",
+    [lambda craft: runge_kutta.install(craft, scenario._RK4), runge_kutta.integrates_here],
+    ids=["install", "integrates_here"],
+)
 def test_anything_but_a_spacecraft_is_refused(call: Callable[[Any], Any]):
     """Installing on, or asking about, a Basilisk object that is not a `Spacecraft` raises, before its address is read.
 
