@@ -53,4 +53,6 @@ jobs:
           version: "0.13.9"
 
       - run: uv sync --locked --all-extras
-      - run: uv run pytest
+      # The suite runs on the package as a consumer's git pin installs it: built from this commit, not the checkout.
+      - run: uv pip install --no-deps "wise-dynamics @ git+file://${GITHUB_WORKSPACE}@${GITHUB_SHA}"
+      - run: uv run --no-sync pytest
