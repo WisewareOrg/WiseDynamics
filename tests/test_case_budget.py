@@ -9,11 +9,14 @@ A warm Leo500 case of the IMU spacecraft is built up one layer at a time, every 
 3. `recorders`: every field the vehicle records;
 4. `host`: `FswHost` ticking a stub build that commands nothing, in place of the C++ flight software.
 
-Each layer's budget is what Basilisk's and WiseDynamics' C++ adds to the layer before it, by the function
-that makes each allocation, as `native_allocations_by_function` charges them: a C++ function is one
-whose name is qualified with `::`. The counts are deterministic, so a budget is an exact figure: an
-allocation added, removed or moved fails the layer it lands in. The C functions of the interpreter and
-the C library are left out, since how their builds inline them moves an allocation between them.
+Each layer's budget is what it adds to the layer before it, as `native_allocations_by_function` charges
+the allocations to functions, in two parts. Every function whose name is qualified with `::` (C++, such
+as Basilisk's modules and WiseDynamics' integrator) has an exact figure of its own. Every other function
+(C, such as the interpreter's, the C library's, and Basilisk's C modules) counts in one total, since how
+those libraries' builds inline them moves an allocation between functions, not in or out of the total.
+The counts are deterministic, so a budget is exact: an allocation added, removed or moved fails the layer
+it lands in. The host layer's C total, which is the interpreter making a thread state for each call into
+Python, is only held above zero, since it differs between Python versions.
 """
 
 from collections.abc import Mapping
@@ -49,7 +52,7 @@ BUDGET: dict[str, dict[str, float]] = {
     },
     "host": {},
 }
-"""Each layer's C++ native allocations per tick, beyond the layer before it, by the function that makes them.
+"""Each layer's native allocations per tick in C++ functions, beyond the layer before it, by function.
 
 A figure over `TICKS` is a count of allocations a flight makes in blocks, such as a recorder's deque, whose
 per-tick slope depends on the flight's length."""
@@ -164,22 +167,38 @@ def per_layer(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, f
     }
 
 
-@pytest.mark.parametrize("layer", LAYERS)
-def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: dict[str, dict[str, float]]):
-    """What the layer's C++ allocates per tick beyond the layer before it is its budget, function by function.
+def _added(per_layer: dict[str, dict[str, float]], layer: str) -> tuple[dict[str, float], float]:
+    """What a layer allocates per tick beyond the layer before it: by C++ function, and in C functions in all.
 
     A function the layer stops allocating in shows as a negative figure.
+
+    Args:
+        per_layer: Every layer's allocations per tick, by function.
+        layer: The layer.
+
+    Returns:
+        The C++ functions' figures, nonzero ones only, and the C functions' total.
+    """
+    here = per_layer[layer]
+    below = per_layer[LAYERS[LAYERS.index(layer) - 1]] if layer != LAYERS[0] else {}
+    added = {function: here.get(function, 0.0) - below.get(function, 0.0) for function in here.keys() | below.keys()}
+    cxx = {function: n for function, n in added.items() if "::" in function and n}
+    return cxx, sum(n for function, n in added.items() if "::" not in function)
+
+
+@pytest.mark.parametrize("layer", LAYERS)
+def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: dict[str, dict[str, float]]):
+    """The layer's C++ functions add exactly their budget; its C functions add nothing, but at the host layer.
+
+    At the host layer, the interpreter's thread state for each call into Python is held above zero.
 
     Args:
         layer: The layer under test.
         per_layer: Every layer's allocations per tick, by function.
     """
-    here = {function: n for function, n in per_layer[layer].items() if "::" in function}
-    below = per_layer[LAYERS[LAYERS.index(layer) - 1]] if layer != LAYERS[0] else {}
-    below = {function: n for function, n in below.items() if "::" in function}
-    added = {
-        function: here.get(function, 0.0) - below.get(function, 0.0)
-        for function in here.keys() | below.keys()
-        if here.get(function, 0.0) != below.get(function, 0.0)
-    }
-    assert added == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer adds {added}"
+    cxx, c = _added(per_layer, layer)
+    assert cxx == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer's C++ adds {cxx}"
+    if layer == "host":
+        assert c > 0, f"the {layer} layer's C functions add {c} per tick"
+    else:
+        assert c == pytest.approx(0.0, abs=1e-9), f"the {layer} layer's C functions add {c} per tick"

@@ -3,12 +3,15 @@
 import json
 import os
 import re
+import select
+import signal
 import time
 import traceback
 import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 import memray
 
@@ -75,8 +78,8 @@ def _tracked(fly: Callable[[int], object], ticks: int, file: Path) -> object:
         What `fly` returned, which must be JSON.
 
     Raises:
-        RuntimeError: The child exited with an error, its traceback printed, was killed by a signal, or
-            ran past `_FLIGHT_TIMEOUT_S` and was killed.
+        RuntimeError: The child failed: it exited with an error, after printing its traceback; it was
+            killed by a signal; or it ran past `_FLIGHT_TIMEOUT_S`, and was killed.
     """
     read, write = os.pipe()
     with warnings.catch_warnings():
@@ -96,20 +99,34 @@ def _tracked(fly: Callable[[int], object], ticks: int, file: Path) -> object:
             os._exit(status)
     os.close(write)
     deadline = time.monotonic() + _FLIGHT_TIMEOUT_S
-    while (waited := os.waitpid(pid, os.WNOHANG))[0] == 0:
-        if time.monotonic() > deadline:
-            os.kill(pid, 9)
+    chunks = []
+    with os.fdopen(read, "rb", buffering=0) as pipe:
+        while chunk := _read_before(pipe, deadline):
+            chunks.append(chunk)
+        if chunk is None:
+            os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-            os.close(read)
             raise RuntimeError(f"the tracked flight of {ticks} ticks ran past {_FLIGHT_TIMEOUT_S} s and was killed")
-        time.sleep(0.05)
-    with os.fdopen(read, "rb") as pipe:
-        payload = pipe.read()
-    exit_code = os.waitstatus_to_exitcode(waited[1])
+    payload = b"".join(chunks)
+    exit_code = os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
     if exit_code != 0:
         how = f"was killed by signal {-exit_code}" if exit_code < 0 else f"exited with {exit_code}"
         raise RuntimeError(f"the tracked flight of {ticks} ticks {how} in its child process")
     return json.loads(payload)
+
+
+def _read_before(pipe: Any, deadline: float) -> bytes | None:
+    """Read what the pipe holds next, waiting for it no later than `deadline`.
+
+    Args:
+        pipe: The read end of a pipe, unbuffered.
+        deadline: The `time.monotonic()` by which something must arrive.
+
+    Returns:
+        The bytes read, empty at the end of the pipe, or None when the deadline passed first.
+    """
+    ready, _, _ = select.select([pipe], [], [], max(0.0, deadline - time.monotonic()))
+    return pipe.read(1 << 16) if ready else None
 
 
 def _stacks(fly: Callable[[int], object], ticks: int, file: Path) -> tuple[Stacks, object]:
@@ -269,7 +286,9 @@ def assert_no_native_allocations_per_tick(
     if not all(runs):
         raise AssertionError(f"the path {within!r} never ran in a flight: it ran {runs} times")
     if not named:
-        raise AssertionError(f"no allocation has {within!r} on its stack, so it names no path that ran")
+        raise AssertionError(
+            f"no allocation has {within!r} on its stack: the name is wrong, or the path allocates nothing at all"
+        )
     if per_tick != 0.0:
         raise AssertionError(f"the path {within!r} makes {per_tick} native allocations per tick")
 

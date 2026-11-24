@@ -6,12 +6,14 @@ else, as of the bsk this repository locks; a bsk that changes that changes these
 
 import os
 import signal
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from Basilisk.fswAlgorithms import inertial3D
 
+from tests import allocations
 from tests.allocations import (
     _name,
     _owner,
@@ -183,7 +185,7 @@ def test_a_name_no_allocation_has_on_its_stack_does_not_hold(tmp_path: Path):
     Args:
         tmp_path: The test's own temporary directory.
     """
-    with pytest.raises(AssertionError, match="names no path that ran"):
+    with pytest.raises(AssertionError, match="the name is wrong"):
         assert_no_native_allocations_per_tick(_fly, within="ImuSensor::Update", ticks=10, directory=tmp_path)
 
 
@@ -231,3 +233,24 @@ def test_an_allocation_is_charged_to_its_innermost_named_frame_past_the_plumbing
         owner: The function it is charged to.
     """
     assert _owner(functions) == owner
+
+
+def test_a_tracked_flight_returns_a_result_larger_than_a_pipe_holds(tmp_path: Path):
+    """A result larger than the pipe's buffer reaches this process whole.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+    """
+    assert _tracked(lambda ticks: "x" * 200_000, 1, tmp_path / "capture.bin") == "x" * 200_000
+
+
+def test_a_tracked_flight_that_runs_past_its_time_is_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A flight still running at the deadline is killed, and the capture fails saying so.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+        monkeypatch: Shortens the deadline.
+    """
+    monkeypatch.setattr(allocations, "_FLIGHT_TIMEOUT_S", 0.5)
+    with pytest.raises(RuntimeError, match="ran past 0.5 s and was killed"):
+        _tracked(lambda ticks: time.sleep(30), 1, tmp_path / "capture.bin")
