@@ -46,10 +46,7 @@ BUDGET: dict[str, dict[str, float]] = {
         "HubEffector::modifyStates": 1 / TICKS,
     },
     "sensors": {"Saturate::saturate": 2.0},
-    "recorders": {
-        "Recorder<SCStatesMsgPayload>::UpdateState": 627 / TICKS,
-        "Recorder<IMUSensorMsgPayload>::UpdateState": 98 / TICKS,
-    },
+    "recorders": {"Recorder<IMUSensorMsgPayload>::UpdateState": 49 / TICKS},
     "host": {},
 }
 """Each layer's native allocations per tick in C++ functions, beyond the layer before it, by function.

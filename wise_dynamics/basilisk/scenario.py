@@ -91,6 +91,27 @@ def _step_ns(fsw_ns: int) -> int:
     return fsw_ns // count
 
 
+def _recorders(fields: Mapping[str, tuple[Any, str, str]], step_ns: int) -> dict[str, Any]:
+    """One Basilisk recorder per distinct message among `fields`, each field mapped to its message's.
+
+    Args:
+        fields: Dataset path to the `(message, field, units)` it records.
+        step_ns: The recording period, in nanoseconds.
+
+    Returns:
+        Dataset path to its message's recorder, a recorder shared by the paths of one message.
+    """
+    by_message: dict[int, Any] = {}
+    recorders = {}
+    for path, (message, _, _) in fields.items():
+        # Each attribute access gives a new SWIG proxy, so a message is known by its C++ address.
+        address = int(message.this)
+        if address not in by_message:
+            by_message[address] = message.recorder(step_ns)
+        recorders[path] = by_message[address]
+    return recorders
+
+
 class Scenario:
     """Builds a Basilisk simulation from what a subclass sets up, runs it once and records it.
 
@@ -179,8 +200,9 @@ class Scenario:
         vehicle's `sensor_models` for that period, which so sample the state of that instant. The
         flight-software task, every `fsw_module.period_s`, holds `fsw_module`, which so reads the
         sensors' output of that instant. The record task, every dynamics step from t = 0, holds one
-        Basilisk recorder per entry of each vehicle's `recorded_fields()` and of `fsw_fields`, so
-        truth and flight output are recorded from the same instant. Runs from t = 0 for
+        Basilisk recorder per distinct message among the entries of each vehicle's
+        `recorded_fields()` and of `fsw_fields`, each entry's field read from its message's
+        recorder, so truth and flight output are recorded from the same instant. Runs from t = 0 for
         `duration_s`. A period that no step of at least 1 ms divides is refused with a
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
@@ -192,7 +214,8 @@ class Scenario:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
                 example one reading a vehicle's `readers()`.
             fsw_fields: Run-file dataset path to the `(message, field, units)` it records from the
-                flight software, in the shape of a vehicle's `recorded_fields()`; may be empty.
+                flight software, each message a Basilisk (SWIG) message, in the shape of a vehicle's
+                `recorded_fields()`; may be empty.
             duration_s: Simulated time to run, in seconds.
             ground: Optionally, any Basilisk module declaring `period_s`, its period in seconds,
                 run from t = 0 in `ground_process`, after every scenario task at each instant they
@@ -225,7 +248,7 @@ class Scenario:
                 self._integrators.append(integrator)
                 fields.update(vehicle.recorded_fields())
             fields.update(fsw_fields)
-            recorders = {path: message.recorder(step_ns) for path, (message, _, _) in fields.items()}
+            recorders = _recorders(fields, step_ns)
 
             tasks = (
                 (_DYNAMICS_TASK, step_ns, _DYNAMICS_PRIORITY),
@@ -247,7 +270,7 @@ class Scenario:
                 ground_task = self._simulation.CreateNewTask(_GROUND_TASK, macros.sec2nano(ground.period_s))
                 ground_process.addTask(ground_task)
                 self._simulation.AddModelToTask(_GROUND_TASK, ground)
-            for recorder in recorders.values():
+            for recorder in {id(recorder): recorder for recorder in recorders.values()}.values():
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
             stop_ns = macros.sec2nano(duration_s)
             # A task's period cannot be 0.

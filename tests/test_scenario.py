@@ -16,6 +16,7 @@ from tests.allocations import assert_no_native_allocations_per_tick
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk import scenario as scenario_module
 from wise_dynamics.basilisk._thread_state import ThreadStateHold
+from wise_dynamics.basilisk.scenario import _RECORD_TASK
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
@@ -650,3 +651,34 @@ def test_the_thread_state_is_given_back_once_at_the_stop_time(monkeypatch: pytes
     Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
 
     assert calls == [3_000_000_000], f"the hold was called at {calls}"
+
+
+def test_a_run_records_each_message_once():
+    """The spacecraft's state message, the IMU's and the flight software's take one recorder each.
+
+    The vehicle records four fields of the first and two of the second.
+    """
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+    guidance, fsw_fields = _guidance()
+    scenario.run(guidance, fsw_fields, duration_s=1.0)
+    tasks = {task.Name: task for task in simulation.TaskList}
+    assert len(tasks[_RECORD_TASK].TaskModels) == 3
+
+
+def test_each_field_read_from_a_shared_recorder_is_its_own():
+    """Each field recorded from a message several fields share holds that field of the message.
+
+    At the final instant, each dataset's last row is its own field of the message's last payload.
+    """
+    vehicle = ImuSpacecraft()
+    datasets = Leo500(vehicle).run(_Guidance(), {}, duration_s=3.0)
+    state, imu = vehicle.spacecraft.scStateOutMsg.read(), vehicle.imu.sensorOutMsg.read()
+    for dataset, last in {
+        "truth/r_N": state.r_BN_N,
+        "truth/v_N": state.v_BN_N,
+        "truth/omega_BN_B": state.omega_BN_B,
+        "imu/gyro_P": imu.AngVelPlatform,
+        "imu/accel_P": imu.AccelPlatform,
+    }.items():
+        assert np.array_equal(datasets[dataset][0][-1], np.asarray(last)), dataset
