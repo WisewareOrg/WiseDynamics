@@ -15,6 +15,7 @@ import pytest
 from tests import allocations
 from tests.allocations import (
     _name,
+    _native,
     _owner,
     _stacks,
     _tracked,
@@ -207,6 +208,39 @@ def test_an_allocation_is_charged_to_its_innermost_named_frame_past_the_plumbing
         owner: The function it is charged to.
     """
     assert _owner(functions) == owner, f"{functions} is charged to {_owner(functions)!r}"
+
+
+@pytest.mark.parametrize(
+    ("functions", "counted"),
+    [
+        (["_PyObject_Malloc", "PyTuple_New", "_PyEval_EvalFrameDefault"], False),
+        (["_PyObject_Realloc", "list_resize", "_PyEval_EvalFrameDefault"], False),
+        (["new_arena", "_PyObject_Malloc", "PyType_GenericAlloc"], False),
+        (["new_threadstate", "PyThreadState_New", "PyGILState_Ensure"], True),
+        (["PyMem_RawCalloc", "new_threadstate", "PyThreadState_New"], True),
+        (["Saturate::saturate", "ImuSensor::UpdateState"], True),
+        (["operator new", "Recorder<X>::UpdateState", "_PyObject_Malloc"], True),
+    ],
+    ids=[
+        "a large object",
+        "a resized object",
+        "an arena",
+        "a thread state",
+        "a raw allocation",
+        "a C++ function",
+        "a C++ owner above the object allocator",
+    ],
+)
+def test_only_cpythons_object_allocator_is_left_out_of_the_counts(functions: list[str], counted: bool):
+    """An allocation CPython's object allocator owns is not counted; one any other function owns is.
+
+    Args:
+        functions: The allocation's function names, innermost first.
+        counted: Whether the allocation counts.
+    """
+    kept = _native([(functions, 1)])
+
+    assert bool(kept) is counted, f"{functions} is {'dropped' if counted else 'counted'}"
 
 
 def test_a_tracked_flight_returns_a_result_larger_than_a_pipe_holds(tmp_path: Path):
