@@ -92,7 +92,8 @@ from `vehicles` and `fidelity`, and runs once. The vehicles' `models()` run ever
 in seconds, after the models at each instant they share, so they sample that instant's state. The
 flight-software module runs in its own task at the same period, after the sensors, so it reads that
 instant's sensor output. The recorders run at every dynamics step, after the rest, so truth and
-flight output are recorded from the same instant. `fsw_fields` maps a dataset path to a
+flight output are recorded from the same instant. A message several fields are recorded from has one
+recorder. `fsw_fields` maps a dataset path to a
 flight-software `(message, field, units)`, as `recorded_fields()` does for a vehicle, and may be
 empty. `run` returns dataset path to `(array, units)`: `t_s` (s) first, then the vehicle's fields,
 then `fsw_fields`.

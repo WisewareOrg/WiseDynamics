@@ -11,6 +11,7 @@ import pytest
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
+from scipy.spatial.transform import Rotation
 
 from tests.allocations import assert_no_native_allocations_per_tick
 from wise_dynamics.basilisk import FswHost, ImuSpacecraft
@@ -650,3 +651,58 @@ def test_the_thread_state_is_given_back_once_at_the_stop_time(monkeypatch: pytes
     Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
 
     assert calls == [3_000_000_000], f"the hold was called at {calls}"
+
+
+def test_a_run_records_each_message_once():
+    """The spacecraft's state message, the IMU's and the flight software's take one recorder each.
+
+    The vehicle's `recorded_fields()` reads several fields of the first two.
+    """
+    scenario = Leo500(ImuSpacecraft())
+    simulation = scenario._simulation
+    guidance, fsw_fields = _guidance()
+
+    scenario.run(guidance, fsw_fields, duration_s=1.0)
+
+    tasks = {task.Name: task for task in simulation.TaskList}
+    recorders = tasks[scenario_module._RECORD_TASK].TaskModels
+    assert len(recorders) == 3, f"the record task holds {len(recorders)} recorders, not 3"
+
+
+def test_a_message_reached_twice_takes_one_recorder_and_two_messages_of_a_type_two():
+    """Fields of one message share its recorder however it was reached; another message has its own."""
+    first, second = ImuSpacecraft(), ImuSpacecraft()
+    fields = {
+        "position": (first.spacecraft.scStateOutMsg, "r_BN_N", "m"),
+        "velocity": (first.spacecraft.scStateOutMsg, "v_BN_N", "m/s"),
+        "other": (second.spacecraft.scStateOutMsg, "r_BN_N", "m"),
+    }
+
+    recorders = scenario_module._recorders(fields, 1_000_000_000)
+
+    assert recorders["position"] is recorders["velocity"], "two accesses to one message took two recorders"
+    assert recorders["position"] is not recorders["other"], "two messages of one type took one recorder"
+
+
+def test_each_field_read_from_a_shared_recorder_is_its_own():
+    """Each field recorded from a message several fields share holds that field of the message.
+
+    At the final instant, each dataset's last row is its own field of the message's last payload; the
+    attitude is recorded as Basilisk's MRP and finished into a quaternion.
+    """
+    vehicle = ImuSpacecraft()
+
+    datasets = Leo500(vehicle).run(_Guidance(), {}, duration_s=3.0)
+
+    state, imu = vehicle.spacecraft.scStateOutMsg.read(), vehicle.imu.sensorOutMsg.read()
+    attitude = Rotation.from_mrp(state.sigma_BN).as_quat(canonical=True, scalar_first=True)
+    for dataset, last in {
+        "truth/q_BN": attitude,
+        "truth/r_N": state.r_BN_N,
+        "truth/v_N": state.v_BN_N,
+        "truth/omega_BN_B": state.omega_BN_B,
+        "imu/gyro_P": imu.AngVelPlatform,
+        "imu/accel_P": imu.AccelPlatform,
+    }.items():
+        recorded = datasets[dataset][0][-1]
+        assert np.array_equal(recorded, np.asarray(last)), f"{dataset} ends at {recorded}, its field at {last}"
