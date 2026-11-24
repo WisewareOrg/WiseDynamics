@@ -1,6 +1,9 @@
 """`Scenario.run`: what a run records, as run-file datasets, and that it runs once."""
 
+import ctypes
+import threading
 import weakref
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -8,7 +11,8 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.fswAlgorithms import inertial3D
 from Basilisk.simulation import svIntegrators
 
-from wise_dynamics.basilisk import ImuSpacecraft
+from tests.allocations import assert_no_native_allocations_per_tick
+from wise_dynamics.basilisk import FswHost, ImuSpacecraft
 from wise_dynamics.basilisk.scenarios.leo500 import Leo500
 
 GUIDANCE_SIGMA_RN = [0.1, 0.2, 0.3]
@@ -128,7 +132,8 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     scenario = Leo500(vehicle)
     simulation = scenario._simulation
     scenario.run(_Guidance(), {}, duration_s=1.0)
-    dynamics, sensors, _, _ = simulation.TaskList
+    tasks = {task.Name: task for task in simulation.TaskList}
+    dynamics, sensors = tasks["dynamics_task"], tasks["sensor_task"]
     assert dynamics.TaskModels == vehicle.models()
     assert sensors.TaskModels == [vehicle.imu]
 
@@ -284,6 +289,7 @@ def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
     assert [process.Name for process in simulation.procList] == [
         "scenario_process",
         "ground_process",
+        "thread_state_process",
     ]
 
 
@@ -394,3 +400,117 @@ def test_the_sensors_sample_the_state_the_dynamics_has_just_reached():
     omega = datasets["truth/omega_BN_B"][0]
     assert np.abs(np.diff(omega, axis=0)).max() > 1e-6
     assert np.array_equal(datasets["imu/gyro_P"][0][1:], omega[1:])
+
+
+def test_a_tick_of_the_host_makes_no_native_allocation(tmp_path: Path, commanding: type):
+    """Basilisk's call into `FswHost` and back, with a build commanding nothing, allocates nothing per tick.
+
+    Args:
+        tmp_path: The test's own temporary directory.
+        commanding: The stub build class.
+    """
+
+    def fly(ticks: int) -> int:
+        """Fly `ticks` ticks of a build commanding nothing.
+
+        Args:
+            ticks: The number of ticks to fly.
+
+        Returns:
+            The ticks the build ran.
+        """
+        build = commanding({})
+        scenario = Leo500(ImuSpacecraft())
+        scenario.run(FswHost(build, scenario.vehicle), {}, duration_s=ticks * build.period_s)
+        return build.ticked
+
+    assert_no_native_allocations_per_tick(
+        fly, within="SwigDirector__SysModel::UpdateState", ticks=100, directory=tmp_path
+    )
+
+
+class _Remembering(sysModel.SysModel):
+    """A Python module that records, at each step, the time a thread-local value was last set to.
+
+    Attributes:
+        period_s: The module's period, in seconds.
+        seen: At each step, the time the thread-local value held, `None` while unset.
+    """
+
+    period_s = 1.0
+    seen: list[int | None]
+
+    def __init__(self) -> None:
+        """Start with nothing seen and an unset thread-local value."""
+        super().__init__()
+        self.seen = []
+        self._local = threading.local()
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        """Record the thread-local value, then set it to this step's time.
+
+        Args:
+            CurrentSimNanos: The simulation time, in nanoseconds.
+        """
+        self.seen.append(getattr(self._local, "t_ns", None))
+        self._local.t_ns = CurrentSimNanos
+
+
+def test_the_python_modules_of_a_run_share_one_thread_state_for_the_run():
+    """A thread-local value the flight software or the ground sets at one step is still set at its next.
+
+    That holds at the final instant too, for the ground, the last module to run there.
+    """
+    fsw, ground = _Remembering(), _Remembering()
+    Leo500(ImuSpacecraft()).run(fsw, {}, duration_s=3.0, ground=ground)
+    assert fsw.seen == [None, 0, 1_000_000_000, 2_000_000_000]
+    assert ground.seen == [None, 0, 1_000_000_000, 2_000_000_000]
+
+
+def _thread_states() -> int:
+    """Count the interpreter's thread states, of live threads and of any left behind.
+
+    Returns:
+        The count.
+    """
+    api = ctypes.PyDLL(None)
+    api.PyInterpreterState_Get.restype = ctypes.c_void_p
+    api.PyInterpreterState_ThreadHead.restype = ctypes.c_void_p
+    api.PyInterpreterState_ThreadHead.argtypes = [ctypes.c_void_p]
+    api.PyThreadState_Next.restype = ctypes.c_void_p
+    api.PyThreadState_Next.argtypes = [ctypes.c_void_p]
+    count, state = 0, api.PyInterpreterState_ThreadHead(api.PyInterpreterState_Get())
+    while state:
+        count, state = count + 1, api.PyThreadState_Next(state)
+    return count
+
+
+def test_a_run_that_returns_leaves_no_thread_state_behind():
+    """The thread state a run holds on Basilisk's thread is given back by the time the run returns."""
+    before = _thread_states()
+    Leo500(ImuSpacecraft()).run(_Remembering(), {}, duration_s=3.0)
+    assert _thread_states() == before
+
+
+def test_a_run_that_raises_leaves_one_cleared_thread_state_behind():
+    """A run whose flight software raises leaves the thread state it held, which only its thread could delete."""
+
+    class _Raising(_Remembering):
+        """A Python flight software that raises at its second step."""
+
+        def UpdateState(self, CurrentSimNanos: int) -> None:
+            """Raise at 1 s.
+
+            Args:
+                CurrentSimNanos: The simulation time, in nanoseconds.
+
+            Raises:
+                ValueError: At 1 s.
+            """
+            if CurrentSimNanos == 1_000_000_000:
+                raise ValueError("raised by the flight software")
+
+    before = _thread_states()
+    with pytest.raises(BaseException, match="SWIG director|raised by the flight software"):
+        Leo500(ImuSpacecraft()).run(_Raising(), {}, duration_s=3.0)
+    assert _thread_states() == before + 1

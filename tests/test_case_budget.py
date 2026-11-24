@@ -15,8 +15,8 @@ as Basilisk's modules and WiseDynamics' integrator) has an exact figure of its o
 (C, such as the interpreter's, the C library's, and Basilisk's C modules) counts in one total, since how
 those libraries' builds inline them moves an allocation between functions, not in or out of the total.
 The counts are deterministic, so a budget is exact: an allocation added, removed or moved fails the layer
-it lands in. The host layer's C total, which is the interpreter making a thread state for each call into
-Python, is only held above zero, since it differs between Python versions.
+it lands in. Every layer's C total is zero, the host layer's included, since a run holds one thread state
+for its calls into Python.
 """
 
 from collections.abc import Mapping
@@ -188,9 +188,7 @@ def _added(per_layer: dict[str, dict[str, float]], layer: str) -> tuple[dict[str
 
 @pytest.mark.parametrize("layer", LAYERS)
 def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: dict[str, dict[str, float]]):
-    """The layer's C++ functions add exactly their budget; its C functions add nothing, but at the host layer.
-
-    At the host layer, the interpreter's thread state for each call into Python is held above zero.
+    """The layer's C++ functions add exactly their budget, and its C functions add nothing.
 
     Args:
         layer: The layer under test.
@@ -198,7 +196,4 @@ def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: di
     """
     cxx, c = _added(per_layer, layer)
     assert cxx == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer's C++ adds {cxx}"
-    if layer == "host":
-        assert c > 0, f"the {layer} layer's C functions add {c} per tick"
-    else:
-        assert c == pytest.approx(0.0, abs=1e-9), f"the {layer} layer's C functions add {c} per tick"
+    assert c == pytest.approx(0.0, abs=1e-9), f"the {layer} layer's C functions add {c} per tick"

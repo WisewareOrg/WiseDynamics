@@ -7,6 +7,7 @@ import numpy as np
 from Basilisk.simulation import svIntegrators
 from Basilisk.utilities import SimulationBaseClass, macros
 
+from wise_dynamics.basilisk._thread_state import ThreadStateHold
 from wise_dynamics.basilisk.fsw_host import FswHost
 from wise_dynamics.basilisk.vehicle import Vehicle
 
@@ -17,6 +18,10 @@ _GROUND_PROCESS = "ground_process"
 _GROUND_TASK = "ground_task"
 _PROCESS_PRIORITY = 2
 _GROUND_PROCESS_PRIORITY = 1
+_HOLD_PROCESS = "thread_state_process"
+_HOLD_TASK = "thread_state_task"
+_HOLD_PROCESS_PRIORITY = _GROUND_PROCESS_PRIORITY - 1
+"""Below every other process, so the thread state is given back after the final instant's last call into Python."""
 _DYNAMICS_TASK = "dynamics_task"
 _SENSOR_TASK = "sensor_task"
 _FSW_TASK = "fsw_task"
@@ -179,6 +184,13 @@ class Scenario:
         `ValueError` before anything runs. Once started, `run` releases its simulation when it returns
         or raises.
 
+        Basilisk calls every Python module of the run, the flight software and the ground among
+        them, on one thread of its own, and the run holds one Python thread state there from its
+        reset to its final instant. So those calls share that thread state as calls on an ordinary
+        thread do: a `threading.local` value or a context variable set in one call is still set in
+        the next. A run that raises leaves that thread state cleared but allocated for the life of
+        the process, as the basilisk README describes.
+
         Args:
             fsw_module: Any Basilisk module declaring `period_s`, its period in seconds, for
                 example one reading a vehicle's `readers()`.
@@ -206,6 +218,7 @@ class Scenario:
         fsw_ns = macros.sec2nano(fsw_module.period_s)
         step_ns = _step_ns(fsw_ns)
         self._executed = True
+        hold = None
         try:
             make_integrator = _FIDELITY[self.fidelity]
             fields = {}
@@ -239,9 +252,16 @@ class Scenario:
                 self._simulation.AddModelToTask(_GROUND_TASK, ground)
             for recorder in recorders.values():
                 self._simulation.AddModelToTask(_RECORD_TASK, recorder)
+            stop_ns = macros.sec2nano(duration_s)
+            # A task's period cannot be 0, and a run of no duration calls into Python only at reset.
+            if stop_ns > 0:
+                hold_process = self._simulation.CreateNewProcess(_HOLD_PROCESS, _HOLD_PROCESS_PRIORITY)
+                hold_process.addTask(self._simulation.CreateNewTask(_HOLD_TASK, stop_ns, FirstStart=stop_ns))
+                hold = ThreadStateHold()
+                self._simulation.AddModelToTask(_HOLD_TASK, hold)
             try:
                 self._simulation.InitializeSimulation()
-                self._simulation.ConfigureStopTime(macros.sec2nano(duration_s))
+                self._simulation.ConfigureStopTime(stop_ns)
                 self._simulation.ExecuteSimulation()
             except BaseException:
                 if isinstance(fsw_module, FswHost) and fsw_module.failure is not None:
@@ -257,3 +277,5 @@ class Scenario:
             return datasets
         finally:
             del self._simulation
+            if hold is not None:
+                hold.abandon()
