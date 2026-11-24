@@ -15,9 +15,9 @@ as Basilisk's modules and WiseDynamics' integrator) has an exact figure of its o
 (C, such as the interpreter's, the C library's, and Basilisk's C modules) counts in one total, since how
 those libraries' builds inline them moves an allocation between functions, not in or out of the total.
 The counts are deterministic, so a budget is exact: an allocation added, removed or moved fails the layer
-it lands in. They are those of the Basilisk, CPython and memray this repository locks: an update to any of
-them can move a figure with no defect here, Basilisk's by changing what allocates, memray's by changing how
-it names a frame; the layer that fails names the function. Every
+it lands in. They are those of the Basilisk and memray this repository locks and of the CPython it runs on:
+an update to any of them can move a figure with no defect here, Basilisk's or CPython's by changing what
+allocates, memray's by changing how it names a frame; the layer that fails names the functions. Every
 layer's C total is zero, the host layer's included, since a run holds one thread state for its calls into
 Python.
 """
@@ -154,8 +154,8 @@ def per_layer(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, f
     }
 
 
-def _added(per_layer: dict[str, dict[str, float]], layer: str) -> tuple[dict[str, float], float]:
-    """What a layer allocates per tick beyond the layer before it: by C++ function, and in C functions in all.
+def _added(per_layer: dict[str, dict[str, float]], layer: str) -> tuple[dict[str, float], dict[str, float]]:
+    """What a layer allocates per tick beyond the layer before it: by C++ function, and by C function.
 
     A function the layer stops allocating in shows as a negative figure.
 
@@ -164,13 +164,14 @@ def _added(per_layer: dict[str, dict[str, float]], layer: str) -> tuple[dict[str
         layer: The layer.
 
     Returns:
-        The C++ functions' figures, nonzero ones only, and the C functions' total.
+        The C++ functions' figures and the C functions' figures, nonzero ones only.
     """
     here = per_layer[layer]
     below = per_layer[LAYERS[LAYERS.index(layer) - 1]] if layer != LAYERS[0] else {}
     added = {function: here.get(function, 0.0) - below.get(function, 0.0) for function in here.keys() | below.keys()}
     cxx = {function: n for function, n in added.items() if "::" in function and n}
-    return cxx, sum(n for function, n in added.items() if "::" not in function)
+    c = {function: n for function, n in added.items() if "::" not in function and n}
+    return cxx, c
 
 
 @pytest.mark.parametrize("layer", LAYERS)
@@ -183,4 +184,4 @@ def test_each_layer_adds_exactly_its_allocation_budget(layer: str, per_layer: di
     """
     cxx, c = _added(per_layer, layer)
     assert cxx == pytest.approx(BUDGET[layer], abs=1e-9), f"the {layer} layer's C++ adds {cxx}"
-    assert c == pytest.approx(0.0, abs=1e-9), f"the {layer} layer's C functions add {c} per tick"
+    assert sum(c.values()) == pytest.approx(0.0, abs=1e-9), f"the {layer} layer's C functions add {c} per tick"

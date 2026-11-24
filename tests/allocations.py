@@ -1,4 +1,9 @@
-"""Count the native allocations a named code path makes per simulation tick, with memray."""
+"""Count the native allocations a named code path makes per simulation tick, with memray.
+
+CPython's object allocator is left out: its small objects, its large ones, which it takes from `malloc`, and
+the arenas it carves small ones from. Python objects are not native allocations, and whether a flight needs
+one more arena depends on the heap the flight starts from, not on the flight.
+"""
 
 import json
 import os
@@ -24,6 +29,18 @@ _RELEASES = {memray.AllocatorType.FREE, memray.AllocatorType.MUNMAP, memray.Allo
 _PLUMBING = ("operator new", "std::", "__gnu_cxx::", "Eigen::", "<unknown>")
 """Prefixes of the frames that never own an allocation: the allocator's own, the standard library's,
 Eigen's, and the frames memray cannot name, so an allocation is charged to the nearest named caller."""
+
+_PYTHON_OBJECT_ALLOCATOR = frozenset(
+    {
+        "_PyObject_Malloc",
+        "_PyObject_Calloc",
+        "_PyObject_Realloc",
+        "_PyMem_ArenaAlloc",
+        "_PyObject_ArenaMmap",
+        "new_arena",
+    }
+)
+"""CPython's object allocator, whose allocations are not counted wherever it is the owner."""
 
 _FLIGHT_TIMEOUT_S = 600.0
 """How long a tracked flight's child process may run before it is killed and the flight fails."""
@@ -169,6 +186,18 @@ def _names(excluding: Iterable[str]) -> tuple[str, ...]:
     return tuple(excluding)
 
 
+def _native(stacks: Stacks) -> Stacks:
+    """The stacks whose allocation is not CPython's object allocator's.
+
+    Args:
+        stacks: Each allocation's function names and count.
+
+    Returns:
+        Those stacks, less every one `_PYTHON_OBJECT_ALLOCATOR` owns.
+    """
+    return [(functions, count) for functions, count in stacks if _owner(functions) not in _PYTHON_OBJECT_ALLOCATOR]
+
+
 def _count(stacks: Stacks, within: str, excluding: tuple[str, ...]) -> int:
     """Count the allocations whose stack holds the function `within` and none of `excluding`.
 
@@ -198,12 +227,12 @@ def _per_tick(
         directory: Where the memray capture files are written and removed.
 
     Returns:
-        The allocations per tick; every allocation the longer flight made under `within`, excluded ones and
-        set-up included; and the shorter and the longer tracked flight's `fly` results.
+        The allocations per tick; every allocation the longer flight made under `within`, excluded ones,
+        set-up and Python objects included; and the shorter and the longer tracked flight's `fly` results.
     """
     short, short_result = _stacks(fly, ticks, directory / "short.bin")
     long, long_result = _stacks(fly, 2 * ticks, directory / "long.bin")
-    per_tick = (_count(long, within, excluding) - _count(short, within, excluding)) / ticks
+    per_tick = (_count(_native(long), within, excluding) - _count(_native(short), within, excluding)) / ticks
     return per_tick, _count(long, within, ()), [short_result, long_result]
 
 
@@ -272,7 +301,7 @@ def native_allocations_by_function(fly: Callable[[int], object], *, ticks: int, 
             Function name to its allocation count.
         """
         owned: Counter[str] = Counter()
-        for functions, count in stacks:
+        for functions, count in _native(stacks):
             owned[_owner(functions)] += count
         return owned
 

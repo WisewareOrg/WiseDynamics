@@ -141,7 +141,8 @@ def test_a_run_is_bit_identical_to_one_with_basilisks_integrator(
         patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
         basilisk, ran_compiled_instead = fly()
 
-    assert ran_compiled and not ran_compiled_instead, "the two flights did not run the two integrators"
+    assert ran_compiled, "the fidelity's own flight did not run the compiled integrator"
+    assert not ran_compiled_instead, "the flight patched to Basilisk's integrator ran the compiled one"
     _assert_bit_identical(compiled, basilisk)
 
 
@@ -193,7 +194,8 @@ def test_a_run_whose_dynamics_depend_on_the_time_is_bit_identical_too(fidelity: 
         patch.setitem(scenario._FIDELITY, fidelity, _BASILISK[fidelity])
         basilisk, ran_compiled_instead = fly()
 
-    assert ran_compiled and not ran_compiled_instead, "the two flights did not run the two integrators"
+    assert ran_compiled, "the fidelity's own flight did not run the compiled integrator"
+    assert not ran_compiled_instead, "the flight patched to Basilisk's integrator ran the compiled one"
 
     _assert_bit_identical(compiled, basilisk)
 

@@ -81,6 +81,7 @@ def test_hi_gives_the_vehicle_that_runs_basilisks_rkf78_at_its_tolerances(monkey
 
     scenario.run(Guidance(), {}, duration_s=1.0)
 
+    assert len(made) == 1, f"hi made {len(made)} RKF78s for one vehicle"
     (integrator,) = made
     assert int(scenario.vehicle.spacecraft.integrator.this) == int(integrator.this), "the vehicle runs another"
     assert integrator.getRelativeTolerance() == 1e-10, "the relative tolerance is not 1e-10"
@@ -148,11 +149,13 @@ def test_the_dynamics_task_holds_the_models_and_the_sensor_task_the_sensors():
     vehicle = ImuSpacecraft()
     scenario = Leo500(vehicle)
     simulation = scenario._simulation
+
     scenario.run(Guidance(), {}, duration_s=1.0)
+
     tasks = {task.Name: task for task in simulation.TaskList}
     dynamics, sensors = tasks["dynamics_task"], tasks["sensor_task"]
-    assert dynamics.TaskModels == vehicle.models()
-    assert sensors.TaskModels == [vehicle.imu]
+    assert dynamics.TaskModels == vehicle.models(), "the dynamics task holds other models than the vehicle's"
+    assert sensors.TaskModels == [vehicle.imu], "the sensor task holds other models than the IMU"
 
 
 def test_two_fidelities_of_one_case_draw_the_same_sensor_noise():
@@ -300,14 +303,15 @@ def test_the_ground_runs_at_its_own_period_in_a_process_of_its_own():
     scenario = Leo500(ImuSpacecraft())
     ground = _Marker("ground", order, period_s=2.0)
     simulation = scenario._simulation
+
     scenario.run(_Marker("fsw", order), {}, duration_s=4.0, ground=ground)
-    assert [t for t, name in order if name == "ground"] == [k * 2_000_000_000 for k in range(3)]
-    assert [t for t, name in order if name == "fsw"] == [k * 1_000_000_000 for k in range(5)]
-    assert [process.Name for process in simulation.procList] == [
-        "scenario_process",
-        "ground_process",
-        "thread_state_process",
-    ]
+
+    ground_ns = [t for t, name in order if name == "ground"]
+    fsw_ns = [t for t, name in order if name == "fsw"]
+    processes = [process.Name for process in simulation.procList]
+    assert ground_ns == [k * 2_000_000_000 for k in range(3)], f"the ground ran at {ground_ns} ns"
+    assert fsw_ns == [k * 1_000_000_000 for k in range(5)], f"the flight software ran at {fsw_ns} ns"
+    assert processes == ["scenario_process", "ground_process", "thread_state_process"], f"the processes are {processes}"
 
 
 class _Stopping(_Marker):
