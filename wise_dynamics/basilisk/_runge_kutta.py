@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import Basilisk
-from Basilisk.simulation import spacecraft  # noqa: F401 - loads the libdynamicsLib.so the library links
+from Basilisk.simulation import spacecraft  # loads the libdynamicsLib.so the library links
 
 __all__ = ["Tableau", "install", "integrates_here"]
 
@@ -96,6 +96,19 @@ class Tableau:
                 raise ValueError(f"row {i} of a is not {stages} long and zero from column {i} on: {self}")
 
 
+def _check_spacecraft(craft: Any) -> None:
+    """Refuse anything but a Basilisk `Spacecraft`, whose address the library reads as its `DynamicObject`.
+
+    Args:
+        craft: What is passed as the spacecraft.
+
+    Raises:
+        TypeError: `craft` is not a Basilisk `Spacecraft`.
+    """
+    if not isinstance(craft, spacecraft.Spacecraft):
+        raise TypeError(f"the compiled integrator takes a Basilisk Spacecraft, not {type(craft).__name__}")
+
+
 def install(craft: Any, tableau: Tableau) -> None:
     """Give a Basilisk spacecraft the compiled integrator of `tableau`, which the spacecraft owns.
 
@@ -104,9 +117,11 @@ def install(craft: Any, tableau: Tableau) -> None:
         tableau: The method.
 
     Raises:
+        TypeError: `craft` is not a Basilisk `Spacecraft`.
         RuntimeError: The spacecraft did not take the integrator, as one whose integration is synced to
             another's does not, or it could not be built.
     """
+    _check_spacecraft(craft)
     stages = len(tableau.b)
     a = (ctypes.c_double * (stages * stages))(*(x for row in tableau.a for x in row))
     b = (ctypes.c_double * stages)(*tableau.b)
@@ -123,5 +138,9 @@ def integrates_here(craft: Any) -> bool:
 
     Returns:
         True when its integrator is the compiled one.
+
+    Raises:
+        TypeError: `craft` is not a Basilisk `Spacecraft`.
     """
+    _check_spacecraft(craft)
     return _LIBRARY.wd_integrates_here(int(craft.this))

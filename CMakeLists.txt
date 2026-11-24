@@ -9,6 +9,9 @@ if(NOT (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_HOST_SYSTEM_PROCESSOR 
     "${CMAKE_HOST_SYSTEM_NAME} ${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif()
 enable_language(CXX)
+# Only the flags below build the integrator: CXXFLAGS and the build type's flags would change its arithmetic.
+set(CMAKE_CXX_FLAGS "")
+set(CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE} "")
 
 find_package(Python COMPONENTS Interpreter REQUIRED)
 execute_process(
@@ -34,8 +37,7 @@ add_library(runge_kutta SHARED native/runge_kutta.cpp)
 set_target_properties(runge_kutta PROPERTIES PREFIX "" OUTPUT_NAME "_runge_kutta_native" SUFFIX ".abi3.so")
 target_compile_features(runge_kutta PRIVATE cxx_std_17)
 target_compile_definitions(runge_kutta PRIVATE NDEBUG WD_BASILISK_REVISION="${basilisk_revision}")
-# The arithmetic and Eigen alignment of Basilisk's SSE2 build, whatever the compiler defaults to. An -m
-# flag in CXXFLAGS still enables its instructions, and importing the library then refuses it.
+# The arithmetic and Eigen alignment of Basilisk's SSE2 build, whatever the compiler defaults to.
 target_compile_options(runge_kutta PRIVATE
   -march=x86-64 -mtune=generic -O2 -fno-fast-math -ffp-contract=off -fvisibility=hidden -fvisibility-inlines-hidden)
 target_include_directories(runge_kutta BEFORE PRIVATE native/include)

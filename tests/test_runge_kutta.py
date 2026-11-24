@@ -9,8 +9,8 @@ import Basilisk
 import numpy as np
 import pytest
 from Basilisk.architecture import messaging
+from Basilisk.simulation import gravityEffector, svIntegrators
 from Basilisk.simulation import spacecraft as bsk_spacecraft
-from Basilisk.simulation import svIntegrators
 
 from tests.allocations import assert_no_native_allocations_per_tick
 from tests.stubs import Guidance
@@ -324,3 +324,14 @@ def test_a_spacecraft_that_does_not_take_the_integrator_is_refused():
         runge_kutta.install(secondary, scenario._RK4)
 
     assert not runge_kutta.integrates_here(secondary), "the synced spacecraft integrates with the compiled integrator"
+
+
+@pytest.mark.parametrize("call", [lambda craft: runge_kutta.install(craft, scenario._RK4), runge_kutta.integrates_here])
+def test_anything_but_a_spacecraft_is_refused(call: Callable[[Any], Any]):
+    """Installing on, or asking about, a Basilisk object that is not a `Spacecraft` raises, before its address is read.
+
+    Args:
+        call: Installs on, or asks about, its argument.
+    """
+    with pytest.raises(TypeError, match="takes a Basilisk Spacecraft, not GravBodyData"):
+        call(gravityEffector.GravBodyData())
