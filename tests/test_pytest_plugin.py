@@ -5,6 +5,7 @@ own marks in source.
 """
 
 import json
+import os
 import re
 import subprocess
 import textwrap
@@ -1146,19 +1147,26 @@ def test_an_editable_install_records_its_checkouts_commit_and_dirt(
     assert bool(found["dirty"]) is dirty
 
 
-def test_wise_dynamics_own_editable_install_records_local(pytester: pytest.Pytester):
-    """With nothing patched, this repository's editable install records `local` and its HEAD.
+def test_the_install_under_test_records_its_kind_and_the_commit_under_test(pytester: pytest.Pytester):
+    """With nothing patched, the install the suite runs on records its kind and the checkout's HEAD.
+
+    The kind expected is `WISE_DYNAMICS_EXPECT_INSTALL`, `local` when unset: an editable checkout, as a
+    development environment is, unless whoever installed the suite says otherwise. CI says `pinned`, so a CI
+    run that is not on the git pin of the commit under test fails here.
 
     Args:
         pytester: pytest's own fixture for running a test session in a subprocess.
     """
+    expected = os.environ.get("WISE_DYNAMICS_EXPECT_INSTALL", "local")
+    head = _git(REPOSITORY, "rev-parse", "HEAD")
     _point(pytester)
     pytester.makepyfile(test_scenario=_source(_case_test(("sim_runs(1)", "sim_duration_s(3)"))))
-    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
 
+    pytester.runpytest_subprocess(*FULL, *SERIAL).assert_outcomes(passed=1)
     found = _provenance_attrs(pytester)
-    assert found["install"] == "local"
-    assert found["commit"] == _git(REPOSITORY, "rev-parse", "HEAD")
+
+    assert found["install"] == expected, f"the suite runs on a {found['install']!r} install, expected {expected!r}"
+    assert found["commit"] == head, f"the install records commit {found['commit']}, expected the checkout's {head}"
 
 
 @pytest.mark.parametrize("case", ["no-direct-url", "git-unavailable"])
