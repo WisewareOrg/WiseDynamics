@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: WisewareOrg/wise-ci/check-adrs@63ae1c90f30257964989acce75abde1e886823a9
+      - uses: WisewareOrg/wise-ci/check-adrs@d1c27c09a689484d023e9f248edbbba6f92fc736
 
   check-python:
     name: check-python
@@ -38,7 +38,7 @@ jobs:
           version: "0.13.9"
 
       - run: uv sync --locked --all-extras
-      - uses: WisewareOrg/wise-ci/check-python@63ae1c90f30257964989acce75abde1e886823a9
+      - uses: WisewareOrg/wise-ci/check-python@d1c27c09a689484d023e9f248edbbba6f92fc736
 
   pytest:
     name: pytest
